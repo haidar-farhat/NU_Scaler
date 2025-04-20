@@ -1,0 +1,36 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# Generated screenshots and images from the screen capture functionality
+*.png
+*.jpg
+*.jpeg
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Build artifacts for Windows
+*.exe
+*.pdb
+*.dll
+*.lib
+
+# Build artifacts for Linux
+*.so
+*.a
+
+# Debug logs
+*.log
+
+# Environment files
+.env
+.env.*
+
+# User configuration files
+/config/ 
