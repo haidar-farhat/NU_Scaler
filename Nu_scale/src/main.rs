@@ -67,6 +67,49 @@ fn main() -> Result<()> {
                         .takes_value(true),
                 ),
         )
+        .subcommand(
+            SubCommand::with_name("fullscreen")
+                .about("Capture, upscale, and display in fullscreen using GPU acceleration")
+                .arg(
+                    Arg::with_name("source")
+                        .help("Capture source (fullscreen, window:<title>, region:<x,y,w,h>)")
+                        .long("source")
+                        .short('s')
+                        .takes_value(true)
+                        .default_value("fullscreen"),
+                )
+                .arg(
+                    Arg::with_name("tech")
+                        .help("Upscaling technology (fsr, dlss, or fallback)")
+                        .long("tech")
+                        .short('t')
+                        .takes_value(true)
+                        .default_value("fallback"),
+                )
+                .arg(
+                    Arg::with_name("quality")
+                        .help("Quality preset (ultra, quality, balanced, performance)")
+                        .long("quality")
+                        .short('q')
+                        .takes_value(true)
+                        .default_value("balanced"),
+                )
+                .arg(
+                    Arg::with_name("fps")
+                        .help("Target frames per second")
+                        .long("fps")
+                        .short('f')
+                        .takes_value(true)
+                        .default_value("60"),
+                )
+                .arg(
+                    Arg::with_name("algorithm")
+                        .help("Upscaling algorithm for traditional upscalers (nearest, bilinear, bicubic, lanczos2, lanczos3, mitchell, area)")
+                        .long("algorithm")
+                        .short('a')
+                        .takes_value(true),
+                ),
+        )
         .get_matches();
 
     // If upscale subcommand was used, handle it
@@ -133,6 +176,91 @@ fn main() -> Result<()> {
             nu_scaler::upscale_image(input_path, output_path, technology, quality, scale_factor)?;
         }
         println!("Upscaling completed successfully!");
+        
+        return Ok(());
+    }
+    
+    // If fullscreen subcommand was used, handle it
+    if let Some(matches) = matches.subcommand_matches("fullscreen") {
+        // Parse capture source
+        let source_str = matches.value_of("source").unwrap();
+        let source = if source_str.starts_with("window:") {
+            let window_title = &source_str[7..];
+            nu_scaler::capture::CaptureTarget::WindowByTitle(window_title.to_string())
+        } else if source_str.starts_with("region:") {
+            let region_str = &source_str[7..];
+            let coords: Vec<&str> = region_str.split(',').collect();
+            if coords.len() != 4 {
+                eprintln!("Invalid region format. Expected region:x,y,width,height");
+                eprintln!("Using fullscreen instead");
+                nu_scaler::capture::CaptureTarget::FullScreen
+            } else {
+                let x = coords[0].parse::<i32>().unwrap_or(0);
+                let y = coords[1].parse::<i32>().unwrap_or(0);
+                let width = coords[2].parse::<u32>().unwrap_or(800);
+                let height = coords[3].parse::<u32>().unwrap_or(600);
+                nu_scaler::capture::CaptureTarget::Region { x, y, width, height }
+            }
+        } else {
+            nu_scaler::capture::CaptureTarget::FullScreen
+        };
+        
+        // Parse upscaling technology
+        let tech_str = matches.value_of("tech").unwrap();
+        let technology = match tech_str.to_lowercase().as_str() {
+            "fsr" => UpscalingTechnology::FSR,
+            "dlss" => UpscalingTechnology::DLSS,
+            "fallback" => UpscalingTechnology::Fallback,
+            _ => {
+                eprintln!("Unknown upscaling technology: {}", tech_str);
+                eprintln!("Using fallback technology");
+                UpscalingTechnology::Fallback
+            }
+        };
+        
+        // Parse quality preset
+        let quality_str = matches.value_of("quality").unwrap();
+        let quality = match quality_str.to_lowercase().as_str() {
+            "ultra" => UpscalingQuality::Ultra,
+            "quality" => UpscalingQuality::Quality,
+            "balanced" => UpscalingQuality::Balanced,
+            "performance" => UpscalingQuality::Performance,
+            _ => {
+                eprintln!("Unknown quality preset: {}", quality_str);
+                eprintln!("Using balanced preset");
+                UpscalingQuality::Balanced
+            }
+        };
+        
+        // Parse FPS
+        let fps = matches.value_of("fps").unwrap()
+            .parse::<u32>().unwrap_or_else(|_| {
+                eprintln!("Invalid FPS, using default of 60");
+                60
+            });
+        
+        // Parse algorithm
+        let algorithm = matches.value_of("algorithm").and_then(|alg_str| {
+            nu_scaler::string_to_algorithm(alg_str).or_else(|| {
+                eprintln!("Unknown algorithm: {}, using algorithm based on quality", alg_str);
+                match quality {
+                    UpscalingQuality::Ultra => Some(UpscalingAlgorithm::Lanczos3),
+                    UpscalingQuality::Quality => Some(UpscalingAlgorithm::Lanczos2),
+                    UpscalingQuality::Balanced => Some(UpscalingAlgorithm::Bicubic),
+                    UpscalingQuality::Performance => Some(UpscalingAlgorithm::Bilinear),
+                }
+            })
+        });
+        
+        // Start fullscreen upscaling
+        println!("Starting fullscreen mode with {:?} capture source", source);
+        nu_scaler::start_fullscreen_upscale_renderer(
+            source,
+            technology,
+            quality,
+            fps,
+            algorithm,
+        )?;
         
         return Ok(());
     }

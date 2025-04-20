@@ -1,6 +1,9 @@
 use anyhow::Result;
 use eframe::{self, egui};
 use egui::{Color32, RichText, Slider, TextEdit, Ui, Stroke, Rounding, Vec2, Frame};
+use std::sync::{Arc, Mutex};
+use image::RgbaImage;
+use egui::{TextureId, ColorImage, TextureOptions, TextureHandle};
 
 use crate::capture;
 use super::profile::{Profile, CaptureSource, SystemPlatform, UpscalingTechnology, UpscalingQuality};
@@ -821,4 +824,149 @@ pub fn run_app() -> Result<()> {
         Box::new(|_cc| Box::new(AppState::default())),
     )
     .map_err(|e| anyhow::anyhow!("Failed to run application: {}", e))
+}
+
+/// Run a fullscreen renderer using wgpu and egui for hardware-accelerated upscaling
+pub fn run_fullscreen_renderer(
+    buffer: Arc<crate::capture::common::FrameBuffer>,
+    stop_signal: Arc<Mutex<bool>>,
+    processor: impl FnMut(&RgbaImage) -> anyhow::Result<RgbaImage> + Send + 'static,
+) -> anyhow::Result<()> {
+    // Create a custom application state for fullscreen rendering
+    struct FullscreenRenderer {
+        buffer: Arc<crate::capture::common::FrameBuffer>,
+        stop_signal: Arc<Mutex<bool>>,
+        processor: Box<dyn FnMut(&RgbaImage) -> anyhow::Result<RgbaImage> + Send + 'static>,
+        texture: Option<TextureHandle>,
+        last_frame: Option<RgbaImage>,
+        fps: f32,
+        frame_count: usize,
+        last_fps_update: std::time::Instant,
+        show_stats: bool,
+    }
+
+    impl eframe::App for FullscreenRenderer {
+        fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+            // Handle ESC key to exit
+            if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                // Signal to stop
+                if let Ok(mut stop) = self.stop_signal.lock() {
+                    *stop = true;
+                }
+                frame.close();
+                return;
+            }
+            
+            // Toggle stats display with F1
+            if ctx.input(|i| i.key_pressed(egui::Key::F1)) {
+                self.show_stats = !self.show_stats;
+            }
+            
+            // Get latest frame from buffer
+            if let Ok(Some(frame_img)) = self.buffer.get_latest_frame() {
+                // Process the frame (upscale)
+                match (self.processor)(&frame_img) {
+                    Ok(processed) => {
+                        // Convert to egui format for display
+                        let size = [processed.width() as _, processed.height() as _];
+                        
+                        // Create a copy of the pixel data to avoid temporary value issues
+                        let flat_samples = processed.as_flat_samples();
+                        let pixels = flat_samples.as_slice();
+                        
+                        // Create egui image
+                        let color_image = ColorImage::from_rgba_unmultiplied(size, pixels);
+                        
+                        // Load or update texture with egui 
+                        self.texture = Some(ctx.load_texture(
+                            "upscaled_frame",
+                            color_image,
+                            TextureOptions::LINEAR
+                        ));
+                        
+                        // Store processed frame
+                        self.last_frame = Some(processed);
+                        
+                        // Update FPS counter
+                        self.frame_count += 1;
+                        let now = std::time::Instant::now();
+                        let elapsed = now.duration_since(self.last_fps_update);
+                        if elapsed.as_secs_f32() >= 1.0 {
+                            self.fps = self.frame_count as f32 / elapsed.as_secs_f32();
+                            self.frame_count = 0;
+                            self.last_fps_update = now;
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!("Error processing frame: {}", e);
+                    }
+                }
+            }
+            
+            // Render the texture full-screen
+            egui::CentralPanel::default()
+                .frame(egui::Frame::none().fill(Color32::BLACK))
+                .show(ctx, |ui| {
+                    if let Some(texture) = &self.texture {
+                        let available_size = ui.available_size();
+                        ui.image(texture, available_size);
+                    } else {
+                        ui.centered_and_justified(|ui| {
+                            ui.label(RichText::new("Waiting for frames...").size(24.0).color(Color32::WHITE));
+                        });
+                    }
+                });
+            
+            // Show stats if enabled
+            if self.show_stats {
+                egui::Window::new("Statistics")
+                    .anchor(egui::Align2::RIGHT_TOP, [0.0, 0.0])
+                    .resizable(false)
+                    .show(ctx, |ui| {
+                        ui.label(format!("FPS: {:.1}", self.fps));
+                        
+                        if let Some(frame) = &self.last_frame {
+                            ui.label(format!("Resolution: {}x{}", frame.width(), frame.height()));
+                        }
+                        
+                        ui.label("Press ESC to exit, F1 to toggle stats");
+                    });
+            }
+            
+            // Request continuous repaint for smooth animation
+            ctx.request_repaint();
+        }
+    }
+    
+    // Create app state
+    let app = FullscreenRenderer {
+        buffer,
+        stop_signal,
+        processor: Box::new(processor),
+        texture: None,
+        last_frame: None,
+        fps: 0.0,
+        frame_count: 0,
+        last_fps_update: std::time::Instant::now(),
+        show_stats: true,
+    };
+    
+    // Run with native options for fullscreen
+    let native_options = eframe::NativeOptions {
+        initial_window_size: None, // Will use fullscreen
+        maximized: true,
+        fullscreen: true,
+        renderer: eframe::Renderer::Wgpu,
+        vsync: false, // Disable vsync for maximum performance
+        hardware_acceleration: eframe::HardwareAcceleration::Required,
+        ..Default::default()
+    };
+    
+    // Run the app
+    eframe::run_native(
+        "NU Scale - Fullscreen",
+        native_options,
+        Box::new(|_cc| Box::new(app)),
+    )
+    .map_err(|e| anyhow::anyhow!("Failed to run fullscreen renderer: {}", e))
 } 

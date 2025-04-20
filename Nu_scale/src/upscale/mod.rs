@@ -30,8 +30,8 @@ pub enum UpscalingTechnology {
     Fallback,
 }
 
-// Trait for upscaling implementations
-pub trait Upscaler {
+/// The main trait for all upscalers
+pub trait Upscaler: Send + Sync {
     // Initialize the upscaler
     fn initialize(&mut self, input_width: u32, input_height: u32, output_width: u32, output_height: u32) -> Result<()>;
     
