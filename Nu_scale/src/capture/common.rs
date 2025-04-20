@@ -203,7 +203,8 @@ pub fn start_fullscreen_upscaled_capture(
                 // We're behind schedule - adjust next frame time
                 let behind = now.duration_since(next_frame_time);
                 let frames_behind = (behind.as_secs_f64() / frame_duration.as_secs_f64()).ceil() as u32;
-                next_frame_time = now + frame_duration.mul_f32(0.5); // Try to catch up gradually
+                // Try to catch up gradually by setting the next frame time to now plus half a frame duration
+                next_frame_time = now + (frame_duration / 2);
             }
         }
         

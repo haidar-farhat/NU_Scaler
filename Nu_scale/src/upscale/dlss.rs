@@ -358,4 +358,16 @@ impl Upscaler for DlssUpscaler {
         
         Ok(())
     }
+    
+    fn needs_initialization(&self) -> bool {
+        !self.initialized
+    }
+    
+    fn input_width(&self) -> u32 {
+        self.input_width
+    }
+    
+    fn input_height(&self) -> u32 {
+        self.input_height
+    }
 } 

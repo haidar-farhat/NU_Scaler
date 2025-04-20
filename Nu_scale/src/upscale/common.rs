@@ -46,6 +46,21 @@ impl Upscaler for PassThroughUpscaler {
         // Quality setting doesn't apply
         Ok(())
     }
+    
+    fn needs_initialization(&self) -> bool {
+        // PassThroughUpscaler doesn't need initialization
+        false
+    }
+    
+    fn input_width(&self) -> u32 {
+        // PassThroughUpscaler doesn't track dimensions
+        0
+    }
+    
+    fn input_height(&self) -> u32 {
+        // PassThroughUpscaler doesn't track dimensions
+        0
+    }
 }
 
 /// Basic upscaling algorithms
@@ -213,6 +228,20 @@ impl Upscaler for BasicUpscaler {
         self.algorithm = Self::algorithm_from_quality(quality);
         
         Ok(())
+    }
+    
+    fn needs_initialization(&self) -> bool {
+        // Consider the upscaler needs initialization if dimensions are zero
+        self.input_width == 0 || self.input_height == 0 || 
+        self.output_width == 0 || self.output_height == 0
+    }
+    
+    fn input_width(&self) -> u32 {
+        self.input_width
+    }
+    
+    fn input_height(&self) -> u32 {
+        self.input_height
     }
 }
 
