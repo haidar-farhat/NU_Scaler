@@ -6,23 +6,21 @@ edition = "2024"
 [dependencies]
 wgpu = "0.15"
 egui = "0.22"
-eframe = "0.22"
-opencv = "0.75"
+eframe = { version = "0.22.0", features = ["wgpu"] }
+opencv = { version = "0.75", optional = true }
 image = "0.24"
 anyhow = "1.0"
 thiserror = "1.0"
 once_cell = "1.17"
-qmetaobject = "0.2"
-cpp_core = "0.6"
-qt_core = "0.5"
-qt_gui = "0.5"
-qt_widgets = "0.5"
-qt_ui_tools = "0.5"
 dirs = "4.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 global-hotkey = "0.2"
 hotkey = "0.3"
+
+[features]
+default = []
+capture_opencv = ["opencv"]
 
 # Windows-specific dependencies
 [target.'cfg(windows)'.dependencies]
