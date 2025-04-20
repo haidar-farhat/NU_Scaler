@@ -5,7 +5,6 @@ use windows::{
     Win32::Foundation::*,
     Win32::Graphics::Gdi::*,
     Win32::UI::WindowsAndMessaging::*,
-    core::PCWSTR,
 };
 use crate::capture::{ScreenCapture, CaptureTarget, CaptureError};
 use super::{WindowId, WindowInfo, WindowGeometry};
@@ -83,7 +82,6 @@ unsafe extern "system" fn enum_windows_callback(hwnd: HWND, _: LPARAM) -> BOOL {
 /// Checks if a window is in fullscreen mode
 unsafe fn is_fullscreen(hwnd: HWND) -> bool {
     let mut window_rect = RECT::default();
-    let mut screen_rect = RECT::default();
     
     if unsafe { GetWindowRect(hwnd, &mut window_rect) }.as_bool() {
         let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
@@ -93,7 +91,7 @@ unsafe fn is_fullscreen(hwnd: HWND) -> bool {
         };
         
         if unsafe { GetMonitorInfoW(monitor, &mut monitor_info) }.as_bool() {
-            screen_rect = monitor_info.rcMonitor;
+            let screen_rect = monitor_info.rcMonitor;
             
             // Compare if window covers the entire monitor
             return window_rect.left == screen_rect.left
@@ -187,7 +185,7 @@ impl PlatformScreenCapture {
         }
         
         // Get bitmap data
-        let mut bitmap_info = BITMAPINFOHEADER {
+        let bitmap_info = BITMAPINFOHEADER {
             biSize: size_of::<BITMAPINFOHEADER>() as u32,
             biWidth: width as i32,
             biHeight: -(height as i32), // Negative height for top-down image
@@ -284,7 +282,7 @@ impl PlatformScreenCapture {
         }
         
         // Get bitmap data
-        let mut bitmap_info = BITMAPINFOHEADER {
+        let bitmap_info = BITMAPINFOHEADER {
             biSize: size_of::<BITMAPINFOHEADER>() as u32,
             biWidth: screen_width,
             biHeight: -screen_height, // Negative height for top-down image
@@ -375,7 +373,7 @@ impl PlatformScreenCapture {
         }
         
         // Get bitmap data
-        let mut bitmap_info = BITMAPINFOHEADER {
+        let bitmap_info = BITMAPINFOHEADER {
             biSize: size_of::<BITMAPINFOHEADER>() as u32,
             biWidth: width as i32,
             biHeight: -(height as i32), // Negative height for top-down image

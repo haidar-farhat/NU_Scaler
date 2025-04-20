@@ -1,5 +1,6 @@
 use anyhow::Result;
 use image::{RgbaImage, imageops};
+use serde::{Serialize, Deserialize};
 use crate::upscale::{Upscaler, UpscalingQuality};
 
 /// Pass-through upscaler that doesn't change the image
@@ -48,7 +49,7 @@ impl Upscaler for PassThroughUpscaler {
 }
 
 /// Basic upscaling algorithms
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum UpscalingAlgorithm {
     /// Nearest-Neighbor: Copies each input pixel to an N×N block. Zero smoothing, zero blur, but aliased.
     NearestNeighbor,
@@ -248,7 +249,7 @@ impl TemporalProcessor {
     pub fn generate_motion_vectors(&mut self) -> Result<()> {
         // Simple implementation - in practice this would use optical flow
         // or other advanced techniques
-        if let (Some(prev), Some(curr)) = (&self.previous_frame, &self.current_frame) {
+        if let (Some(_prev), Some(curr)) = (&self.previous_frame, &self.current_frame) {
             // For demonstration, just create zero motion vectors
             let width = curr.width() as usize;
             let height = curr.height() as usize;
@@ -272,7 +273,7 @@ impl TemporalProcessor {
     
     /// Generate an intermediate frame using motion vectors
     pub fn generate_intermediate_frame(&self) -> Result<Option<RgbaImage>> {
-        if let (Some(prev), Some(curr), Some(vectors)) = (
+        if let (Some(prev), Some(curr), Some(_vectors)) = (
             &self.previous_frame,
             &self.current_frame,
             &self.motion_vectors

@@ -1,13 +1,11 @@
 use anyhow::Result;
 use eframe::{self, egui};
-use egui::{Color32, RichText, Slider, TextEdit, Ui, FontId, Label, Stroke, Rounding, Vec2, Frame};
-use std::sync::{Arc, Mutex};
+use egui::{Color32, RichText, Slider, TextEdit, Ui, Stroke, Rounding, Vec2, Frame};
+use std::sync::Arc;
 
 use crate::capture;
-use crate::upscale::common::UpscalingAlgorithm;
 use super::profile::{Profile, CaptureSource, SystemPlatform, UpscalingTechnology, UpscalingQuality};
 use super::settings::AppSettings;
-use super::hotkeys::{HotkeyManager, HotkeyAction};
 
 const ACCENT_COLOR: Color32 = Color32::from_rgb(0, 120, 215); // Blue accent
 const SUCCESS_COLOR: Color32 = Color32::from_rgb(25, 170, 88); // Green
@@ -614,7 +612,7 @@ impl AppState {
                     
                     // Initialize algorithm if not set
                     if self.profile.upscaling_algorithm.is_none() {
-                        self.profile.upscaling_algorithm = Some(UpscalingAlgorithm::Lanczos3);
+                        self.profile.upscaling_algorithm = Some("Lanczos3".to_string());
                     }
                     
                     // Upscaling algorithm 
@@ -622,33 +620,34 @@ impl AppState {
                         ui.label("Upscaling Algorithm:");
                         ui.add_space(8.0);
                         
-                        let mut current_algorithm = self.profile.upscaling_algorithm.unwrap_or(UpscalingAlgorithm::Lanczos3);
+                        let mut current_algorithm = self.profile.upscaling_algorithm.clone().unwrap_or_else(|| "Lanczos3".to_string());
                         
                         egui::ComboBox::from_id_source("upscale_algorithm")
-                            .selected_text(match current_algorithm {
-                                UpscalingAlgorithm::NearestNeighbor => "Nearest-Neighbor",
-                                UpscalingAlgorithm::Bilinear => "Bilinear",
-                                UpscalingAlgorithm::Bicubic => "Bicubic",
-                                UpscalingAlgorithm::Lanczos2 => "Lanczos (a=2)",
-                                UpscalingAlgorithm::Lanczos3 => "Lanczos (a=3)",
-                                UpscalingAlgorithm::Mitchell => "Mitchell-Netravali",
-                                UpscalingAlgorithm::Area => "Area (Box) Resample",
+                            .selected_text(match current_algorithm.as_str() {
+                                "NearestNeighbor" => "Nearest-Neighbor",
+                                "Bilinear" => "Bilinear",
+                                "Bicubic" => "Bicubic",
+                                "Lanczos2" => "Lanczos (a=2)",
+                                "Lanczos3" => "Lanczos (a=3)",
+                                "Mitchell" => "Mitchell-Netravali",
+                                "Area" => "Area (Box) Resample",
+                                _ => "Lanczos (a=3)",
                             })
                             .width(300.0)
                             .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut current_algorithm, UpscalingAlgorithm::NearestNeighbor, 
+                                ui.selectable_value(&mut current_algorithm, "NearestNeighbor".to_string(), 
                                     "Nearest-Neighbor - Zero smoothing, zero blur, but aliased");
-                                ui.selectable_value(&mut current_algorithm, UpscalingAlgorithm::Bilinear, 
+                                ui.selectable_value(&mut current_algorithm, "Bilinear".to_string(), 
                                     "Bilinear - Fast and smooth, but tends to blur sharp edges");
-                                ui.selectable_value(&mut current_algorithm, UpscalingAlgorithm::Bicubic, 
+                                ui.selectable_value(&mut current_algorithm, "Bicubic".to_string(), 
                                     "Bicubic - Preserves more edge sharpness than bilinear");
-                                ui.selectable_value(&mut current_algorithm, UpscalingAlgorithm::Lanczos2, 
+                                ui.selectable_value(&mut current_algorithm, "Lanczos2".to_string(), 
                                     "Lanczos (a=2) - Good edge preservation with 4×4 kernel");
-                                ui.selectable_value(&mut current_algorithm, UpscalingAlgorithm::Lanczos3, 
+                                ui.selectable_value(&mut current_algorithm, "Lanczos3".to_string(), 
                                     "Lanczos (a=3) - Best edge preservation with 6×6 kernel");
-                                ui.selectable_value(&mut current_algorithm, UpscalingAlgorithm::Mitchell, 
+                                ui.selectable_value(&mut current_algorithm, "Mitchell".to_string(), 
                                     "Mitchell-Netravali - Tunable cubic filter for balanced results");
-                                ui.selectable_value(&mut current_algorithm, UpscalingAlgorithm::Area, 
+                                ui.selectable_value(&mut current_algorithm, "Area".to_string(), 
                                     "Area (Box) - Excellent for downscaling, useful for upscaling to avoid overshoot");
                             });
                             
@@ -656,26 +655,27 @@ impl AppState {
                     });
                     
                     // Add algorithm description
-                    if let Some(algorithm) = self.profile.upscaling_algorithm {
+                    if let Some(algorithm) = &self.profile.upscaling_algorithm {
                         ui.add_space(4.0);
                         ui.horizontal(|ui| {
                             ui.add_space(138.0); // Align with dropdown content
                             
-                            let description = match algorithm {
-                                UpscalingAlgorithm::NearestNeighbor => 
+                            let description = match algorithm.as_str() {
+                                "NearestNeighbor" => 
                                     "Copies each input pixel to an N×N block. Zero smoothing, zero blur, but aliased.",
-                                UpscalingAlgorithm::Bilinear => 
+                                "Bilinear" => 
                                     "Computes a weighted average of the four nearest input pixels. Fast and smooth, but tends to blur sharp edges.",
-                                UpscalingAlgorithm::Bicubic => 
+                                "Bicubic" => 
                                     "Uses cubic convolution on a 4×4 neighborhood to preserve more edge sharpness than bilinear, at moderate cost.",
-                                UpscalingAlgorithm::Lanczos2 => 
+                                "Lanczos2" => 
                                     "Windowed sinc filter over a 4×4 kernel. Good edge preservation with moderate compute.",
-                                UpscalingAlgorithm::Lanczos3 => 
+                                "Lanczos3" => 
                                     "Windowed sinc filter over a 6×6 kernel. Best edge preservation among traditional kernels, heavier compute.",
-                                UpscalingAlgorithm::Mitchell => 
+                                "Mitchell" => 
                                     "Tunable two-parameter cubic filters that trade off ringing vs. smoothness.",
-                                UpscalingAlgorithm::Area => 
+                                "Area" => 
                                     "Averages all pixels covered by the destination pixel's footprint. Excellent for downscaling, sometimes used for upscaling.",
+                                _ => "",
                             };
                             
                             ui.label(RichText::new(description).weak().italics());
