@@ -1,7 +1,6 @@
 use anyhow::Result;
 use eframe::{self, egui};
 use egui::{Color32, RichText, Slider, TextEdit, Ui, Stroke, Rounding, Vec2, Frame};
-use std::sync::Arc;
 
 use crate::capture;
 use super::profile::{Profile, CaptureSource, SystemPlatform, UpscalingTechnology, UpscalingQuality};
@@ -11,7 +10,6 @@ const ACCENT_COLOR: Color32 = Color32::from_rgb(0, 120, 215); // Blue accent
 const SUCCESS_COLOR: Color32 = Color32::from_rgb(25, 170, 88); // Green
 const WARNING_COLOR: Color32 = Color32::from_rgb(235, 165, 0); // Amber
 const ERROR_COLOR: Color32 = Color32::from_rgb(209, 43, 43);   // Red
-const SPACING: f32 = 8.0;
 
 /// The main application state
 struct AppState {
@@ -22,7 +20,7 @@ struct AppState {
     /// Is capturing active
     is_capturing: bool,
     /// Hotkey string for toggle capture
-    toggle_capture_hotkey: String,
+    _toggle_capture_hotkey: String,
     /// Hotkey string for capture single frame
     single_frame_hotkey: String,
     /// Hotkey string for toggle overlay
@@ -51,6 +49,7 @@ struct AppState {
 enum StatusMessageType {
     Info,
     Success,
+    #[allow(dead_code)]
     Warning,
     Error,
 }
@@ -88,7 +87,7 @@ impl Default for AppState {
             profile,
             settings,
             is_capturing: false,
-            toggle_capture_hotkey: "Ctrl+Alt+C".to_string(),
+            _toggle_capture_hotkey: "Ctrl+Alt+C".to_string(),
             single_frame_hotkey: "Ctrl+Alt+S".to_string(),
             toggle_overlay_hotkey: "Ctrl+Alt+O".to_string(),
             available_profiles,
@@ -232,7 +231,7 @@ impl AppState {
             let status_color = match self.status_message_type {
                 StatusMessageType::Info => Color32::LIGHT_GRAY,
                 StatusMessageType::Success => SUCCESS_COLOR,
-                StatusMessageType::Warning => WARNING_COLOR, 
+                StatusMessageType::Warning => WARNING_COLOR,
                 StatusMessageType::Error => ERROR_COLOR,
             };
             
