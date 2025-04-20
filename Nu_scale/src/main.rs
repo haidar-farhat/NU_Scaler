@@ -15,261 +15,72 @@ use nu_scaler::upscale::{UpscalingTechnology, UpscalingQuality};
 use nu_scaler::UpscalingAlgorithm;
 
 fn main() -> Result<()> {
-    // Parse command line arguments
-    let matches = App::new(nu_scaler::app_name())
-        .version(nu_scaler::app_version())
-        .author("Your Name <your.email@example.com>")
-        .about("Image and video upscaling using AI/ML techniques")
-        .subcommand(
-            SubCommand::with_name("upscale")
-                .about("Upscale an image file")
-                .arg(
-                    Arg::with_name("input")
-                        .help("Input image file")
-                        .required(true)
-                        .index(1),
-                )
-                .arg(
-                    Arg::with_name("output")
-                        .help("Output image file")
-                        .required(true)
-                        .index(2),
-                )
-                .arg(
-                    Arg::with_name("tech")
-                        .help("Upscaling technology (fsr, dlss, or fallback)")
-                        .long("tech")
-                        .short('t')
-                        .takes_value(true)
-                        .default_value("fallback"),
-                )
-                .arg(
-                    Arg::with_name("quality")
-                        .help("Quality preset (ultra, quality, balanced, performance)")
-                        .long("quality")
-                        .short('q')
-                        .takes_value(true)
-                        .default_value("balanced"),
-                )
-                .arg(
-                    Arg::with_name("scale")
-                        .help("Scale factor (e.g., 1.5, 2.0)")
-                        .long("scale")
-                        .short('s')
-                        .takes_value(true)
-                        .default_value("2.0"),
-                )
-                .arg(
-                    Arg::with_name("algorithm")
-                        .help("Upscaling algorithm for traditional upscalers (nearest, bilinear, bicubic, lanczos2, lanczos3, mitchell, area)")
-                        .long("algorithm")
-                        .short('a')
-                        .takes_value(true),
-                ),
-        )
-        .subcommand(
-            SubCommand::with_name("fullscreen")
-                .about("Capture, upscale, and display in fullscreen using GPU acceleration")
-                .arg(
-                    Arg::with_name("source")
-                        .help("Capture source (fullscreen, window:<title>, region:<x,y,w,h>)")
-                        .long("source")
-                        .short('s')
-                        .takes_value(true)
-                        .default_value("fullscreen"),
-                )
-                .arg(
-                    Arg::with_name("tech")
-                        .help("Upscaling technology (fsr, dlss, or fallback)")
-                        .long("tech")
-                        .short('t')
-                        .takes_value(true)
-                        .default_value("fallback"),
-                )
-                .arg(
-                    Arg::with_name("quality")
-                        .help("Quality preset (ultra, quality, balanced, performance)")
-                        .long("quality")
-                        .short('q')
-                        .takes_value(true)
-                        .default_value("balanced"),
-                )
-                .arg(
-                    Arg::with_name("fps")
-                        .help("Target frames per second")
-                        .long("fps")
-                        .short('f')
-                        .takes_value(true)
-                        .default_value("60"),
-                )
-                .arg(
-                    Arg::with_name("algorithm")
-                        .help("Upscaling algorithm for traditional upscalers (nearest, bilinear, bicubic, lanczos2, lanczos3, mitchell, area)")
-                        .long("algorithm")
-                        .short('a')
-                        .takes_value(true),
-                ),
-        )
-        .get_matches();
+    // Initialize global configuration for the application
+    init()?;
 
-    // If upscale subcommand was used, handle it
-    if let Some(matches) = matches.subcommand_matches("upscale") {
-        // Get input and output paths
-        let input_path = matches.value_of("input").unwrap();
-        let output_path = matches.value_of("output").unwrap();
-        
-        // Get upscaling technology
-        let tech_str = matches.value_of("tech").unwrap();
-        let technology = match tech_str.to_lowercase().as_str() {
-            "fsr" => UpscalingTechnology::FSR,
-            "dlss" => UpscalingTechnology::DLSS,
-            "fallback" => UpscalingTechnology::Fallback,
-            _ => {
-                eprintln!("Unknown upscaling technology: {}", tech_str);
-                eprintln!("Using fallback technology");
-                UpscalingTechnology::Fallback
+    // Parse command-line arguments
+    let args: Args = argh::from_env();
+
+    // If fullscreen command is used, start the fullscreen renderer
+    if let Some(cmd) = args.fullscreen_cmd {
+        // Get screen capturer
+        let source = match cmd.source.as_str() {
+            "fullscreen" => CaptureTarget::FullScreen,
+            s if s.starts_with("window:") => {
+                let title = s.strip_prefix("window:").unwrap_or("").to_string();
+                CaptureTarget::WindowByTitle(title)
             }
-        };
-        
-        // Get quality preset
-        let quality_str = matches.value_of("quality").unwrap();
-        let quality = match quality_str.to_lowercase().as_str() {
-            "ultra" => UpscalingQuality::Ultra,
-            "quality" => UpscalingQuality::Quality,
-            "balanced" => UpscalingQuality::Balanced,
-            "performance" => UpscalingQuality::Performance,
-            _ => {
-                eprintln!("Unknown quality preset: {}", quality_str);
-                eprintln!("Using balanced preset");
-                UpscalingQuality::Balanced
-            }
-        };
-        
-        // Get scale factor
-        let scale_factor = matches.value_of("scale").unwrap()
-            .parse::<f32>().unwrap_or_else(|_| {
-                eprintln!("Invalid scale factor, using default of 2.0");
-                2.0
-            });
-        
-        // Get algorithm if specified
-        let algorithm = matches.value_of("algorithm").and_then(|alg_str| {
-            nu_scaler::string_to_algorithm(alg_str).or_else(|| {
-                eprintln!("Unknown algorithm: {}, using algorithm based on quality", alg_str);
-                match quality {
-                    UpscalingQuality::Ultra => Some(UpscalingAlgorithm::Lanczos3),
-                    UpscalingQuality::Quality => Some(UpscalingAlgorithm::Lanczos2),
-                    UpscalingQuality::Balanced => Some(UpscalingAlgorithm::Bicubic),
-                    UpscalingQuality::Performance => Some(UpscalingAlgorithm::Bilinear),
+            s if s.starts_with("region:") => {
+                let params = s.strip_prefix("region:").unwrap_or("").split(',')
+                    .filter_map(|s| s.parse::<i32>().ok())
+                    .collect::<Vec<_>>();
+                
+                if params.len() >= 4 {
+                    CaptureTarget::Region {
+                        x: params[0],
+                        y: params[1],
+                        width: params[2] as u32,
+                        height: params[3] as u32,
+                    }
+                } else {
+                    return Err(anyhow!("Invalid region format"));
                 }
-            })
-        });
-        
-        // Perform upscaling
-        println!("Upscaling {} to {} using {:?} technology with {:?} quality at {}x scale",
-            input_path, output_path, technology, quality, scale_factor);
-            
-        if let Some(alg) = algorithm {
-            println!("Using algorithm: {:?}", alg);
-            nu_scaler::upscale_image_with_algorithm(input_path, output_path, technology, quality, scale_factor, alg)?;
-        } else {
-            nu_scaler::upscale_image(input_path, output_path, technology, quality, scale_factor)?;
-        }
-        println!("Upscaling completed successfully!");
-        
-        return Ok(());
-    }
-    
-    // If fullscreen subcommand was used, handle it
-    if let Some(matches) = matches.subcommand_matches("fullscreen") {
-        // Parse capture source
-        let source_str = matches.value_of("source").unwrap();
-        let source = if source_str.starts_with("window:") {
-            let window_title = &source_str[7..];
-            nu_scaler::capture::CaptureTarget::WindowByTitle(window_title.to_string())
-        } else if source_str.starts_with("region:") {
-            let region_str = &source_str[7..];
-            let coords: Vec<&str> = region_str.split(',').collect();
-            if coords.len() != 4 {
-                eprintln!("Invalid region format. Expected region:x,y,width,height");
-                eprintln!("Using fullscreen instead");
-                nu_scaler::capture::CaptureTarget::FullScreen
-            } else {
-                let x = coords[0].parse::<i32>().unwrap_or(0);
-                let y = coords[1].parse::<i32>().unwrap_or(0);
-                let width = coords[2].parse::<u32>().unwrap_or(800);
-                let height = coords[3].parse::<u32>().unwrap_or(600);
-                nu_scaler::capture::CaptureTarget::Region { x, y, width, height }
             }
-        } else {
-            nu_scaler::capture::CaptureTarget::FullScreen
+            _ => return Err(anyhow!("Invalid source format")),
         };
+        
+        // Get FPS
+        let fps = cmd.fps.unwrap_or(60);
         
         // Parse upscaling technology
-        let tech_str = matches.value_of("tech").unwrap();
-        let technology = match tech_str.to_lowercase().as_str() {
-            "fsr" => UpscalingTechnology::FSR,
-            "dlss" => UpscalingTechnology::DLSS,
-            "fallback" => UpscalingTechnology::Fallback,
-            _ => {
-                eprintln!("Unknown upscaling technology: {}", tech_str);
-                eprintln!("Using fallback technology");
-                UpscalingTechnology::Fallback
-            }
+        let tech = match cmd.tech.as_deref() {
+            Some("fsr") => UpscalingTechnology::FSR,
+            Some("dlss") => UpscalingTechnology::DLSS,
+            Some("fallback") | _ => UpscalingTechnology::Fallback,
         };
         
-        // Parse quality preset
-        let quality_str = matches.value_of("quality").unwrap();
-        let quality = match quality_str.to_lowercase().as_str() {
-            "ultra" => UpscalingQuality::Ultra,
-            "quality" => UpscalingQuality::Quality,
-            "balanced" => UpscalingQuality::Balanced,
-            "performance" => UpscalingQuality::Performance,
-            _ => {
-                eprintln!("Unknown quality preset: {}", quality_str);
-                eprintln!("Using balanced preset");
-                UpscalingQuality::Balanced
-            }
+        // Parse quality
+        let quality = match cmd.quality.as_deref() {
+            Some("ultra") => UpscalingQuality::Ultra,
+            Some("quality") => UpscalingQuality::Quality,
+            Some("balanced") => UpscalingQuality::Balanced,
+            Some("performance") | _ => UpscalingQuality::Performance,
         };
         
-        // Parse FPS
-        let fps = matches.value_of("fps").unwrap()
-            .parse::<u32>().unwrap_or_else(|_| {
-                eprintln!("Invalid FPS, using default of 60");
-                60
-            });
+        // Get algorithm if specified
+        let algorithm = cmd.algorithm.as_deref().and_then(string_to_algorithm);
         
-        // Parse algorithm
-        let algorithm = matches.value_of("algorithm").and_then(|alg_str| {
-            nu_scaler::string_to_algorithm(alg_str).or_else(|| {
-                eprintln!("Unknown algorithm: {}, using algorithm based on quality", alg_str);
-                match quality {
-                    UpscalingQuality::Ultra => Some(UpscalingAlgorithm::Lanczos3),
-                    UpscalingQuality::Quality => Some(UpscalingAlgorithm::Lanczos2),
-                    UpscalingQuality::Balanced => Some(UpscalingAlgorithm::Bicubic),
-                    UpscalingQuality::Performance => Some(UpscalingAlgorithm::Bilinear),
-                }
-            })
-        });
-        
-        // Start fullscreen upscaling
-        println!("Starting fullscreen mode with {:?} capture source", source);
-        nu_scaler::start_fullscreen_upscale_renderer(
-            source,
-            technology,
-            quality,
-            fps,
-            algorithm,
-        )?;
-        
-        return Ok(());
+        // Run the fullscreen renderer directly
+        return nu_scaler::start_borderless_upscale(source, tech, quality, fps, algorithm);
     }
-    
-    // Initialize the application
-    nu_scaler::init()?;
-    
-    // Run the UI
-    nu_scaler::ui::run_ui()
+
+    // If upscale command is used, process a single frame
+    if let Some(cmd) = args.upscale_cmd {
+        return do_upscale(cmd);
+    }
+
+    // Launch the GUI by default
+    nu_scaler::ui::run_app()
 }
 
 /// Run the command-line interface demo

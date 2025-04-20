@@ -34,6 +34,75 @@ pub fn app_version() -> &'static str {
     VERSION
 }
 
+/// Toggle fullscreen mode for the current window
+pub fn toggle_fullscreen(app_state: &mut ui::AppState) -> Result<()> {
+    app_state.toggle_fullscreen_mode()
+}
+
+/// Starts a borderless window with upscaling functionality 
+/// integrated directly into the main process
+pub fn start_borderless_upscale(
+    source: capture::CaptureTarget,
+    technology: upscale::UpscalingTechnology,
+    quality: upscale::UpscalingQuality,
+    fps: u32,
+    algorithm: Option<upscale::UpscalingAlgorithm>,
+) -> Result<()> {
+    use std::sync::{Arc, Mutex};
+    
+    // Create a capturer for the source
+    let mut capturer = capture::create_capturer()?;
+    
+    // Create an upscaler with the given technology and quality
+    let mut upscaler = upscale::create_upscaler(technology, quality)?;
+    
+    // Set quality explicitly
+    upscaler.set_quality(quality);
+    
+    // Create a stop signal for the upscaling thread
+    let stop_signal = Arc::new(Mutex::new(false));
+    let stop_signal_clone = stop_signal.clone();
+    
+    // Create a frame buffer to share frames between threads
+    let frame_buffer = Arc::new(capture::common::FrameBuffer::new());
+    let frame_buffer_clone = frame_buffer.clone();
+    
+    // Start a capture thread
+    let capture_thread = std::thread::spawn(move || {
+        let target_frame_time = std::time::Duration::from_secs_f64(1.0 / fps as f64);
+        
+        while !*stop_signal_clone.lock().unwrap() {
+            let start_time = std::time::Instant::now();
+            
+            // Capture frame
+            match capturer.capture_frame(&source) {
+                Ok(frame) => {
+                    // Push frame to buffer
+                    frame_buffer_clone.push(frame);
+                },
+                Err(e) => {
+                    eprintln!("Error capturing frame: {:?}", e);
+                    break;
+                }
+            }
+            
+            // Sleep to maintain target FPS
+            let elapsed = start_time.elapsed();
+            if elapsed < target_frame_time {
+                std::thread::sleep(target_frame_time - elapsed);
+            }
+        }
+    });
+    
+    // Start the fullscreen UI
+    let result = ui::run_fullscreen_upscaler(frame_buffer, stop_signal, upscaler, algorithm);
+    
+    // Wait for capture thread to finish
+    capture_thread.join().expect("Failed to join capture thread");
+    
+    result
+}
+
 /// Upscale a single image file
 pub fn upscale_image(
     input_path: &str,
