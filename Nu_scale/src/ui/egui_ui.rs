@@ -36,6 +36,8 @@ struct AppState {
     show_region_dialog: bool,
     /// Status message
     status_message: String,
+    /// Current selected tab
+    selected_tab: TabState,
 }
 
 impl Default for AppState {
@@ -81,6 +83,7 @@ impl Default for AppState {
             region,
             show_region_dialog: false,
             status_message: "Ready".to_string(),
+            selected_tab: TabState::Capture,
         }
     }
 }
@@ -143,12 +146,32 @@ impl eframe::App for AppState {
             });
             
             // Main content
-            egui::CentralPanel::default().show(ctx, |ui| {
-                egui::TabBar::new(&mut 0)
-                    .tab(&mut TabState::Capture, "Capture", |ui| self.show_capture_tab(ui))
-                    .tab(&mut TabState::Settings, "Settings", |ui| self.show_settings_tab(ui))
-                    .tab(&mut TabState::Advanced, "Advanced", |ui| self.show_advanced_tab(ui))
-                    .ui(ui);
+            egui::CentralPanel::default().show(ctx, |_ui| {
+                ui.horizontal(|ui| {
+                    let mut selected_tab = match self.selected_tab {
+                        TabState::Capture => 0,
+                        TabState::Settings => 1,
+                        TabState::Advanced => 2,
+                    };
+                    
+                    ui.selectable_value(&mut selected_tab, 0, "Capture");
+                    ui.selectable_value(&mut selected_tab, 1, "Settings");
+                    ui.selectable_value(&mut selected_tab, 2, "Advanced");
+                    
+                    self.selected_tab = match selected_tab {
+                        0 => TabState::Capture,
+                        1 => TabState::Settings,
+                        _ => TabState::Advanced,
+                    };
+                });
+                
+                ui.separator();
+                
+                match self.selected_tab {
+                    TabState::Capture => self.show_capture_tab(ui),
+                    TabState::Settings => self.show_settings_tab(ui),
+                    TabState::Advanced => self.show_advanced_tab(ui),
+                }
             });
         });
         
@@ -161,8 +184,18 @@ impl eframe::App for AppState {
                     ui.heading("Select Region");
                     ui.add(egui::Slider::new(&mut self.region.0, -2000..=2000).text("X"));
                     ui.add(egui::Slider::new(&mut self.region.1, -2000..=2000).text("Y"));
-                    ui.add(egui::Slider::new(&mut self.region.2 as &mut i32, 100..=3840).text("Width"));
-                    ui.add(egui::Slider::new(&mut self.region.3 as &mut i32, 100..=2160).text("Height"));
+                    
+                    // Convert to i32 for the slider UI
+                    let mut width_i32 = self.region.2 as i32;
+                    let mut height_i32 = self.region.3 as i32;
+                    
+                    // Add sliders for width and height
+                    ui.add(egui::Slider::new(&mut width_i32, 100..=3840).text("Width"));
+                    ui.add(egui::Slider::new(&mut height_i32, 100..=2160).text("Height"));
+                    
+                    // Store values back 
+                    self.region.2 = width_i32 as u32;
+                    self.region.3 = height_i32 as u32;
                     
                     ui.horizontal(|ui| {
                         if ui.button("OK").clicked() {
