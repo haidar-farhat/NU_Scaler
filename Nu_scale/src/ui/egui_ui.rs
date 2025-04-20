@@ -4,7 +4,7 @@ use egui::{Color32, RichText, Slider, TextEdit, Ui, FontId, Label, Stroke, Round
 use std::sync::{Arc, Mutex};
 
 use crate::capture;
-use super::profile::{Profile, CaptureSource, SystemPlatform, UpscalingTechnology};
+use super::profile::{Profile, CaptureSource, SystemPlatform, UpscalingTechnology, UpscalingQuality};
 use super::settings::AppSettings;
 use super::hotkeys::{HotkeyManager, HotkeyAction};
 
@@ -582,11 +582,31 @@ impl AppState {
                         .width(300.0)
                         .show_ui(ui, |ui| {
                             ui.selectable_value(&mut self.profile.upscaling_tech, UpscalingTechnology::None, "None");
-                            ui.selectable_value(&mut self.profile.upscaling_tech, UpscalingTechnology::FSR, "FSR (AMD FidelityFX)");
-                            ui.selectable_value(&mut self.profile.upscaling_tech, UpscalingTechnology::NIS, "NIS (NVIDIA Image Scaling)");
+                            ui.selectable_value(&mut self.profile.upscaling_tech, UpscalingTechnology::FSR, "AMD FidelityFX Super Resolution (FSR)");
+                            ui.selectable_value(&mut self.profile.upscaling_tech, UpscalingTechnology::DLSS, "NVIDIA Deep Learning Super Sampling (DLSS)");
+                            ui.selectable_value(&mut self.profile.upscaling_tech, UpscalingTechnology::Fallback, "Basic Algorithms");
                             ui.selectable_value(&mut self.profile.upscaling_tech, UpscalingTechnology::Custom, "Custom");
                         });
                 });
+                
+                ui.add_space(8.0);
+                
+                // Upscaling quality
+                ui.horizontal(|ui| {
+                    ui.label("Upscaling Quality:");
+                    ui.add_space(8.0);
+                    
+                    egui::ComboBox::from_id_source("upscale_quality")
+                        .selected_text(format!("{:?}", self.profile.upscaling_quality))
+                        .width(300.0)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.profile.upscaling_quality, UpscalingQuality::Ultra, "Ultra Quality");
+                            ui.selectable_value(&mut self.profile.upscaling_quality, UpscalingQuality::Quality, "Quality");
+                            ui.selectable_value(&mut self.profile.upscaling_quality, UpscalingQuality::Balanced, "Balanced");
+                            ui.selectable_value(&mut self.profile.upscaling_quality, UpscalingQuality::Performance, "Performance");
+                        });
+                });
+                
             });
             
             // Hotkey settings

@@ -31,14 +31,29 @@ pub enum SystemPlatform {
 /// Upscaling technology
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum UpscalingTechnology {
+    /// No upscaling
+    None,
     /// AMD FidelityFX Super Resolution (FSR)
     FSR,
-    /// NVIDIA Image Scaling (NIS)
-    NIS,
+    /// NVIDIA Deep Learning Super Sampling (DLSS)
+    DLSS,
+    /// Fallback to basic algorithms
+    Fallback,
     /// Custom implementation
     Custom,
-    /// None (passthrough)
-    None,
+}
+
+/// Upscaling quality
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub enum UpscalingQuality {
+    /// Ultra quality (minimal upscaling)
+    Ultra,
+    /// Quality (good balance)
+    Quality,
+    /// Balanced (medium quality, better performance)
+    Balanced,
+    /// Performance (focus on performance)
+    Performance,
 }
 
 /// Profile for capture and upscaling settings
@@ -54,6 +69,8 @@ pub struct Profile {
     pub scale_factor: f32,
     /// Upscaling technology
     pub upscaling_tech: UpscalingTechnology,
+    /// Upscaling quality preset
+    pub upscaling_quality: UpscalingQuality,
     /// Enable overlay
     pub enable_overlay: bool,
     /// Hotkey for starting/stopping capture
@@ -70,6 +87,7 @@ impl Default for Profile {
             platform: SystemPlatform::Auto,
             scale_factor: 1.5,
             upscaling_tech: UpscalingTechnology::None,
+            upscaling_quality: UpscalingQuality::Balanced,
             enable_overlay: false,
             hotkey: "Ctrl+Alt+C".to_string(),
             fps: 30,

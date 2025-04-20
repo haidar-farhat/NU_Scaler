@@ -1,5 +1,5 @@
 [package]
-name = "Nu_scale"
+name = "Nu_scaler"
 version = "0.1.0"
 edition = "2024"
 
@@ -17,10 +17,16 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 global-hotkey = "0.2"
 hotkey = "0.3"
+clap = "3.2"
 
 [features]
 default = []
 capture_opencv = ["opencv"]
+
+# Add feature for AMD FSR support
+fsr = []
+# Add feature for NVIDIA DLSS support
+dlss = []
 
 # Windows-specific dependencies
 [target.'cfg(windows)'.dependencies]
