@@ -3,7 +3,7 @@ use eframe::{self, egui};
 use egui::{Color32, RichText, Slider, TextEdit, Ui, FontId, Label, Stroke, Rounding, Vec2, Frame};
 use std::sync::{Arc, Mutex};
 
-use crate::capture::{self, CaptureTarget};
+use crate::capture;
 use super::profile::{Profile, CaptureSource, SystemPlatform, UpscalingTechnology};
 use super::settings::AppSettings;
 use super::hotkeys::{HotkeyManager, HotkeyAction};
@@ -159,7 +159,7 @@ enum TabState {
 impl AppState {
     /// Configure custom fonts
     fn configure_fonts(&self, ctx: &egui::Context) {
-        let mut fonts = egui::FontDefinitions::default();
+        let fonts = egui::FontDefinitions::default();
         // Could add custom fonts here
         ctx.set_fonts(fonts);
     }
@@ -456,7 +456,7 @@ impl AppState {
                 
                 // Window
                 ui.horizontal(|ui| {
-                    let window_selected = ui.radio_value(
+                    let _window_selected = ui.radio_value(
                         &mut self.capture_source_index, 
                         1, 
                         RichText::new("🪟 Window").size(14.0)
@@ -495,7 +495,7 @@ impl AppState {
                 
                 // Region
                 ui.horizontal(|ui| {
-                    let region_selected = ui.radio_value(
+                    let _region_selected = ui.radio_value(
                         &mut self.capture_source_index, 
                         2, 
                         RichText::new("📏 Region").size(14.0)
@@ -562,12 +562,10 @@ impl AppState {
                 ui.horizontal(|ui| {
                     ui.label("Scale Factor:");
                     ui.add_space(8.0);
-                    ui.add(
-                        Slider::new(&mut self.profile.scale_factor, 1.0..=4.0)
-                            .step_by(0.1)
-                            .text("×")
-                            .width(300.0)
-                    );
+                    let slider = Slider::new(&mut self.profile.scale_factor, 1.0..=4.0)
+                        .step_by(0.1)
+                        .text("×");
+                    let _response = ui.add_sized([300.0, 20.0], slider);
                     
                     ui.label(format!("{:.1}×", self.profile.scale_factor));
                 });
@@ -639,11 +637,9 @@ impl AppState {
                 ui.horizontal(|ui| {
                     ui.label("Target FPS:");
                     ui.add_space(8.0);
-                    ui.add(
-                        Slider::new(&mut self.profile.fps, 1..=240)
-                            .text("fps")
-                            .width(300.0)
-                    );
+                    let slider = Slider::new(&mut self.profile.fps, 1..=240)
+                        .text("fps");
+                    let _response = ui.add_sized([300.0, 20.0], slider);
                     ui.label(format!("{} fps", self.profile.fps));
                 });
             });
