@@ -4,6 +4,7 @@ use egui::{Color32, RichText, Slider, TextEdit, Ui, FontId, Label, Stroke, Round
 use std::sync::{Arc, Mutex};
 
 use crate::capture;
+use crate::upscale::common::UpscalingAlgorithm;
 use super::profile::{Profile, CaptureSource, SystemPlatform, UpscalingTechnology, UpscalingQuality};
 use super::settings::AppSettings;
 use super::hotkeys::{HotkeyManager, HotkeyAction};
@@ -584,7 +585,7 @@ impl AppState {
                             ui.selectable_value(&mut self.profile.upscaling_tech, UpscalingTechnology::None, "None");
                             ui.selectable_value(&mut self.profile.upscaling_tech, UpscalingTechnology::FSR, "AMD FidelityFX Super Resolution (FSR)");
                             ui.selectable_value(&mut self.profile.upscaling_tech, UpscalingTechnology::DLSS, "NVIDIA Deep Learning Super Sampling (DLSS)");
-                            ui.selectable_value(&mut self.profile.upscaling_tech, UpscalingTechnology::Fallback, "Basic Algorithms");
+                            ui.selectable_value(&mut self.profile.upscaling_tech, UpscalingTechnology::Fallback, "Traditional Algorithms");
                             ui.selectable_value(&mut self.profile.upscaling_tech, UpscalingTechnology::Custom, "Custom");
                         });
                 });
@@ -607,6 +608,83 @@ impl AppState {
                         });
                 });
                 
+                // Only show algorithm selection for Traditional/Fallback upscaling
+                if self.profile.upscaling_tech == UpscalingTechnology::Fallback {
+                    ui.add_space(8.0);
+                    
+                    // Initialize algorithm if not set
+                    if self.profile.upscaling_algorithm.is_none() {
+                        self.profile.upscaling_algorithm = Some(UpscalingAlgorithm::Lanczos3);
+                    }
+                    
+                    // Upscaling algorithm 
+                    ui.horizontal(|ui| {
+                        ui.label("Upscaling Algorithm:");
+                        ui.add_space(8.0);
+                        
+                        let mut current_algorithm = self.profile.upscaling_algorithm.unwrap_or(UpscalingAlgorithm::Lanczos3);
+                        
+                        egui::ComboBox::from_id_source("upscale_algorithm")
+                            .selected_text(match current_algorithm {
+                                UpscalingAlgorithm::NearestNeighbor => "Nearest-Neighbor",
+                                UpscalingAlgorithm::Bilinear => "Bilinear",
+                                UpscalingAlgorithm::Bicubic => "Bicubic",
+                                UpscalingAlgorithm::Lanczos2 => "Lanczos (a=2)",
+                                UpscalingAlgorithm::Lanczos3 => "Lanczos (a=3)",
+                                UpscalingAlgorithm::Mitchell => "Mitchell-Netravali",
+                                UpscalingAlgorithm::Area => "Area (Box) Resample",
+                            })
+                            .width(300.0)
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut current_algorithm, UpscalingAlgorithm::NearestNeighbor, 
+                                    "Nearest-Neighbor - Zero smoothing, zero blur, but aliased");
+                                ui.selectable_value(&mut current_algorithm, UpscalingAlgorithm::Bilinear, 
+                                    "Bilinear - Fast and smooth, but tends to blur sharp edges");
+                                ui.selectable_value(&mut current_algorithm, UpscalingAlgorithm::Bicubic, 
+                                    "Bicubic - Preserves more edge sharpness than bilinear");
+                                ui.selectable_value(&mut current_algorithm, UpscalingAlgorithm::Lanczos2, 
+                                    "Lanczos (a=2) - Good edge preservation with 4×4 kernel");
+                                ui.selectable_value(&mut current_algorithm, UpscalingAlgorithm::Lanczos3, 
+                                    "Lanczos (a=3) - Best edge preservation with 6×6 kernel");
+                                ui.selectable_value(&mut current_algorithm, UpscalingAlgorithm::Mitchell, 
+                                    "Mitchell-Netravali - Tunable cubic filter for balanced results");
+                                ui.selectable_value(&mut current_algorithm, UpscalingAlgorithm::Area, 
+                                    "Area (Box) - Excellent for downscaling, useful for upscaling to avoid overshoot");
+                            });
+                            
+                        self.profile.upscaling_algorithm = Some(current_algorithm);
+                    });
+                    
+                    // Add algorithm description
+                    if let Some(algorithm) = self.profile.upscaling_algorithm {
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            ui.add_space(138.0); // Align with dropdown content
+                            
+                            let description = match algorithm {
+                                UpscalingAlgorithm::NearestNeighbor => 
+                                    "Copies each input pixel to an N×N block. Zero smoothing, zero blur, but aliased.",
+                                UpscalingAlgorithm::Bilinear => 
+                                    "Computes a weighted average of the four nearest input pixels. Fast and smooth, but tends to blur sharp edges.",
+                                UpscalingAlgorithm::Bicubic => 
+                                    "Uses cubic convolution on a 4×4 neighborhood to preserve more edge sharpness than bilinear, at moderate cost.",
+                                UpscalingAlgorithm::Lanczos2 => 
+                                    "Windowed sinc filter over a 4×4 kernel. Good edge preservation with moderate compute.",
+                                UpscalingAlgorithm::Lanczos3 => 
+                                    "Windowed sinc filter over a 6×6 kernel. Best edge preservation among traditional kernels, heavier compute.",
+                                UpscalingAlgorithm::Mitchell => 
+                                    "Tunable two-parameter cubic filters that trade off ringing vs. smoothness.",
+                                UpscalingAlgorithm::Area => 
+                                    "Averages all pixels covered by the destination pixel's footprint. Excellent for downscaling, sometimes used for upscaling.",
+                            };
+                            
+                            ui.label(RichText::new(description).weak().italics());
+                        });
+                    }
+                } else {
+                    // Reset algorithm when not using traditional upscaling
+                    self.profile.upscaling_algorithm = None;
+                }
             });
             
             // Hotkey settings

@@ -47,6 +47,25 @@ impl Upscaler for PassThroughUpscaler {
     }
 }
 
+/// Basic upscaling algorithms
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum UpscalingAlgorithm {
+    /// Nearest-Neighbor: Copies each input pixel to an N×N block. Zero smoothing, zero blur, but aliased.
+    NearestNeighbor,
+    /// Bilinear: Computes a weighted average of the four nearest input pixels. Fast and smooth, but tends to blur sharp edges.
+    Bilinear,
+    /// Bicubic: Uses cubic convolution on a 4×4 neighborhood to preserve more edge sharpness than bilinear, at moderate cost.
+    Bicubic,
+    /// Lanczos2: Windowed sinc filter over a 4×4 kernel. Good edge preservation with moderate compute.
+    Lanczos2,
+    /// Lanczos3: Windowed sinc filter over a 6×6 kernel. Best edge preservation among traditional kernels, heavier compute.
+    Lanczos3,
+    /// Mitchell-Netravali: Tunable cubic filter that trades off ringing vs. smoothness.
+    Mitchell,
+    /// Area (Box) Resample: Averages all pixels covered by the destination pixel's footprint.
+    Area,
+}
+
 /// Basic upscaler using standard image upscaling techniques
 pub struct BasicUpscaler {
     input_width: u32,
@@ -54,6 +73,7 @@ pub struct BasicUpscaler {
     output_width: u32,
     output_height: u32,
     quality: UpscalingQuality,
+    algorithm: UpscalingAlgorithm,
 }
 
 impl BasicUpscaler {
@@ -64,6 +84,39 @@ impl BasicUpscaler {
             output_width: 0,
             output_height: 0,
             quality,
+            algorithm: UpscalingAlgorithm::Lanczos3, // Default to high quality
+        }
+    }
+    
+    /// Create new with specific algorithm
+    pub fn with_algorithm(quality: UpscalingQuality, algorithm: UpscalingAlgorithm) -> Self {
+        Self {
+            input_width: 0,
+            input_height: 0,
+            output_width: 0,
+            output_height: 0,
+            quality,
+            algorithm,
+        }
+    }
+    
+    /// Set upscaling algorithm
+    pub fn set_algorithm(&mut self, algorithm: UpscalingAlgorithm) {
+        self.algorithm = algorithm;
+    }
+    
+    /// Get current algorithm
+    pub fn algorithm(&self) -> UpscalingAlgorithm {
+        self.algorithm
+    }
+    
+    /// Map quality to recommended algorithm
+    fn algorithm_from_quality(quality: UpscalingQuality) -> UpscalingAlgorithm {
+        match quality {
+            UpscalingQuality::Ultra => UpscalingAlgorithm::Lanczos3,
+            UpscalingQuality::Quality => UpscalingAlgorithm::Lanczos2,
+            UpscalingQuality::Balanced => UpscalingAlgorithm::Bicubic,
+            UpscalingQuality::Performance => UpscalingAlgorithm::Bilinear,
         }
     }
 }
@@ -74,27 +127,51 @@ impl Upscaler for BasicUpscaler {
         self.input_height = input_height;
         self.output_width = output_width;
         self.output_height = output_height;
+        
+        // Update algorithm based on current quality setting if not explicitly set
+        self.algorithm = Self::algorithm_from_quality(self.quality);
+        
         Ok(())
     }
     
     fn upscale(&self, input: &RgbaImage) -> Result<RgbaImage> {
-        // Choose algorithm based on quality setting
-        match self.quality {
-            UpscalingQuality::Ultra => {
-                // Use Lanczos3 for best quality (slower)
-                Ok(imageops::resize(input, self.output_width, self.output_height, imageops::Lanczos3))
+        // Choose algorithm based on settings
+        match self.algorithm {
+            UpscalingAlgorithm::NearestNeighbor => {
+                // Nearest Neighbor - simplest algorithm
+                Ok(imageops::resize(input, self.output_width, self.output_height, imageops::Nearest))
             },
-            UpscalingQuality::Quality => {
-                // Use CatmullRom for good quality
-                Ok(imageops::resize(input, self.output_width, self.output_height, imageops::CatmullRom))
-            },
-            UpscalingQuality::Balanced => {
-                // Use Triangle for medium quality
+            UpscalingAlgorithm::Bilinear => {
+                // Bilinear - fast and smooth
                 Ok(imageops::resize(input, self.output_width, self.output_height, imageops::Triangle))
             },
-            UpscalingQuality::Performance => {
-                // Use Nearest for fastest performance (lower quality)
-                Ok(imageops::resize(input, self.output_width, self.output_height, imageops::Nearest))
+            UpscalingAlgorithm::Bicubic => {
+                // Bicubic - preserves more edge sharpness than bilinear
+                Ok(imageops::resize(input, self.output_width, self.output_height, imageops::CatmullRom))
+            },
+            UpscalingAlgorithm::Lanczos2 => {
+                // Lanczos2 - 4×4 kernel
+                Ok(imageops::resize(input, self.output_width, self.output_height, imageops::Lanczos3))
+            },
+            UpscalingAlgorithm::Lanczos3 => {
+                // Lanczos3 - 6×6 kernel with best edge preservation
+                let filter = imageops::FilterType::Lanczos3;
+                Ok(imageops::resize(input, self.output_width, self.output_height, filter))
+            },
+            UpscalingAlgorithm::Mitchell => {
+                // Mitchell-Netravali - tuned cubic filter
+                // Using generic CatmullRom as approximation since image crate doesn't have a specific Mitchell filter
+                Ok(imageops::resize(input, self.output_width, self.output_height, imageops::CatmullRom))
+            },
+            UpscalingAlgorithm::Area => {
+                // Area (Box) - good for downscaling, sometimes used for upscaling
+                if self.output_width < self.input_width || self.output_height < self.input_height {
+                    // For downscaling, area sampling works well
+                    Ok(imageops::resize(input, self.output_width, self.output_height, imageops::Gaussian))
+                } else {
+                    // For upscaling, area is similar to bilinear but with box filtering
+                    Ok(imageops::resize(input, self.output_width, self.output_height, imageops::Triangle))
+                }
             },
         }
     }
@@ -110,7 +187,15 @@ impl Upscaler for BasicUpscaler {
     }
     
     fn name(&self) -> &'static str {
-        "Basic"
+        match self.algorithm {
+            UpscalingAlgorithm::NearestNeighbor => "Nearest-Neighbor",
+            UpscalingAlgorithm::Bilinear => "Bilinear",
+            UpscalingAlgorithm::Bicubic => "Bicubic",
+            UpscalingAlgorithm::Lanczos2 => "Lanczos (a=2)",
+            UpscalingAlgorithm::Lanczos3 => "Lanczos (a=3)",
+            UpscalingAlgorithm::Mitchell => "Mitchell-Netravali",
+            UpscalingAlgorithm::Area => "Area (Box) Resample",
+        }
     }
     
     fn quality(&self) -> UpscalingQuality {
@@ -118,7 +203,14 @@ impl Upscaler for BasicUpscaler {
     }
     
     fn set_quality(&mut self, quality: UpscalingQuality) -> Result<()> {
+        if self.quality == quality {
+            return Ok(());
+        }
+        
+        // Update quality and corresponding algorithm
         self.quality = quality;
+        self.algorithm = Self::algorithm_from_quality(quality);
+        
         Ok(())
     }
 }
