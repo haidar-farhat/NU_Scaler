@@ -2,6 +2,7 @@ mod capture;
 mod ui;
 
 use anyhow::Result;
+use clap::{App, Arg, SubCommand};
 #[cfg(feature = "capture_opencv")]
 use std::path::Path;
 #[cfg(feature = "capture_opencv")]
@@ -10,24 +11,111 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 #[cfg(feature = "capture_opencv")]
 use capture::{CaptureTarget, common, window_finder};
+use Nu_scaler::upscale::{UpscalingTechnology, UpscalingQuality};
 
 fn main() -> Result<()> {
-    // Check for command line arguments
-    let args: Vec<String> = std::env::args().collect();
-    
-    // If we have any arguments, run the CLI version
-    if args.len() > 1 && args[1] == "--cli" {
-        #[cfg(feature = "capture_opencv")]
-        run_cli_demo()?;
+    // Parse command line arguments
+    let matches = App::new(Nu_scaler::app_name())
+        .version(Nu_scaler::app_version())
+        .author("Your Name <your.email@example.com>")
+        .about("Image and video upscaling using AI/ML techniques")
+        .subcommand(
+            SubCommand::with_name("upscale")
+                .about("Upscale an image file")
+                .arg(
+                    Arg::with_name("input")
+                        .help("Input image file")
+                        .required(true)
+                        .index(1),
+                )
+                .arg(
+                    Arg::with_name("output")
+                        .help("Output image file")
+                        .required(true)
+                        .index(2),
+                )
+                .arg(
+                    Arg::with_name("tech")
+                        .help("Upscaling technology (fsr, dlss, or fallback)")
+                        .long("tech")
+                        .short('t')
+                        .takes_value(true)
+                        .default_value("fallback"),
+                )
+                .arg(
+                    Arg::with_name("quality")
+                        .help("Quality preset (ultra, quality, balanced, performance)")
+                        .long("quality")
+                        .short('q')
+                        .takes_value(true)
+                        .default_value("balanced"),
+                )
+                .arg(
+                    Arg::with_name("scale")
+                        .help("Scale factor (e.g., 1.5, 2.0)")
+                        .long("scale")
+                        .short('s')
+                        .takes_value(true)
+                        .default_value("2.0"),
+                ),
+        )
+        .get_matches();
+
+    // If upscale subcommand was used, handle it
+    if let Some(matches) = matches.subcommand_matches("upscale") {
+        // Get input and output paths
+        let input_path = matches.value_of("input").unwrap();
+        let output_path = matches.value_of("output").unwrap();
         
-        #[cfg(not(feature = "capture_opencv"))]
-        println!("CLI demo requires OpenCV support. Please compile with the 'capture_opencv' feature.");
-    } else {
-        // Otherwise, run the UI version
-        ui::run_ui()?;
+        // Get upscaling technology
+        let tech_str = matches.value_of("tech").unwrap();
+        let technology = match tech_str.to_lowercase().as_str() {
+            "fsr" => UpscalingTechnology::FSR,
+            "dlss" => UpscalingTechnology::DLSS,
+            "fallback" => UpscalingTechnology::Fallback,
+            _ => {
+                eprintln!("Unknown upscaling technology: {}", tech_str);
+                eprintln!("Using fallback technology");
+                UpscalingTechnology::Fallback
+            }
+        };
+        
+        // Get quality preset
+        let quality_str = matches.value_of("quality").unwrap();
+        let quality = match quality_str.to_lowercase().as_str() {
+            "ultra" => UpscalingQuality::Ultra,
+            "quality" => UpscalingQuality::Quality,
+            "balanced" => UpscalingQuality::Balanced,
+            "performance" => UpscalingQuality::Performance,
+            _ => {
+                eprintln!("Unknown quality preset: {}", quality_str);
+                eprintln!("Using balanced preset");
+                UpscalingQuality::Balanced
+            }
+        };
+        
+        // Get scale factor
+        let scale_factor = matches.value_of("scale").unwrap()
+            .parse::<f32>().unwrap_or_else(|_| {
+                eprintln!("Invalid scale factor, using default of 2.0");
+                2.0
+            });
+        
+        // Perform upscaling
+        println!("Upscaling {} to {} using {:?} technology with {:?} quality at {}x scale",
+            input_path, output_path, technology, quality, scale_factor);
+        
+        Nu_scaler::upscale_image(input_path, output_path, technology, quality, scale_factor)?;
+        println!("Upscaling completed successfully!");
+        
+        return Ok(());
     }
     
-    Ok(())
+    // Initialize the application
+    Nu_scaler::init()?;
+    
+    // Run the UI
+    Nu_scaler::ui::run_ui()
 }
 
 /// Run the command-line interface demo
