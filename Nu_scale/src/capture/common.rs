@@ -4,6 +4,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use super::{CaptureTarget, ScreenCapture};
+use crate::ui::profile::{UpscalingTechnology, UpscalingQuality};
 
 /// Type aliases for upscaling functionality to avoid import issues
 #[allow(dead_code)]
