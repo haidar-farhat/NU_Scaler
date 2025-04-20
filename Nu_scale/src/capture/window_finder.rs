@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use super::{CaptureError, platform::WindowInfo};
 
 /// Simple fuzzy matching algorithm for window titles
+#[allow(dead_code)]
 fn fuzzy_match(haystack: &str, needle: &str) -> bool {
     let haystack = haystack.to_lowercase();
     let needle = needle.to_lowercase();
