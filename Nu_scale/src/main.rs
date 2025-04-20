@@ -11,13 +11,13 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 #[cfg(feature = "capture_opencv")]
 use capture::{CaptureTarget, common, window_finder};
-use Nu_scaler::upscale::{UpscalingTechnology, UpscalingQuality};
-use Nu_scaler::UpscalingAlgorithm;
+use nu_scaler::upscale::{UpscalingTechnology, UpscalingQuality};
+use nu_scaler::UpscalingAlgorithm;
 
 fn main() -> Result<()> {
     // Parse command line arguments
-    let matches = App::new(Nu_scaler::app_name())
-        .version(Nu_scaler::app_version())
+    let matches = App::new(nu_scaler::app_name())
+        .version(nu_scaler::app_version())
         .author("Your Name <your.email@example.com>")
         .about("Image and video upscaling using AI/ML techniques")
         .subcommand(
@@ -111,7 +111,7 @@ fn main() -> Result<()> {
         
         // Get algorithm if specified
         let algorithm = matches.value_of("algorithm").and_then(|alg_str| {
-            Nu_scaler::string_to_algorithm(alg_str).or_else(|| {
+            nu_scaler::string_to_algorithm(alg_str).or_else(|| {
                 eprintln!("Unknown algorithm: {}, using algorithm based on quality", alg_str);
                 match quality {
                     UpscalingQuality::Ultra => Some(UpscalingAlgorithm::Lanczos3),
@@ -128,9 +128,9 @@ fn main() -> Result<()> {
             
         if let Some(alg) = algorithm {
             println!("Using algorithm: {:?}", alg);
-            Nu_scaler::upscale_image_with_algorithm(input_path, output_path, technology, quality, scale_factor, alg)?;
+            nu_scaler::upscale_image_with_algorithm(input_path, output_path, technology, quality, scale_factor, alg)?;
         } else {
-            Nu_scaler::upscale_image(input_path, output_path, technology, quality, scale_factor)?;
+            nu_scaler::upscale_image(input_path, output_path, technology, quality, scale_factor)?;
         }
         println!("Upscaling completed successfully!");
         
@@ -138,10 +138,10 @@ fn main() -> Result<()> {
     }
     
     // Initialize the application
-    Nu_scaler::init()?;
+    nu_scaler::init()?;
     
     // Run the UI
-    Nu_scaler::ui::run_ui()
+    nu_scaler::ui::run_ui()
 }
 
 /// Run the command-line interface demo
@@ -306,6 +306,6 @@ fn run_live_capture_demo() -> Result<()> {
 }
 
 /// Utility function to convert a string algorithm name to the UpscalingAlgorithm enum
-fn string_to_algorithm(alg_str: &str) -> Option<Nu_scaler::UpscalingAlgorithm> {
-    Nu_scaler::string_to_algorithm(alg_str)
+fn string_to_algorithm(alg_str: &str) -> Option<nu_scaler::UpscalingAlgorithm> {
+    nu_scaler::string_to_algorithm(alg_str)
 }
