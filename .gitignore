@@ -1,0 +1,82 @@
+# Rust build artifacts
+/target/
+Cargo.lock
+
+# Debug symbols
+*.pdb
+*.dSYM/
+*.sym
+
+# Binary files
+*.exe
+*.dll
+*.so
+*.dylib
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+.vs/
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.dbmdl
+*.dbproj.schemaview
+*.jfm
+*.pfx
+*.publishsettings
+
+# Generated resources
+*.rs.bk
+
+# Backup files
+*~
+\#*\#
+
+# Environment files
+.env
+*.env.local
+
+# OS-specific
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Build directories for different platforms
+**/debug/
+**/release/
+**/x64/
+**/x86/
+**/build/
+**/bin/
+**/obj/
+**/dist/
+
+# Package files
+*.7z
+*.dmg
+*.gz
+*.iso
+*.jar
+*.rar
+*.tar
+*.zip
+
+# Log files
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Cache files
+.cache/
+.npm/
+.eslintcache
+.stylelintcache
+
+# Project-specific
+Nu_scale/target/ 
