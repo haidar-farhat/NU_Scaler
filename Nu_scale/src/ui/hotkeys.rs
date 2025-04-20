@@ -1,7 +1,6 @@
 use anyhow::{Result, anyhow};
-use global_hotkey::{GlobalHotKeyManager, HotKey};
-use hotkey::modifiers;
-use hotkey::keys;
+use global_hotkey::GlobalHotKeyManager;
+use global_hotkey::hotkey::{self, HotKey, Modifiers};
 use std::str::FromStr;
 use std::sync::mpsc::{Sender, Receiver, channel};
 use std::thread;
@@ -77,16 +76,17 @@ impl HotkeyManager {
             return Err(anyhow!("Invalid hotkey format"));
         }
         
-        let mut modifiers = modifiers::NONE;
+        // Initialize modifiers with no modifiers
+        let mut modifiers = Modifiers::empty();
         let mut key = None;
         
         for part in parts.iter() {
             let part = part.trim();
             match part.to_lowercase().as_str() {
-                "ctrl" | "control" => modifiers |= modifiers::CONTROL,
-                "alt" => modifiers |= modifiers::ALT,
-                "shift" => modifiers |= modifiers::SHIFT,
-                "win" | "super" | "meta" => modifiers |= modifiers::META,
+                "ctrl" | "control" => modifiers |= Modifiers::CONTROL,
+                "alt" => modifiers |= Modifiers::ALT,
+                "shift" => modifiers |= Modifiers::SHIFT,
+                "win" | "super" | "meta" => modifiers |= Modifiers::META,
                 key_name => {
                     // It's a key, try to parse it
                     if key.is_some() {
@@ -110,83 +110,84 @@ impl HotkeyManager {
     }
     
     /// Convert a key name to a key code
-    fn key_from_str(key_str: &str) -> Result<keys::Keys> {
+    fn key_from_str(key_str: &str) -> Result<hotkey::Code> {
+        use hotkey::Code;
+        
         match key_str.to_lowercase().as_str() {
-            "a" => Ok(keys::Keys::A),
-            "b" => Ok(keys::Keys::B),
-            "c" => Ok(keys::Keys::C),
-            "d" => Ok(keys::Keys::D),
-            "e" => Ok(keys::Keys::E),
-            "f" => Ok(keys::Keys::F),
-            "g" => Ok(keys::Keys::G),
-            "h" => Ok(keys::Keys::H),
-            "i" => Ok(keys::Keys::I),
-            "j" => Ok(keys::Keys::J),
-            "k" => Ok(keys::Keys::K),
-            "l" => Ok(keys::Keys::L),
-            "m" => Ok(keys::Keys::M),
-            "n" => Ok(keys::Keys::N),
-            "o" => Ok(keys::Keys::O),
-            "p" => Ok(keys::Keys::P),
-            "q" => Ok(keys::Keys::Q),
-            "r" => Ok(keys::Keys::R),
-            "s" => Ok(keys::Keys::S),
-            "t" => Ok(keys::Keys::T),
-            "u" => Ok(keys::Keys::U),
-            "v" => Ok(keys::Keys::V),
-            "w" => Ok(keys::Keys::W),
-            "x" => Ok(keys::Keys::X),
-            "y" => Ok(keys::Keys::Y),
-            "z" => Ok(keys::Keys::Z),
-            "1" | "one" => Ok(keys::Keys::NUM1),
-            "2" | "two" => Ok(keys::Keys::NUM2),
-            "3" | "three" => Ok(keys::Keys::NUM3),
-            "4" | "four" => Ok(keys::Keys::NUM4),
-            "5" | "five" => Ok(keys::Keys::NUM5),
-            "6" | "six" => Ok(keys::Keys::NUM6),
-            "7" | "seven" => Ok(keys::Keys::NUM7),
-            "8" | "eight" => Ok(keys::Keys::NUM8),
-            "9" | "nine" => Ok(keys::Keys::NUM9),
-            "0" | "zero" => Ok(keys::Keys::NUM0),
-            "f1" => Ok(keys::Keys::F1),
-            "f2" => Ok(keys::Keys::F2),
-            "f3" => Ok(keys::Keys::F3),
-            "f4" => Ok(keys::Keys::F4),
-            "f5" => Ok(keys::Keys::F5),
-            "f6" => Ok(keys::Keys::F6),
-            "f7" => Ok(keys::Keys::F7),
-            "f8" => Ok(keys::Keys::F8),
-            "f9" => Ok(keys::Keys::F9),
-            "f10" => Ok(keys::Keys::F10),
-            "f11" => Ok(keys::Keys::F11),
-            "f12" => Ok(keys::Keys::F12),
-            "space" => Ok(keys::Keys::SPACE),
-            "escape" | "esc" => Ok(keys::Keys::ESCAPE),
-            "return" | "enter" => Ok(keys::Keys::RETURN),
-            "tab" => Ok(keys::Keys::TAB),
-            "backspace" => Ok(keys::Keys::BACKSPACE),
-            "insert" => Ok(keys::Keys::INSERT),
-            "delete" => Ok(keys::Keys::DELETE),
-            "home" => Ok(keys::Keys::HOME),
-            "end" => Ok(keys::Keys::END),
-            "pageup" => Ok(keys::Keys::PAGEUP),
-            "pagedown" => Ok(keys::Keys::PAGEDOWN),
-            "up" => Ok(keys::Keys::UP),
-            "down" => Ok(keys::Keys::DOWN),
-            "left" => Ok(keys::Keys::LEFT),
-            "right" => Ok(keys::Keys::RIGHT),
+            "a" => Ok(Code::KeyA),
+            "b" => Ok(Code::KeyB),
+            "c" => Ok(Code::KeyC),
+            "d" => Ok(Code::KeyD),
+            "e" => Ok(Code::KeyE),
+            "f" => Ok(Code::KeyF),
+            "g" => Ok(Code::KeyG),
+            "h" => Ok(Code::KeyH),
+            "i" => Ok(Code::KeyI),
+            "j" => Ok(Code::KeyJ),
+            "k" => Ok(Code::KeyK),
+            "l" => Ok(Code::KeyL),
+            "m" => Ok(Code::KeyM),
+            "n" => Ok(Code::KeyN),
+            "o" => Ok(Code::KeyO),
+            "p" => Ok(Code::KeyP),
+            "q" => Ok(Code::KeyQ),
+            "r" => Ok(Code::KeyR),
+            "s" => Ok(Code::KeyS),
+            "t" => Ok(Code::KeyT),
+            "u" => Ok(Code::KeyU),
+            "v" => Ok(Code::KeyV),
+            "w" => Ok(Code::KeyW),
+            "x" => Ok(Code::KeyX),
+            "y" => Ok(Code::KeyY),
+            "z" => Ok(Code::KeyZ),
+            "1" | "one" => Ok(Code::Digit1),
+            "2" | "two" => Ok(Code::Digit2),
+            "3" | "three" => Ok(Code::Digit3),
+            "4" | "four" => Ok(Code::Digit4),
+            "5" | "five" => Ok(Code::Digit5),
+            "6" | "six" => Ok(Code::Digit6),
+            "7" | "seven" => Ok(Code::Digit7),
+            "8" | "eight" => Ok(Code::Digit8),
+            "9" | "nine" => Ok(Code::Digit9),
+            "0" | "zero" => Ok(Code::Digit0),
+            "f1" => Ok(Code::F1),
+            "f2" => Ok(Code::F2),
+            "f3" => Ok(Code::F3),
+            "f4" => Ok(Code::F4),
+            "f5" => Ok(Code::F5),
+            "f6" => Ok(Code::F6),
+            "f7" => Ok(Code::F7),
+            "f8" => Ok(Code::F8),
+            "f9" => Ok(Code::F9),
+            "f10" => Ok(Code::F10),
+            "f11" => Ok(Code::F11),
+            "f12" => Ok(Code::F12),
+            "space" => Ok(Code::Space),
+            "escape" | "esc" => Ok(Code::Escape),
+            "return" | "enter" => Ok(Code::Enter),
+            "tab" => Ok(Code::Tab),
+            "backspace" => Ok(Code::Backspace),
+            "insert" => Ok(Code::Insert),
+            "delete" => Ok(Code::Delete),
+            "home" => Ok(Code::Home),
+            "end" => Ok(Code::End),
+            "pageup" => Ok(Code::PageUp),
+            "pagedown" => Ok(Code::PageDown),
+            "up" => Ok(Code::ArrowUp),
+            "down" => Ok(Code::ArrowDown),
+            "left" => Ok(Code::ArrowLeft),
+            "right" => Ok(Code::ArrowRight),
             _ => Err(anyhow!("Unknown key: {}", key_str)),
         }
     }
     
     /// Get the action receiver
-    pub fn get_receiver(&self) -> Receiver<HotkeyAction> {
-        self.action_receiver.clone()
+    pub fn get_receiver(&self) -> &Receiver<HotkeyAction> {
+        &self.action_receiver
     }
     
     /// Start listening for hotkeys
     pub fn start_listening(self) -> Result<thread::JoinHandle<()>> {
-        let manager = self.manager;
         let sender = self.action_sender;
         let hotkeys = self.hotkeys;
         

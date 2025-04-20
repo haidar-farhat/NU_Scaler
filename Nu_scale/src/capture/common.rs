@@ -106,14 +106,18 @@ pub fn start_live_capture_thread(
     buffer: Arc<FrameBuffer>,
     stop_signal: Arc<Mutex<bool>>,
 ) -> Result<thread::JoinHandle<Result<()>>> {
+    // Clone Arc references for the closure
+    let buffer_clone = Arc::clone(&buffer);
+    let stop_signal_clone = Arc::clone(&stop_signal);
+    
     let handle = thread::spawn(move || {
         let mut capturer = super::create_capturer()?;
         
         // Create a callback function that will add frames to the buffer
-        let mut callback = |frame: &RgbaImage| -> Result<bool> {
+        let mut callback = move |frame: &RgbaImage| -> Result<bool> {
             // Check if we should stop
             let should_stop = {
-                let guard = stop_signal.lock().map_err(|_| anyhow::anyhow!("Mutex lock failed"))?;
+                let guard = stop_signal_clone.lock().map_err(|_| anyhow::anyhow!("Mutex lock failed"))?;
                 *guard
             };
             
@@ -122,7 +126,7 @@ pub fn start_live_capture_thread(
             }
             
             // Add frame to buffer
-            buffer.add_frame(frame.clone())?;
+            buffer_clone.add_frame(frame.clone())?;
             
             Ok(true)
         };
@@ -144,6 +148,10 @@ pub fn process_frame_buffer<F>(
 where
     F: FnMut(&RgbaImage) -> Result<()> + Send + 'static,
 {
+    // Clone Arc references for the closure
+    let buffer_clone = Arc::clone(&buffer);
+    let stop_signal_clone = Arc::clone(&stop_signal);
+    
     let handle = thread::spawn(move || {
         let frame_duration = std::time::Duration::from_secs_f64(1.0 / fps as f64);
         let mut next_frame_time = std::time::Instant::now();
@@ -152,7 +160,7 @@ where
         loop {
             // Check if we should stop
             let should_stop = {
-                let guard = stop_signal.lock().map_err(|_| anyhow::anyhow!("Mutex lock failed"))?;
+                let guard = stop_signal_clone.lock().map_err(|_| anyhow::anyhow!("Mutex lock failed"))?;
                 *guard
             };
             
@@ -161,7 +169,7 @@ where
             }
             
             // Get the latest frame
-            if let Some(frame) = buffer.get_latest_frame()? {
+            if let Some(frame) = buffer_clone.get_latest_frame()? {
                 // Process the frame
                 frame_processor(&frame)?;
             }

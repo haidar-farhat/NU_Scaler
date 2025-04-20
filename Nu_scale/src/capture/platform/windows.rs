@@ -10,6 +10,7 @@ use windows::{
 use crate::capture::{ScreenCapture, CaptureTarget, CaptureError};
 use super::{WindowId, WindowInfo, WindowGeometry};
 use once_cell::sync::Lazy;
+use std::sync::Mutex;
 
 /// Windows implementation of screen capture
 pub struct PlatformScreenCapture {
@@ -19,51 +20,63 @@ pub struct PlatformScreenCapture {
     cached_windows: Vec<WindowInfo>,
 }
 
-/// Static callback for window enumeration
-static mut WINDOW_LIST: Lazy<Vec<WindowInfo>> = Lazy::new(|| Vec::new());
+// Thread-safe window list for enumerator callback
+static WINDOW_LIST: Lazy<Mutex<Vec<WindowInfo>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
-/// Unsafe Windows callback for window enumeration
+/// Callback for EnumWindows
 unsafe extern "system" fn enum_windows_callback(hwnd: HWND, _: LPARAM) -> BOOL {
     let mut title = [0u16; 512];
     let mut class_name = [0u16; 512];
     
-    // Skip windows with no title or invisible windows
-    if GetWindowTextW(hwnd, &mut title) == 0 || !IsWindowVisible(hwnd) {
+    // Check if window is visible
+    if unsafe { GetWindowTextW(hwnd, &mut title) } == 0 || !unsafe { IsWindowVisible(hwnd) }.as_bool() {
         return TRUE;
     }
     
-    GetClassNameW(hwnd, &mut class_name);
+    // Get window class
+    let class_len = unsafe { GetClassNameW(hwnd, &mut class_name) } as usize;
     
     // Get window rect
     let mut rect = RECT::default();
-    GetWindowRect(hwnd, &mut rect);
+    unsafe { GetWindowRect(hwnd, &mut rect) };
     
-    // Convert to our WindowInfo struct
-    let title = String::from_utf16_lossy(&title[..GetWindowTextLengthW(hwnd) as usize]);
-    let class = String::from_utf16_lossy(&class_name[..GetClassNameW(hwnd, &mut class_name) as usize]);
+    // Get title text
+    let title_len = unsafe { GetWindowTextLengthW(hwnd) } as usize;
+    let title = String::from_utf16_lossy(&title[..title_len]);
+    let class = String::from_utf16_lossy(&class_name[..class_len]);
     
+    // Get window placement info (for minimized state)
     let mut placement = WINDOWPLACEMENT {
         length: size_of::<WINDOWPLACEMENT>() as u32,
         ..Default::default()
     };
-    GetWindowPlacement(hwnd, &mut placement);
+    unsafe { GetWindowPlacement(hwnd, &mut placement) };
     
+    // Create window info
     let window_info = WindowInfo {
         id: WindowId::Windows(hwnd.0 as usize),
         title,
-        class: Some(class),
+        class: if class.len() > 0 {
+            Some(class)
+        } else {
+            None
+        },
         geometry: WindowGeometry::new(
-            rect.left,
-            rect.top,
+            rect.left, 
+            rect.top, 
             (rect.right - rect.left) as u32,
-            (rect.bottom - rect.top) as u32,
+            (rect.bottom - rect.top) as u32
         ),
-        visible: IsWindowVisible(hwnd).as_bool(),
-        minimized: placement.showCmd == SW_SHOWMINIMIZED as u32,
-        fullscreen: is_fullscreen(hwnd),
+        visible: unsafe { IsWindowVisible(hwnd) }.as_bool(),
+        minimized: placement.showCmd.0 == SW_SHOWMINIMIZED.0,
+        fullscreen: unsafe { is_fullscreen(hwnd) },
     };
     
-    WINDOW_LIST.push(window_info);
+    // Add to window list in a thread-safe way
+    if let Ok(mut list) = WINDOW_LIST.lock() {
+        list.push(window_info);
+    }
+    
     TRUE
 }
 
@@ -72,14 +85,14 @@ unsafe fn is_fullscreen(hwnd: HWND) -> bool {
     let mut window_rect = RECT::default();
     let mut screen_rect = RECT::default();
     
-    if GetWindowRect(hwnd, &mut window_rect).is_ok() {
-        let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+    if unsafe { GetWindowRect(hwnd, &mut window_rect) }.as_bool() {
+        let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
         let mut monitor_info = MONITORINFO {
             cbSize: size_of::<MONITORINFO>() as u32,
             ..Default::default()
         };
         
-        if GetMonitorInfoW(monitor, &mut monitor_info).is_ok() {
+        if unsafe { GetMonitorInfoW(monitor, &mut monitor_info) }.as_bool() {
             screen_rect = monitor_info.rcMonitor;
             
             // Compare if window covers the entire monitor
@@ -122,52 +135,54 @@ impl PlatformScreenCapture {
     /// Captures a window by HWND
     unsafe fn capture_window(&self, hwnd: HWND) -> Result<RgbaImage> {
         // Get window DC
-        let window_dc = GetDC(hwnd);
+        let window_dc = unsafe { GetDC(hwnd) };
         if window_dc.is_invalid() {
             return Err(anyhow!(CaptureError::CaptureFailed("Failed to get window DC".into())));
         }
         
         // Get window dimensions
         let mut rect = RECT::default();
-        GetClientRect(hwnd, &mut rect);
+        unsafe { GetClientRect(hwnd, &mut rect) };
         let width = rect.right as u32;
         let height = rect.bottom as u32;
         
         if width == 0 || height == 0 {
-            ReleaseDC(hwnd, window_dc);
+            unsafe { ReleaseDC(hwnd, window_dc) };
             return Err(anyhow!(CaptureError::CaptureFailed("Window has zero size".into())));
         }
         
         // Create compatible DC and bitmap
-        let compatible_dc = CreateCompatibleDC(window_dc);
+        let compatible_dc = unsafe { CreateCompatibleDC(window_dc) };
         if compatible_dc.is_invalid() {
-            ReleaseDC(hwnd, window_dc);
+            unsafe { ReleaseDC(hwnd, window_dc) };
             return Err(anyhow!(CaptureError::CaptureFailed("Failed to create compatible DC".into())));
         }
         
-        let bitmap = CreateCompatibleBitmap(window_dc, width as i32, height as i32);
+        let bitmap = unsafe { CreateCompatibleBitmap(window_dc, width as i32, height as i32) };
         if bitmap.is_invalid() {
-            DeleteDC(compatible_dc);
-            ReleaseDC(hwnd, window_dc);
+            unsafe { DeleteDC(compatible_dc) };
+            unsafe { ReleaseDC(hwnd, window_dc) };
             return Err(anyhow!(CaptureError::CaptureFailed("Failed to create compatible bitmap".into())));
         }
         
         // Select bitmap into DC
-        let old_bitmap = SelectObject(compatible_dc, bitmap);
+        let old_bitmap = unsafe { SelectObject(compatible_dc, bitmap) };
         
         // Copy window content to bitmap
-        if !BitBlt(
-            compatible_dc,
-            0, 0,
-            width as i32, height as i32,
-            window_dc,
-            0, 0,
-            SRCCOPY,
-        ).as_bool() {
-            SelectObject(compatible_dc, old_bitmap);
-            DeleteObject(bitmap);
-            DeleteDC(compatible_dc);
-            ReleaseDC(hwnd, window_dc);
+        if !unsafe { 
+            BitBlt(
+                compatible_dc,
+                0, 0,
+                width as i32, height as i32,
+                window_dc,
+                0, 0,
+                SRCCOPY,
+            )
+        }.as_bool() {
+            unsafe { SelectObject(compatible_dc, old_bitmap) };
+            unsafe { DeleteObject(bitmap) };
+            unsafe { DeleteDC(compatible_dc) };
+            unsafe { ReleaseDC(hwnd, window_dc) };
             return Err(anyhow!(CaptureError::CaptureFailed("BitBlt failed".into())));
         }
         
@@ -186,30 +201,32 @@ impl PlatformScreenCapture {
         let mut buffer = vec![0u8; (width * height * 4) as usize];
         
         // Get bitmap bits
-        if GetDIBits(
-            compatible_dc,
-            bitmap,
-            0,
-            height,
-            Some(buffer.as_mut_ptr() as *mut std::ffi::c_void),
-            &mut BITMAPINFO {
-                bmiHeader: bitmap_info,
-                bmiColors: [RGBQUAD::default()],
-            },
-            DIB_RGB_COLORS,
-        ) == 0 {
-            SelectObject(compatible_dc, old_bitmap);
-            DeleteObject(bitmap);
-            DeleteDC(compatible_dc);
-            ReleaseDC(hwnd, window_dc);
+        if unsafe {
+            GetDIBits(
+                compatible_dc,
+                bitmap,
+                0,
+                height,
+                Some(buffer.as_mut_ptr() as *mut std::ffi::c_void),
+                &mut BITMAPINFO {
+                    bmiHeader: bitmap_info,
+                    bmiColors: [RGBQUAD::default()],
+                },
+                DIB_RGB_COLORS,
+            )
+        } == 0 {
+            unsafe { SelectObject(compatible_dc, old_bitmap) };
+            unsafe { DeleteObject(bitmap) };
+            unsafe { DeleteDC(compatible_dc) };
+            unsafe { ReleaseDC(hwnd, window_dc) };
             return Err(anyhow!(CaptureError::CaptureFailed("GetDIBits failed".into())));
         }
         
         // Clean up
-        SelectObject(compatible_dc, old_bitmap);
-        DeleteObject(bitmap);
-        DeleteDC(compatible_dc);
-        ReleaseDC(hwnd, window_dc);
+        unsafe { SelectObject(compatible_dc, old_bitmap) };
+        unsafe { DeleteObject(bitmap) };
+        unsafe { DeleteDC(compatible_dc) };
+        unsafe { ReleaseDC(hwnd, window_dc) };
         
         // Convert to image::RgbaImage (BGRA -> RGBA)
         let mut image = RgbaImage::new(width, height);
@@ -231,36 +248,38 @@ impl PlatformScreenCapture {
     /// Captures the full screen
     unsafe fn capture_screen(&self) -> Result<RgbaImage> {
         // Get screen dimensions
-        let screen_width = GetSystemMetrics(SM_CXSCREEN);
-        let screen_height = GetSystemMetrics(SM_CYSCREEN);
+        let screen_width = unsafe { GetSystemMetrics(SM_CXSCREEN) };
+        let screen_height = unsafe { GetSystemMetrics(SM_CYSCREEN) };
         
         // Create compatible DC and bitmap
-        let compatible_dc = CreateCompatibleDC(self.screen_dc);
+        let compatible_dc = unsafe { CreateCompatibleDC(self.screen_dc) };
         if compatible_dc.is_invalid() {
             return Err(anyhow!(CaptureError::CaptureFailed("Failed to create compatible DC".into())));
         }
         
-        let bitmap = CreateCompatibleBitmap(self.screen_dc, screen_width, screen_height);
+        let bitmap = unsafe { CreateCompatibleBitmap(self.screen_dc, screen_width, screen_height) };
         if bitmap.is_invalid() {
-            DeleteDC(compatible_dc);
+            unsafe { DeleteDC(compatible_dc) };
             return Err(anyhow!(CaptureError::CaptureFailed("Failed to create compatible bitmap".into())));
         }
         
         // Select bitmap into DC
-        let old_bitmap = SelectObject(compatible_dc, bitmap);
+        let old_bitmap = unsafe { SelectObject(compatible_dc, bitmap) };
         
         // Copy screen content to bitmap
-        if !BitBlt(
-            compatible_dc,
-            0, 0,
-            screen_width, screen_height,
-            self.screen_dc,
-            0, 0,
-            SRCCOPY,
-        ).as_bool() {
-            SelectObject(compatible_dc, old_bitmap);
-            DeleteObject(bitmap);
-            DeleteDC(compatible_dc);
+        if !unsafe {
+            BitBlt(
+                compatible_dc,
+                0, 0,
+                screen_width, screen_height,
+                self.screen_dc,
+                0, 0,
+                SRCCOPY,
+            )
+        }.as_bool() {
+            unsafe { SelectObject(compatible_dc, old_bitmap) };
+            unsafe { DeleteObject(bitmap) };
+            unsafe { DeleteDC(compatible_dc) };
             return Err(anyhow!(CaptureError::CaptureFailed("BitBlt failed".into())));
         }
         
@@ -281,28 +300,30 @@ impl PlatformScreenCapture {
         let mut buffer = vec![0u8; (width * height * 4) as usize];
         
         // Get bitmap bits
-        if GetDIBits(
-            compatible_dc,
-            bitmap,
-            0,
-            height,
-            Some(buffer.as_mut_ptr() as *mut std::ffi::c_void),
-            &mut BITMAPINFO {
-                bmiHeader: bitmap_info,
-                bmiColors: [RGBQUAD::default()],
-            },
-            DIB_RGB_COLORS,
-        ) == 0 {
-            SelectObject(compatible_dc, old_bitmap);
-            DeleteObject(bitmap);
-            DeleteDC(compatible_dc);
+        if unsafe {
+            GetDIBits(
+                compatible_dc,
+                bitmap,
+                0,
+                height,
+                Some(buffer.as_mut_ptr() as *mut std::ffi::c_void),
+                &mut BITMAPINFO {
+                    bmiHeader: bitmap_info,
+                    bmiColors: [RGBQUAD::default()],
+                },
+                DIB_RGB_COLORS,
+            )
+        } == 0 {
+            unsafe { SelectObject(compatible_dc, old_bitmap) };
+            unsafe { DeleteObject(bitmap) };
+            unsafe { DeleteDC(compatible_dc) };
             return Err(anyhow!(CaptureError::CaptureFailed("GetDIBits failed".into())));
         }
         
         // Clean up
-        SelectObject(compatible_dc, old_bitmap);
-        DeleteObject(bitmap);
-        DeleteDC(compatible_dc);
+        unsafe { SelectObject(compatible_dc, old_bitmap) };
+        unsafe { DeleteObject(bitmap) };
+        unsafe { DeleteDC(compatible_dc) };
         
         // Convert to image::RgbaImage (BGRA -> RGBA)
         let mut image = RgbaImage::new(width, height);
@@ -324,32 +345,32 @@ impl PlatformScreenCapture {
     /// Captures a specific region of the screen
     unsafe fn capture_region(&self, x: i32, y: i32, width: u32, height: u32) -> Result<RgbaImage> {
         // Create compatible DC and bitmap
-        let compatible_dc = CreateCompatibleDC(self.screen_dc);
+        let compatible_dc = unsafe { CreateCompatibleDC(self.screen_dc) };
         if compatible_dc.is_invalid() {
             return Err(anyhow!(CaptureError::CaptureFailed("Failed to create compatible DC".into())));
         }
         
-        let bitmap = CreateCompatibleBitmap(self.screen_dc, width as i32, height as i32);
+        let bitmap = unsafe { CreateCompatibleBitmap(self.screen_dc, width as i32, height as i32) };
         if bitmap.is_invalid() {
-            DeleteDC(compatible_dc);
+            unsafe { DeleteDC(compatible_dc) };
             return Err(anyhow!(CaptureError::CaptureFailed("Failed to create compatible bitmap".into())));
         }
         
         // Select bitmap into DC
-        let old_bitmap = SelectObject(compatible_dc, bitmap);
+        let old_bitmap = unsafe { SelectObject(compatible_dc, bitmap) };
         
         // Copy screen content to bitmap
-        if !BitBlt(
+        if !unsafe { BitBlt(
             compatible_dc,
             0, 0,
             width as i32, height as i32,
             self.screen_dc,
             x, y,
             SRCCOPY,
-        ).as_bool() {
-            SelectObject(compatible_dc, old_bitmap);
-            DeleteObject(bitmap);
-            DeleteDC(compatible_dc);
+        ) }.as_bool() {
+            unsafe { SelectObject(compatible_dc, old_bitmap) };
+            unsafe { DeleteObject(bitmap) };
+            unsafe { DeleteDC(compatible_dc) };
             return Err(anyhow!(CaptureError::CaptureFailed("BitBlt failed".into())));
         }
         
@@ -368,7 +389,7 @@ impl PlatformScreenCapture {
         let mut buffer = vec![0u8; (width * height * 4) as usize];
         
         // Get bitmap bits
-        if GetDIBits(
+        if unsafe { GetDIBits(
             compatible_dc,
             bitmap,
             0,
@@ -379,17 +400,17 @@ impl PlatformScreenCapture {
                 bmiColors: [RGBQUAD::default()],
             },
             DIB_RGB_COLORS,
-        ) == 0 {
-            SelectObject(compatible_dc, old_bitmap);
-            DeleteObject(bitmap);
-            DeleteDC(compatible_dc);
+        ) } == 0 {
+            unsafe { SelectObject(compatible_dc, old_bitmap) };
+            unsafe { DeleteObject(bitmap) };
+            unsafe { DeleteDC(compatible_dc) };
             return Err(anyhow!(CaptureError::CaptureFailed("GetDIBits failed".into())));
         }
         
         // Clean up
-        SelectObject(compatible_dc, old_bitmap);
-        DeleteObject(bitmap);
-        DeleteDC(compatible_dc);
+        unsafe { SelectObject(compatible_dc, old_bitmap) };
+        unsafe { DeleteObject(bitmap) };
+        unsafe { DeleteDC(compatible_dc) };
         
         // Convert to image::RgbaImage (BGRA -> RGBA)
         let mut image = RgbaImage::new(width, height);
@@ -411,9 +432,9 @@ impl PlatformScreenCapture {
     /// Updates the cached window list
     fn update_window_list(&mut self) -> Result<()> {
         unsafe {
-            WINDOW_LIST.clear();
+            WINDOW_LIST.lock().unwrap().clear();
             EnumWindows(Some(enum_windows_callback), LPARAM(0));
-            self.cached_windows = WINDOW_LIST.clone();
+            self.cached_windows = WINDOW_LIST.lock().unwrap().clone();
         }
         Ok(())
     }
