@@ -52,6 +52,30 @@ pub trait Upscaler {
     
     // Set the quality level
     fn set_quality(&mut self, quality: UpscalingQuality) -> Result<()>;
+    
+    /// Check if the upscaler needs initialization
+    /// Returns true if the upscaler has not been initialized or if it needs re-initialization
+    fn needs_initialization(&self) -> bool {
+        // Default implementation returns false
+        // Can be overridden by implementations that track initialization state
+        false
+    }
+    
+    /// Get the current input width
+    /// Returns the width of input images this upscaler is configured for
+    fn input_width(&self) -> u32 {
+        // Default implementation returns 0
+        // Must be overridden by implementations that need to track input dimensions
+        0
+    }
+    
+    /// Get the current input height
+    /// Returns the height of input images this upscaler is configured for
+    fn input_height(&self) -> u32 {
+        // Default implementation returns 0
+        // Must be overridden by implementations that need to track input dimensions
+        0
+    }
 }
 
 // Factory function to create an upscaler based on the technology
