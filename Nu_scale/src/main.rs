@@ -2,9 +2,13 @@ mod capture;
 mod ui;
 
 use anyhow::Result;
+#[cfg(feature = "capture_opencv")]
 use std::path::Path;
+#[cfg(feature = "capture_opencv")]
 use std::sync::{Arc, Mutex};
+#[cfg(feature = "capture_opencv")]
 use std::time::{Duration, Instant};
+#[cfg(feature = "capture_opencv")]
 use capture::{CaptureTarget, common, window_finder};
 
 fn main() -> Result<()> {
@@ -13,7 +17,11 @@ fn main() -> Result<()> {
     
     // If we have any arguments, run the CLI version
     if args.len() > 1 && args[1] == "--cli" {
+        #[cfg(feature = "capture_opencv")]
         run_cli_demo()?;
+        
+        #[cfg(not(feature = "capture_opencv"))]
+        println!("CLI demo requires OpenCV support. Please compile with the 'capture_opencv' feature.");
     } else {
         // Otherwise, run the UI version
         ui::run_ui()?;
@@ -23,6 +31,7 @@ fn main() -> Result<()> {
 }
 
 /// Run the command-line interface demo
+#[cfg(feature = "capture_opencv")]
 fn run_cli_demo() -> Result<()> {
     println!("OS-Specific Screen Capture Demo");
     
@@ -96,6 +105,7 @@ fn run_cli_demo() -> Result<()> {
 }
 
 /// Demonstrates the live capture functionality
+#[cfg(feature = "capture_opencv")]
 fn run_live_capture_demo() -> Result<()> {
     println!("Starting live capture demo (will capture 100 frames)...");
     
