@@ -75,4 +75,18 @@ pub fn is_fsr_supported() -> bool {
 /// Check if DLSS is supported
 pub fn is_dlss_supported() -> bool {
     upscale::dlss::DlssUpscaler::is_supported()
+}
+
+/// Convert a string algorithm name to the UpscalingAlgorithm enum
+pub fn string_to_algorithm(alg_str: &str) -> Option<UpscalingAlgorithm> {
+    match alg_str.to_lowercase().as_str() {
+        "nearest" | "nearestneighbor" => Some(UpscalingAlgorithm::NearestNeighbor),
+        "bilinear" => Some(UpscalingAlgorithm::Bilinear),
+        "bicubic" => Some(UpscalingAlgorithm::Bicubic),
+        "lanczos2" => Some(UpscalingAlgorithm::Lanczos2),
+        "lanczos3" => Some(UpscalingAlgorithm::Lanczos3),
+        "mitchell" => Some(UpscalingAlgorithm::Mitchell),
+        "area" => Some(UpscalingAlgorithm::Area),
+        _ => None
+    }
 } 

@@ -1,9 +1,8 @@
 use serde::{Serialize, Deserialize};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use anyhow::{Result, anyhow};
 use dirs;
-use crate::upscale::common::UpscalingAlgorithm;
 
 /// Source type for capture
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -73,7 +72,7 @@ pub struct Profile {
     /// Upscaling quality preset
     pub upscaling_quality: UpscalingQuality,
     /// Specific upscaling algorithm when using fallback technology
-    pub upscaling_algorithm: Option<UpscalingAlgorithm>,
+    pub upscaling_algorithm: Option<String>,
     /// Enable overlay
     pub enable_overlay: bool,
     /// Hotkey for starting/stopping capture

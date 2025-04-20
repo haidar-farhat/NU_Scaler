@@ -1,10 +1,10 @@
-use anyhow::Result;
-use image::{DynamicImage, ImageBuffer, Rgba, RgbaImage};
+use anyhow::{Result, anyhow};
+use image::{DynamicImage, RgbaImage};
+use std::fs;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::thread;
-
-use super::{CaptureTarget, ScreenCapture, FrameCallback};
+use std::thread::{self, JoinHandle};
+use super::{CaptureTarget, ScreenCapture};
 
 /// Captures a screenshot and saves it to the specified path
 pub fn capture_screenshot(target: &CaptureTarget, output_path: &Path) -> Result<()> {

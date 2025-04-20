@@ -110,25 +110,16 @@ fn main() -> Result<()> {
             });
         
         // Get algorithm if specified
-        let algorithm = matches.value_of("algorithm").map(|alg_str| {
-            match alg_str.to_lowercase().as_str() {
-                "nearest" => UpscalingAlgorithm::NearestNeighbor,
-                "bilinear" => UpscalingAlgorithm::Bilinear,
-                "bicubic" => UpscalingAlgorithm::Bicubic,
-                "lanczos2" => UpscalingAlgorithm::Lanczos2,
-                "lanczos3" => UpscalingAlgorithm::Lanczos3,
-                "mitchell" => UpscalingAlgorithm::Mitchell,
-                "area" => UpscalingAlgorithm::Area,
-                _ => {
-                    eprintln!("Unknown algorithm: {}, using algorithm based on quality", alg_str);
-                    match quality {
-                        UpscalingQuality::Ultra => UpscalingAlgorithm::Lanczos3,
-                        UpscalingQuality::Quality => UpscalingAlgorithm::Lanczos2,
-                        UpscalingQuality::Balanced => UpscalingAlgorithm::Bicubic,
-                        UpscalingQuality::Performance => UpscalingAlgorithm::Bilinear,
-                    }
+        let algorithm = matches.value_of("algorithm").and_then(|alg_str| {
+            Nu_scaler::string_to_algorithm(alg_str).or_else(|| {
+                eprintln!("Unknown algorithm: {}, using algorithm based on quality", alg_str);
+                match quality {
+                    UpscalingQuality::Ultra => Some(UpscalingAlgorithm::Lanczos3),
+                    UpscalingQuality::Quality => Some(UpscalingAlgorithm::Lanczos2),
+                    UpscalingQuality::Balanced => Some(UpscalingAlgorithm::Bicubic),
+                    UpscalingQuality::Performance => Some(UpscalingAlgorithm::Bilinear),
                 }
-            }
+            })
         });
         
         // Perform upscaling
@@ -312,4 +303,9 @@ fn run_live_capture_demo() -> Result<()> {
     println!("Average FPS: {:.2}", fps);
     
     Ok(())
+}
+
+/// Utility function to convert a string algorithm name to the UpscalingAlgorithm enum
+fn string_to_algorithm(alg_str: &str) -> Option<Nu_scaler::UpscalingAlgorithm> {
+    Nu_scaler::string_to_algorithm(alg_str)
 }
