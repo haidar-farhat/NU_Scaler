@@ -5,6 +5,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use super::{CaptureTarget, ScreenCapture};
+use crate::upscale;
 
 /// Captures a screenshot and saves it to the specified path
 pub fn capture_screenshot(target: &CaptureTarget, output_path: &Path) -> Result<()> {
@@ -17,6 +18,39 @@ pub fn capture_screenshot_image(target: &CaptureTarget) -> Result<DynamicImage> 
     let mut capturer = super::create_capturer()?;
     let image = capturer.capture_frame(target)?;
     Ok(DynamicImage::ImageRgba8(image))
+}
+
+/// Captures and upscales content to fullscreen dimensions
+pub fn capture_and_upscale_to_fullscreen(
+    target: &CaptureTarget,
+    technology: upscale::UpscalingTechnology,
+    quality: upscale::UpscalingQuality,
+    algorithm: Option<upscale::common::UpscalingAlgorithm>,
+) -> Result<RgbaImage> {
+    let mut capturer = super::create_capturer()?;
+    
+    // Get source image
+    let source_image = capturer.capture_frame(target)?;
+    
+    // Get fullscreen dimensions
+    let (screen_width, screen_height) = capturer.get_primary_screen_dimensions()?;
+    
+    // Create and initialize upscaler
+    let mut upscaler = upscale::create_upscaler(technology, quality, algorithm)?;
+    upscaler.initialize(
+        source_image.width(),
+        source_image.height(),
+        screen_width,
+        screen_height
+    )?;
+    
+    // Upscale the image
+    let upscaled_image = upscaler.upscale(&source_image)?;
+    
+    // Cleanup
+    upscaler.cleanup()?;
+    
+    Ok(upscaled_image)
 }
 
 /// Lists all available windows with their titles and IDs
@@ -97,6 +131,89 @@ impl FrameBuffer {
             max_size: self.max_size,
         }
     }
+}
+
+/// Start fullscreen upscaled capture in a separate thread
+pub fn start_fullscreen_upscaled_capture(
+    target: CaptureTarget,
+    fps: u32,
+    technology: upscale::UpscalingTechnology,
+    quality: upscale::UpscalingQuality,
+    algorithm: Option<upscale::common::UpscalingAlgorithm>,
+    buffer: Arc<FrameBuffer>,
+    stop_signal: Arc<Mutex<bool>>,
+) -> Result<thread::JoinHandle<Result<()>>> {
+    // Clone Arc references for the closure
+    let buffer_clone = Arc::clone(&buffer);
+    let stop_signal_clone = Arc::clone(&stop_signal);
+    
+    let handle = thread::spawn(move || {
+        let mut capturer = super::create_capturer()?;
+        
+        // Get fullscreen dimensions
+        let (screen_width, screen_height) = capturer.get_primary_screen_dimensions()?;
+        
+        // Create upscaler
+        let mut upscaler = upscale::create_upscaler(technology, quality, algorithm)?;
+        
+        // Calculate frame delay based on FPS
+        let frame_duration = std::time::Duration::from_secs_f64(1.0 / fps as f64);
+        let mut next_frame_time = std::time::Instant::now();
+        
+        // Capture loop
+        loop {
+            // Check if we should stop
+            let should_stop = {
+                let guard = stop_signal_clone.lock().map_err(|_| anyhow!("Mutex lock failed"))?;
+                *guard
+            };
+            
+            if should_stop {
+                break;
+            }
+            
+            // Capture frame
+            let source_image = capturer.capture_frame(&target)?;
+            
+            // Initialize upscaler if dimensions changed
+            if upscaler.needs_initialization() || 
+               source_image.width() != upscaler.input_width() || 
+               source_image.height() != upscaler.input_height() {
+                upscaler.initialize(
+                    source_image.width(),
+                    source_image.height(),
+                    screen_width,
+                    screen_height
+                )?;
+            }
+            
+            // Upscale the frame
+            let upscaled_frame = upscaler.upscale(&source_image)?;
+            
+            // Add to buffer
+            buffer_clone.add_frame(upscaled_frame)?;
+            
+            // Sleep until next frame
+            next_frame_time += frame_duration;
+            let now = std::time::Instant::now();
+            
+            if next_frame_time > now {
+                std::thread::sleep(next_frame_time.duration_since(now));
+            } else {
+                // We're behind schedule - adjust next frame time
+                let behind = now.duration_since(next_frame_time);
+                let frames_behind = (behind.as_secs_f64() / frame_duration.as_secs_f64()).ceil() as u32;
+                next_frame_time = now + frame_duration.mul_f32(0.5); // Try to catch up gradually
+            }
+        }
+        
+        // Cleanup
+        upscaler.cleanup()?;
+        
+        Ok(())
+    });
+    
+    Ok(handle)
 }
 
 /// Start live capture in a separate thread, storing frames in a buffer
