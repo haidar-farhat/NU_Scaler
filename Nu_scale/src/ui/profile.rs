@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use anyhow::{Result, anyhow};
 use dirs;
+use crate::upscale::common::UpscalingAlgorithm;
 
 /// Source type for capture
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -71,6 +72,8 @@ pub struct Profile {
     pub upscaling_tech: UpscalingTechnology,
     /// Upscaling quality preset
     pub upscaling_quality: UpscalingQuality,
+    /// Specific upscaling algorithm when using fallback technology
+    pub upscaling_algorithm: Option<UpscalingAlgorithm>,
     /// Enable overlay
     pub enable_overlay: bool,
     /// Hotkey for starting/stopping capture
@@ -88,6 +91,7 @@ impl Default for Profile {
             scale_factor: 1.5,
             upscaling_tech: UpscalingTechnology::None,
             upscaling_quality: UpscalingQuality::Balanced,
+            upscaling_algorithm: None, // Let quality determine the algorithm
             enable_overlay: false,
             hotkey: "Ctrl+Alt+C".to_string(),
             fps: 30,

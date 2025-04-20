@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 #[cfg(feature = "capture_opencv")]
 use capture::{CaptureTarget, common, window_finder};
 use Nu_scaler::upscale::{UpscalingTechnology, UpscalingQuality};
+use Nu_scaler::UpscalingAlgorithm;
 
 fn main() -> Result<()> {
     // Parse command line arguments
@@ -57,6 +58,13 @@ fn main() -> Result<()> {
                         .short('s')
                         .takes_value(true)
                         .default_value("2.0"),
+                )
+                .arg(
+                    Arg::with_name("algorithm")
+                        .help("Upscaling algorithm for traditional upscalers (nearest, bilinear, bicubic, lanczos2, lanczos3, mitchell, area)")
+                        .long("algorithm")
+                        .short('a')
+                        .takes_value(true),
                 ),
         )
         .get_matches();
@@ -101,11 +109,38 @@ fn main() -> Result<()> {
                 2.0
             });
         
+        // Get algorithm if specified
+        let algorithm = matches.value_of("algorithm").map(|alg_str| {
+            match alg_str.to_lowercase().as_str() {
+                "nearest" => UpscalingAlgorithm::NearestNeighbor,
+                "bilinear" => UpscalingAlgorithm::Bilinear,
+                "bicubic" => UpscalingAlgorithm::Bicubic,
+                "lanczos2" => UpscalingAlgorithm::Lanczos2,
+                "lanczos3" => UpscalingAlgorithm::Lanczos3,
+                "mitchell" => UpscalingAlgorithm::Mitchell,
+                "area" => UpscalingAlgorithm::Area,
+                _ => {
+                    eprintln!("Unknown algorithm: {}, using algorithm based on quality", alg_str);
+                    match quality {
+                        UpscalingQuality::Ultra => UpscalingAlgorithm::Lanczos3,
+                        UpscalingQuality::Quality => UpscalingAlgorithm::Lanczos2,
+                        UpscalingQuality::Balanced => UpscalingAlgorithm::Bicubic,
+                        UpscalingQuality::Performance => UpscalingAlgorithm::Bilinear,
+                    }
+                }
+            }
+        });
+        
         // Perform upscaling
         println!("Upscaling {} to {} using {:?} technology with {:?} quality at {}x scale",
             input_path, output_path, technology, quality, scale_factor);
-        
-        Nu_scaler::upscale_image(input_path, output_path, technology, quality, scale_factor)?;
+            
+        if let Some(alg) = algorithm {
+            println!("Using algorithm: {:?}", alg);
+            Nu_scaler::upscale_image_with_algorithm(input_path, output_path, technology, quality, scale_factor, alg)?;
+        } else {
+            Nu_scaler::upscale_image(input_path, output_path, technology, quality, scale_factor)?;
+        }
         println!("Upscaling completed successfully!");
         
         return Ok(());

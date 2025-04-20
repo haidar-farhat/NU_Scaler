@@ -8,6 +8,8 @@ pub mod upscale;
 
 // Import Upscaler trait for is_supported() methods
 use upscale::Upscaler;
+// Re-export upscaling algorithm types
+pub use upscale::common::UpscalingAlgorithm;
 
 /// Application version
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -36,12 +38,32 @@ pub fn upscale_image(
     quality: upscale::UpscalingQuality,
     scale_factor: f32,
 ) -> Result<()> {
-    upscale::upscale_image_file(
-        &std::path::Path::new(input_path),
-        &std::path::Path::new(output_path),
+    upscale::upscale_image(
+        input_path,
+        output_path,
         technology,
         quality,
         scale_factor,
+        None, // Use default algorithm based on quality
+    )
+}
+
+/// Upscale a single image file with specified algorithm
+pub fn upscale_image_with_algorithm(
+    input_path: &str,
+    output_path: &str,
+    technology: upscale::UpscalingTechnology,
+    quality: upscale::UpscalingQuality,
+    scale_factor: f32,
+    algorithm: UpscalingAlgorithm,
+) -> Result<()> {
+    upscale::upscale_image(
+        input_path,
+        output_path,
+        technology,
+        quality,
+        scale_factor,
+        Some(algorithm),
     )
 }
 
