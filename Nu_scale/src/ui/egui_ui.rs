@@ -3,11 +3,13 @@ use eframe::{self, egui};
 use egui::{Color32, RichText, Slider, TextEdit, Ui, Stroke, Rounding, Vec2, Frame};
 use std::sync::{Arc, Mutex};
 use image::RgbaImage;
-use egui::{TextureId, ColorImage, TextureOptions, TextureHandle};
+use egui::{TextureOptions, TextureHandle, ColorImage};
 
 use crate::capture;
 use super::profile::{Profile, CaptureSource, SystemPlatform, UpscalingTechnology, UpscalingQuality};
 use super::settings::AppSettings;
+
+// External crate imports were removed
 
 const ACCENT_COLOR: Color32 = Color32::from_rgb(0, 120, 215); // Blue accent
 const SUCCESS_COLOR: Color32 = Color32::from_rgb(25, 170, 88); // Green
@@ -193,6 +195,17 @@ impl AppState {
             }
             
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_space(8.0);
+                
+                // Fullscreen mode button
+                let fullscreen_button = ui.add(egui::Button::new(
+                    RichText::new("🖥️ Fullscreen Mode").size(14.0))
+                        .fill(Color32::from_rgb(0, 120, 215)));
+                
+                if fullscreen_button.clicked() {
+                    self.launch_fullscreen_mode();
+                }
+                
                 ui.add_space(8.0);
                 
                 if self.is_capturing {
@@ -804,6 +817,77 @@ impl AppState {
                     ui.label("Advanced settings will be available in future versions.");
                 });
             });
+        });
+    }
+
+    /// Launch the fullscreen upscaling mode with current profile settings
+    fn launch_fullscreen_mode(&mut self) {
+        // Create capture target from profile
+        let target = match &self.profile.source {
+            CaptureSource::Fullscreen => "fullscreen".to_string(),
+            CaptureSource::Window(title) => format!("window:{}", title),
+            CaptureSource::Region { x, y, width, height } => 
+                format!("region:{},{},{},{}", x, y, width, height),
+        };
+        
+        // Save the profile before launching fullscreen mode
+        if let Err(e) = self.profile.save() {
+            self.status_message = format!("Warning: Failed to save profile before launching fullscreen: {}", e);
+            self.status_message_type = StatusMessageType::Warning;
+        }
+        
+        // Update status to indicate we're launching fullscreen mode
+        self.status_message = "Launching fullscreen mode...".to_string();
+        self.status_message_type = StatusMessageType::Info;
+        
+        // Launch separate process for fullscreen mode 
+        let fps = self.profile.fps.to_string();
+        
+        // Get technology string
+        let tech = match self.profile.upscaling_tech {
+            UpscalingTechnology::None => "fallback",
+            UpscalingTechnology::FSR => "fsr",
+            UpscalingTechnology::DLSS => "dlss",
+            UpscalingTechnology::Fallback => "fallback",
+            _ => "fallback",
+        }.to_string();
+        
+        // Get quality string
+        let quality = match self.profile.upscaling_quality {
+            UpscalingQuality::Ultra => "ultra",
+            UpscalingQuality::Quality => "quality",
+            UpscalingQuality::Balanced => "balanced",
+            UpscalingQuality::Performance => "performance",
+        }.to_string();
+        
+        // Get algorithm if available
+        let algorithm = if self.profile.upscaling_tech == UpscalingTechnology::Fallback {
+            self.profile.upscaling_algorithm.clone()
+        } else {
+            None
+        };
+        
+        // Create and launch the subprocess
+        std::thread::spawn(move || {
+            use std::process::Command;
+            
+            let mut cmd = Command::new("cargo");
+            cmd.args(["run", "--", "fullscreen", 
+                      "--source", &target,
+                      "--fps", &fps,
+                      "--tech", &tech,
+                      "--quality", &quality]);
+                      
+            // Add algorithm if specified
+            if let Some(alg) = algorithm {
+                cmd.args(["--algorithm", &alg]);
+            }
+            
+            // Run the command
+            match cmd.status() {
+                Ok(_) => {},
+                Err(e) => eprintln!("Error launching fullscreen mode: {:?}", e),
+            }
         });
     }
 }
