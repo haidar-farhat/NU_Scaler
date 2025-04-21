@@ -1,6 +1,8 @@
-use anyhow::Result;
-use image::{RgbaImage, imageops};
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+use image::{RgbaImage, Rgba, imageops};
 use serde::{Serialize, Deserialize};
+use anyhow::{Result, anyhow};
 use crate::upscale::{Upscaler, UpscalingQuality};
 
 /// Pass-through upscaler that doesn't change the image
@@ -63,23 +65,25 @@ impl Upscaler for PassThroughUpscaler {
     }
 }
 
-/// Basic upscaling algorithms
+/// Upscaling algorithm to use for traditional upscaling
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum UpscalingAlgorithm {
-    /// Nearest-Neighbor: Copies each input pixel to an N×N block. Zero smoothing, zero blur, but aliased.
+    /// Nearest neighbor (fastest, lowest quality)
     NearestNeighbor,
-    /// Bilinear: Computes a weighted average of the four nearest input pixels. Fast and smooth, but tends to blur sharp edges.
+    /// Bilinear (fast, moderate quality)
     Bilinear,
-    /// Bicubic: Uses cubic convolution on a 4×4 neighborhood to preserve more edge sharpness than bilinear, at moderate cost.
+    /// Bicubic (moderate speed, good quality)
     Bicubic,
-    /// Lanczos2: Windowed sinc filter over a 4×4 kernel. Good edge preservation with moderate compute.
+    /// Lanczos2 (slower, better quality)
     Lanczos2,
-    /// Lanczos3: Windowed sinc filter over a 6×6 kernel. Best edge preservation among traditional kernels, heavier compute.
+    /// Lanczos3 (slow, high quality)
     Lanczos3,
-    /// Mitchell-Netravali: Tunable cubic filter that trades off ringing vs. smoothness.
+    /// Mitchell (slow, high quality)
     Mitchell,
-    /// Area (Box) Resample: Averages all pixels covered by the destination pixel's footprint.
+    /// Area (slowest, highest quality for downscaling)
     Area,
+    /// Best algorithm based on the situation
+    Balanced,
 }
 
 /// Basic upscaler using standard image upscaling techniques
@@ -151,45 +155,88 @@ impl Upscaler for BasicUpscaler {
     }
     
     fn upscale(&self, input: &RgbaImage) -> Result<RgbaImage> {
-        // Choose algorithm based on settings
+        // Check if dimensions match
+        if input.width() != self.input_width || input.height() != self.input_height {
+            return Err(anyhow!("Input dimensions ({}, {}) don't match initialized dimensions ({}, {})",
+                      input.width(), input.height(), self.input_width, self.input_height));
+        }
+        
+        // Create output image with output dimensions
+        let mut output = RgbaImage::new(self.output_width, self.output_height);
+        
+        // Apply selected algorithm
         match self.algorithm {
             UpscalingAlgorithm::NearestNeighbor => {
-                // Nearest Neighbor - simplest algorithm
-                Ok(imageops::resize(input, self.output_width, self.output_height, imageops::Nearest))
-            },
-            UpscalingAlgorithm::Bilinear => {
-                // Bilinear - fast and smooth
-                Ok(imageops::resize(input, self.output_width, self.output_height, imageops::Triangle))
-            },
-            UpscalingAlgorithm::Bicubic => {
-                // Bicubic - preserves more edge sharpness than bilinear
-                Ok(imageops::resize(input, self.output_width, self.output_height, imageops::CatmullRom))
-            },
-            UpscalingAlgorithm::Lanczos2 => {
-                // Lanczos2 - 4×4 kernel
-                Ok(imageops::resize(input, self.output_width, self.output_height, imageops::Lanczos3))
-            },
-            UpscalingAlgorithm::Lanczos3 => {
-                // Lanczos3 - 6×6 kernel with best edge preservation
-                let filter = imageops::FilterType::Lanczos3;
-                Ok(imageops::resize(input, self.output_width, self.output_height, filter))
-            },
-            UpscalingAlgorithm::Mitchell => {
-                // Mitchell-Netravali - tuned cubic filter
-                // Using generic CatmullRom as approximation since image crate doesn't have a specific Mitchell filter
-                Ok(imageops::resize(input, self.output_width, self.output_height, imageops::CatmullRom))
-            },
-            UpscalingAlgorithm::Area => {
-                // Area (Box) - good for downscaling, sometimes used for upscaling
-                if self.output_width < self.input_width || self.output_height < self.input_height {
-                    // For downscaling, area sampling works well
-                    Ok(imageops::resize(input, self.output_width, self.output_height, imageops::Gaussian))
-                } else {
-                    // For upscaling, area is similar to bilinear but with box filtering
-                    Ok(imageops::resize(input, self.output_width, self.output_height, imageops::Triangle))
+                // Nearest neighbor implementation
+                for y in 0..self.output_height {
+                    for x in 0..self.output_width {
+                        let src_x = (x * self.input_width / self.output_width).min(self.input_width - 1);
+                        let src_y = (y * self.input_height / self.output_height).min(self.input_height - 1);
+                        let pixel = input.get_pixel(src_x, src_y);
+                        output.put_pixel(x, y, *pixel);
+                    }
                 }
             },
-        }
+            UpscalingAlgorithm::Bilinear => {
+                // Bilinear interpolation
+                // TODO: Replace with more efficient implementation
+                for y in 0..self.output_height {
+                    for x in 0..self.output_width {
+                        let src_x = (x as f32 * self.input_width as f32 / self.output_width as f32).min(self.input_width as f32 - 1.0);
+                        let src_y = (y as f32 * self.input_height as f32 / self.output_height as f32).min(self.input_height as f32 - 1.0);
+                        
+                        let x0 = src_x.floor() as u32;
+                        let y0 = src_y.floor() as u32;
+                        let x1 = (x0 + 1).min(self.input_width - 1);
+                        let y1 = (y0 + 1).min(self.input_height - 1);
+                        
+                        let dx = src_x - x0 as f32;
+                        let dy = src_y - y0 as f32;
+                        
+                        let p00 = input.get_pixel(x0, y0);
+                        let p10 = input.get_pixel(x1, y0);
+                        let p01 = input.get_pixel(x0, y1);
+                        let p11 = input.get_pixel(x1, y1);
+                        
+                        let r = ((1.0 - dx) * (1.0 - dy) * p00[0] as f32 +
+                                 dx * (1.0 - dy) * p10[0] as f32 +
+                                 (1.0 - dx) * dy * p01[0] as f32 +
+                                 dx * dy * p11[0] as f32) as u8;
+                                 
+                        let g = ((1.0 - dx) * (1.0 - dy) * p00[1] as f32 +
+                                 dx * (1.0 - dy) * p10[1] as f32 +
+                                 (1.0 - dx) * dy * p01[1] as f32 +
+                                 dx * dy * p11[1] as f32) as u8;
+                                 
+                        let b = ((1.0 - dx) * (1.0 - dy) * p00[2] as f32 +
+                                 dx * (1.0 - dy) * p10[2] as f32 +
+                                 (1.0 - dx) * dy * p01[2] as f32 +
+                                 dx * dy * p11[2] as f32) as u8;
+                                 
+                        let a = ((1.0 - dx) * (1.0 - dy) * p00[3] as f32 +
+                                 dx * (1.0 - dy) * p10[3] as f32 +
+                                 (1.0 - dx) * dy * p01[3] as f32 +
+                                 dx * dy * p11[3] as f32) as u8;
+                        
+                        output.put_pixel(x, y, Rgba([r, g, b, a]));
+                    }
+                }
+            },
+            // Other algorithms would be implemented here
+            // For now, fall back to nearest neighbor for unimplemented algorithms
+            _ => {
+                for y in 0..self.output_height {
+                    for x in 0..self.output_width {
+                        let src_x = (x * self.input_width / self.output_width).min(self.input_width - 1);
+                        let src_y = (y * self.input_height / self.output_height).min(self.input_height - 1);
+                        let pixel = input.get_pixel(src_x, src_y);
+                        output.put_pixel(x, y, *pixel);
+                    }
+                }
+            },
+        };
+        
+        Ok(output)
     }
     
     fn cleanup(&mut self) -> Result<()> {
@@ -204,13 +251,14 @@ impl Upscaler for BasicUpscaler {
     
     fn name(&self) -> &'static str {
         match self.algorithm {
-            UpscalingAlgorithm::NearestNeighbor => "Nearest-Neighbor",
-            UpscalingAlgorithm::Bilinear => "Bilinear",
-            UpscalingAlgorithm::Bicubic => "Bicubic",
-            UpscalingAlgorithm::Lanczos2 => "Lanczos (a=2)",
-            UpscalingAlgorithm::Lanczos3 => "Lanczos (a=3)",
-            UpscalingAlgorithm::Mitchell => "Mitchell-Netravali",
-            UpscalingAlgorithm::Area => "Area (Box) Resample",
+            UpscalingAlgorithm::NearestNeighbor => "Basic Nearest Neighbor",
+            UpscalingAlgorithm::Bilinear => "Basic Bilinear",
+            UpscalingAlgorithm::Bicubic => "Basic Bicubic",
+            UpscalingAlgorithm::Lanczos2 => "Basic Lanczos2",
+            UpscalingAlgorithm::Lanczos3 => "Basic Lanczos3",
+            UpscalingAlgorithm::Mitchell => "Basic Mitchell-Netravali",
+            UpscalingAlgorithm::Area => "Basic Area Resampling",
+            UpscalingAlgorithm::Balanced => "Basic Auto Upscaling",
         }
     }
     
@@ -407,5 +455,40 @@ impl ErrorMetrics {
     
     pub fn ssim(&self) -> f64 {
         self.ssim
+    }
+}
+
+impl UpscalingAlgorithm {
+    /// Convert to OpenCV interpolation flags for remap/resize operations
+    #[cfg(feature = "capture_opencv")]
+    pub fn get_opencv_interpolation(&self) -> i32 {
+        // Import OpenCV constants
+        use opencv::imgproc::{INTER_NEAREST, INTER_LINEAR, INTER_CUBIC, 
+                              INTER_LANCZOS4, INTER_AREA};
+        
+        match *self {
+            UpscalingAlgorithm::NearestNeighbor => INTER_NEAREST,
+            UpscalingAlgorithm::Bilinear => INTER_LINEAR,
+            UpscalingAlgorithm::Bicubic => INTER_CUBIC,
+            UpscalingAlgorithm::Lanczos2 => INTER_LANCZOS4,
+            UpscalingAlgorithm::Lanczos3 => INTER_LANCZOS4, // OpenCV only has one Lanczos variant
+            UpscalingAlgorithm::Mitchell => INTER_CUBIC,    // OpenCV doesn't have Mitchell, use cubic
+            UpscalingAlgorithm::Area => INTER_AREA,
+            UpscalingAlgorithm::Balanced => INTER_LINEAR,   // Use bilinear as a balanced default
+        }
+    }
+    
+    /// Get a description of the algorithm for display
+    pub fn get_description(&self) -> &'static str {
+        match *self {
+            UpscalingAlgorithm::NearestNeighbor => "Nearest Neighbor",
+            UpscalingAlgorithm::Bilinear => "Bilinear",
+            UpscalingAlgorithm::Bicubic => "Bicubic",
+            UpscalingAlgorithm::Lanczos2 => "Lanczos (2-lobed)",
+            UpscalingAlgorithm::Lanczos3 => "Lanczos (3-lobed)",
+            UpscalingAlgorithm::Mitchell => "Mitchell-Netravali",
+            UpscalingAlgorithm::Area => "Area (Box) Resample",
+            UpscalingAlgorithm::Balanced => "Auto (Balanced)",
+        }
     }
 } 

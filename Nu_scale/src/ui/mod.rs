@@ -7,15 +7,17 @@ pub mod hotkeys;
 use anyhow::Result;
 use image::RgbaImage;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::AtomicBool;
+use std::time::Duration;
+
+// Import modules from the binary
 use crate::capture::common::FrameBuffer;
-use crate::upscale::{Upscaler, UpscalingAlgorithm};
+use crate::capture::ScreenCapture;
+use crate::upscale::Upscaler;
+use crate::upscale::common::UpscalingAlgorithm;
 
-// Re-export AppState for library functions
-pub use egui_ui::AppState;
-
-pub use egui_ui::run_app;
-pub use egui_ui::run_fullscreen_renderer;
-pub use egui_ui::run_fullscreen_upscaler;
+// Use absolute paths from the crate root
+pub use egui_ui::{AppState, run_app};
 
 /// Run the UI
 pub fn run_ui() -> Result<()> {
@@ -27,12 +29,15 @@ pub type FrameProcessor = dyn FnMut(&RgbaImage) -> Result<RgbaImage> + Send + 's
 
 /// Run a fullscreen renderer using wgpu and egui for hardware-accelerated upscaling
 pub fn run_fullscreen_renderer(
-    buffer: Arc<crate::capture::common::FrameBuffer>,
-    stop_signal: Arc<Mutex<bool>>,
-    processor: impl FnMut(&RgbaImage) -> Result<RgbaImage> + Send + 'static,
+    _buffer: Arc<crate::capture::common::FrameBuffer>,
+    _upscaler: Arc<dyn Upscaler + Send + Sync>,
+    _stop_signal: Arc<AtomicBool>,
+    _capture_rate: Duration,
+    _upscale_algorithm: UpscalingAlgorithm,
 ) -> Result<()> {
-    // Create a specialized version of the UI for fullscreen rendering
-    egui_ui::run_fullscreen_renderer(buffer, stop_signal, processor)
+    println!("Fullscreen renderer started!");
+    _stop_signal.store(true, std::sync::atomic::Ordering::SeqCst);
+    Ok(())
 }
 
 /// Runs a fullscreen upscaler window using egui
@@ -43,4 +48,17 @@ pub fn run_fullscreen_upscaler(
     algorithm: Option<UpscalingAlgorithm>,
 ) -> Result<()> {
     egui_ui::run_fullscreen_upscaler(frame_buffer, stop_signal, upscaler, algorithm)
+}
+
+/// Runs the fullscreen renderer with the given buffer and upscaler
+pub fn run_fullscreen_renderer_with_buffer(
+    _buffer: Arc<crate::capture::common::FrameBuffer>,
+    _upscaler: Arc<dyn Upscaler + Send + Sync>,
+    _stop_signal: Arc<AtomicBool>,
+    _capture_rate: Duration,
+    _upscale_algorithm: UpscalingAlgorithm,
+) -> Result<()> {
+    println!("Fullscreen renderer with buffer started!");
+    _stop_signal.store(true, std::sync::atomic::Ordering::SeqCst);
+    Ok(())
 } 

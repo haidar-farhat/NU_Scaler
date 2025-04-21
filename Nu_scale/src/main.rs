@@ -1,7 +1,7 @@
 mod capture;
 mod ui;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use clap::{App, Arg, SubCommand};
 #[cfg(feature = "capture_opencv")]
 use std::path::Path;
@@ -9,74 +9,89 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 #[cfg(feature = "capture_opencv")]
 use std::time::{Duration, Instant};
+use nu_scaler::capture::CaptureTarget;
 #[cfg(feature = "capture_opencv")]
-use capture::{CaptureTarget, common, window_finder};
+use nu_scaler::capture::{common, window_finder};
 use nu_scaler::upscale::{UpscalingTechnology, UpscalingQuality};
 use nu_scaler::UpscalingAlgorithm;
+use nu_scaler::{init, start_borderless_upscale};
 
 fn main() -> Result<()> {
     // Initialize global configuration for the application
     init()?;
 
     // Parse command-line arguments
-    let args: Args = argh::from_env();
-
-    // If fullscreen command is used, start the fullscreen renderer
-    if let Some(cmd) = args.fullscreen_cmd {
-        // Get screen capturer
-        let source = match cmd.source.as_str() {
-            "fullscreen" => CaptureTarget::FullScreen,
-            s if s.starts_with("window:") => {
-                let title = s.strip_prefix("window:").unwrap_or("").to_string();
-                CaptureTarget::WindowByTitle(title)
-            }
-            s if s.starts_with("region:") => {
-                let params = s.strip_prefix("region:").unwrap_or("").split(',')
-                    .filter_map(|s| s.parse::<i32>().ok())
-                    .collect::<Vec<_>>();
-                
-                if params.len() >= 4 {
-                    CaptureTarget::Region {
-                        x: params[0],
-                        y: params[1],
-                        width: params[2] as u32,
-                        height: params[3] as u32,
+    let args: Vec<String> = std::env::args().collect();
+    let command = args.get(1).map(|s| s.as_str());
+    
+    // Handle fullscreen command
+    if command == Some("fullscreen") {
+        // Default values
+        let mut source = CaptureTarget::FullScreen;
+        let mut tech = UpscalingTechnology::Fallback;
+        let mut quality = UpscalingQuality::Performance;
+        let mut fps = 60;
+        let mut algorithm = None;
+        
+        // Parse remaining arguments
+        for i in 2..args.len() {
+            if args[i] == "--source" && i + 1 < args.len() {
+                let source_str = &args[i + 1];
+                source = match source_str {
+                    s if s == "fullscreen" => CaptureTarget::FullScreen,
+                    s if s.starts_with("window:") => {
+                        let title = s.strip_prefix("window:").unwrap_or("").to_string();
+                        CaptureTarget::WindowByTitle(title)
                     }
-                } else {
-                    return Err(anyhow!("Invalid region format"));
+                    s if s.starts_with("region:") => {
+                        let params = s.strip_prefix("region:").unwrap_or("").split(',')
+                            .filter_map(|s| s.parse::<i32>().ok())
+                            .collect::<Vec<_>>();
+                        
+                        if params.len() >= 4 {
+                            CaptureTarget::Region {
+                                x: params[0],
+                                y: params[1],
+                                width: params[2] as u32,
+                                height: params[3] as u32,
+                            }
+                        } else {
+                            return Err(anyhow!("Invalid region format"));
+                        }
+                    }
+                    _ => return Err(anyhow!("Invalid source format")),
+                };
+            } else if args[i] == "--tech" && i + 1 < args.len() {
+                tech = match args[i + 1].as_str() {
+                    "fsr" => UpscalingTechnology::FSR,
+                    "dlss" => UpscalingTechnology::DLSS,
+                    "fallback" | _ => UpscalingTechnology::Fallback,
+                };
+            } else if args[i] == "--quality" && i + 1 < args.len() {
+                quality = match args[i + 1].as_str() {
+                    "ultra" => UpscalingQuality::Ultra,
+                    "quality" => UpscalingQuality::Quality,
+                    "balanced" => UpscalingQuality::Balanced,
+                    "performance" | _ => UpscalingQuality::Performance,
+                };
+            } else if args[i] == "--fps" && i + 1 < args.len() {
+                if let Ok(f) = args[i + 1].parse::<u32>() {
+                    fps = f;
                 }
+            } else if args[i] == "--algorithm" && i + 1 < args.len() {
+                algorithm = local_string_to_algorithm(&args[i + 1]);
             }
-            _ => return Err(anyhow!("Invalid source format")),
-        };
-        
-        // Get FPS
-        let fps = cmd.fps.unwrap_or(60);
-        
-        // Parse upscaling technology
-        let tech = match cmd.tech.as_deref() {
-            Some("fsr") => UpscalingTechnology::FSR,
-            Some("dlss") => UpscalingTechnology::DLSS,
-            Some("fallback") | _ => UpscalingTechnology::Fallback,
-        };
-        
-        // Parse quality
-        let quality = match cmd.quality.as_deref() {
-            Some("ultra") => UpscalingQuality::Ultra,
-            Some("quality") => UpscalingQuality::Quality,
-            Some("balanced") => UpscalingQuality::Balanced,
-            Some("performance") | _ => UpscalingQuality::Performance,
-        };
-        
-        // Get algorithm if specified
-        let algorithm = cmd.algorithm.as_deref().and_then(string_to_algorithm);
+        }
         
         // Run the fullscreen renderer directly
-        return nu_scaler::start_borderless_upscale(source, tech, quality, fps, algorithm);
+        return start_borderless_upscale(source, tech, quality, fps, algorithm);
     }
-
+    
     // If upscale command is used, process a single frame
-    if let Some(cmd) = args.upscale_cmd {
-        return do_upscale(cmd);
+    if command == Some("upscale") {
+        // TODO: Implement upscale command
+        println!("Upscale command not implemented yet");
+        return Ok(());
     }
 
     // Launch the GUI by default
@@ -245,6 +260,6 @@ fn run_live_capture_demo() -> Result<()> {
 }
 
 /// Utility function to convert a string algorithm name to the UpscalingAlgorithm enum
-fn string_to_algorithm(alg_str: &str) -> Option<nu_scaler::UpscalingAlgorithm> {
+fn local_string_to_algorithm(alg_str: &str) -> Option<nu_scaler::UpscalingAlgorithm> {
     nu_scaler::string_to_algorithm(alg_str)
 }
