@@ -517,16 +517,18 @@ pub fn run_fullscreen_upscaler(
     algorithm: Option<UpscalingAlgorithm>,
 ) -> Result<(), String> {
     // Try to create a lock file to ensure only one instance runs
-    let lock_file = match create_lock_file() {
-        Ok(Some(file)) => file,
-        Ok(None) => {
-            return Err("Another instance of NU_Scaler is already running in fullscreen mode. Please close it before starting a new session.".to_string());
-        },
-        Err(e) => {
-            log::error!("Failed to check for running instances: {}", e);
-            // Continue anyway, but log the error
-        }
-    };
+    let lock_file_result = create_lock_file();
+    
+    // Check if we got a lock
+    if let Ok(None) = lock_file_result {
+        return Err("Another instance of NU_Scaler is already running in fullscreen mode. Please close it before starting a new session.".to_string());
+    }
+    
+    // Handle error cases but continue
+    if let Err(e) = &lock_file_result {
+        log::error!("Failed to check for running instances: {}", e);
+        // Continue anyway, but log the error
+    }
     
     // Create an upscaler with the given technology and quality
     let upscaler = match create_upscaler(technology, quality, algorithm) {
