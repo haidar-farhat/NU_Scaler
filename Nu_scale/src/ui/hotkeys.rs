@@ -218,4 +218,17 @@ impl HotkeyManager {
             }
         }
     }
+}
+
+// Default hotkey definitions
+pub const KEY_TOGGLE_CAPTURE: &str = "Ctrl+Alt+C";
+pub const KEY_CAPTURE_FRAME: &str = "Ctrl+Alt+S";
+pub const KEY_TOGGLE_OVERLAY: &str = "Ctrl+Alt+O";
+
+/// Register a global hotkey
+pub fn register_global_hotkey(hotkey_str: &str, action: HotkeyAction) -> Result<()> {
+    let mut manager = HotkeyManager::new()?;
+    manager.register(hotkey_str, action)?;
+    manager.start_listening()?;
+    Ok(())
 } 
