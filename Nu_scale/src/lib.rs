@@ -181,7 +181,7 @@ pub fn start_borderless_upscale(
     info!("Starting fullscreen renderer");
     let result = match renderer::fullscreen::run_fullscreen_upscaler(
         frame_buffer,
-        stop_signal,
+        stop_signal.clone(),
         technology,
         quality,
         algorithm,
