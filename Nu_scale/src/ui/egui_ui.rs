@@ -98,6 +98,8 @@ pub struct AppState {
     error_message: String,
     /// Phantom data
     _phantom: PhantomData<()>,
+    /// Currently running upscaling process (if any)
+    scaling_process: Option<std::process::Child>,
 }
 
 // Type definition for upscaling buffer
@@ -152,6 +154,7 @@ impl Default for AppState {
             show_error_dialog: false,
             error_message: String::new(),
             _phantom: PhantomData,
+            scaling_process: None,
         }
     }
 }
@@ -250,7 +253,18 @@ impl AppState {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(8.0);
                 
-                // Fullscreen mode button
+                // Scale button - combined scaling and fullscreen
+                let scale_button = ui.add(egui::Button::new(
+                    RichText::new("🔍 Scale").size(14.0))
+                        .fill(Color32::from_rgb(180, 100, 240)));
+                
+                if scale_button.clicked() {
+                    self.start_scaling_process();
+                }
+                
+                ui.add_space(8.0);
+
+                // Original fullscreen mode button
                 let fullscreen_button = ui.add(egui::Button::new(
                     RichText::new("🖥️ Fullscreen Mode").size(14.0))
                         .fill(Color32::from_rgb(0, 120, 215)));
@@ -1135,25 +1149,147 @@ impl AppState {
         self.status_message_type = StatusMessageType::Info;
     }
 
-    // Map profile UpscalingTechnology to library UpscalingTechnology
-    fn map_tech(&self, tech: &ProfileUpscalingTechnology) -> UpscalingTechnology {
-        match tech {
-            ProfileUpscalingTechnology::None => UpscalingTechnology::Fallback,
-            ProfileUpscalingTechnology::FSR => UpscalingTechnology::FSR,
-            ProfileUpscalingTechnology::DLSS => UpscalingTechnology::DLSS,
-            ProfileUpscalingTechnology::Fallback => UpscalingTechnology::Fallback,
-            ProfileUpscalingTechnology::Custom => UpscalingTechnology::Fallback,
+    /// Start a scaling process in a separate application instance
+    fn start_scaling_process(&mut self) {
+        // First, kill any existing scaling process
+        self.kill_scaling_process();
+
+        // Get the capture source string
+        let source_str = match self.profile.capture_source {
+            0 => "fullscreen".to_string(),
+            1 => format!("window:{}", self.profile.window_title),
+            2 => format!("region:{},{},{},{}", 
+                self.profile.region_x, 
+                self.profile.region_y, 
+                self.profile.region_width, 
+                self.profile.region_height
+            ),
+            _ => "fullscreen".to_string(), // Default fallback
+        };
+
+        // Map tech to string
+        let tech_str = match self.profile.upscaling_tech {
+            0 => "fsr",
+            1 => "dlss",
+            2 => "fallback",
+            3 => "fallback",
+            _ => "fallback",
+        };
+
+        // Map quality to string
+        let quality_str = match self.profile.upscaling_quality {
+            0 => "ultra",
+            1 => "quality",
+            2 => "balanced",
+            3 => "performance",
+            _ => "balanced",
+        };
+
+        // Get algorithm string if needed
+        let mut alg_arg = Vec::new();
+        if self.profile.upscaling_tech == 3 { // Fallback mode uses algorithm
+            let alg_str = match self.profile.upscaling_algorithm {
+                0 => "lanczos3",
+                1 => "nearest",
+                2 => "bilinear",
+                3 => "bicubic",
+                _ => "lanczos3",
+            };
+            alg_arg.push("--algorithm");
+            alg_arg.push(alg_str);
+        }
+
+        // Get current executable path
+        let exe_path = std::env::current_exe().unwrap_or_else(|_| {
+            log::error!("Failed to get current executable path");
+            PathBuf::from("nu_scaler.exe")
+        });
+
+        // Build and start the process
+        let mut cmd = std::process::Command::new(exe_path);
+        cmd.arg("fullscreen")
+           .arg("--source").arg(&source_str)
+           .arg("--tech").arg(tech_str)
+           .arg("--quality").arg(quality_str)
+           .arg("--fps").arg(self.profile.fps.to_string());
+
+        // Add algorithm argument if needed
+        if !alg_arg.is_empty() {
+            cmd.arg(alg_arg[0]).arg(alg_arg[1]);
+        }
+
+        // Run the process
+        match cmd.spawn() {
+            Ok(child) => {
+                log::info!("Started scaling process with PID: {}", child.id());
+                self.scaling_process = Some(child);
+                self.status_message = "Scaling started in separate window.".to_string();
+                self.status_message_type = StatusMessageType::Success;
+            },
+            Err(e) => {
+                log::error!("Failed to start scaling process: {}", e);
+                self.status_message = format!("Failed to start scaling: {}", e);
+                self.status_message_type = StatusMessageType::Error;
+            }
         }
     }
 
-    // Map profile UpscalingQuality to library UpscalingQuality
-    fn map_quality(&self, quality: &ProfileUpscalingQuality) -> UpscalingQuality {
-        match quality {
-            ProfileUpscalingQuality::Ultra => UpscalingQuality::Ultra,
-            ProfileUpscalingQuality::Quality => UpscalingQuality::Quality,
-            ProfileUpscalingQuality::Balanced => UpscalingQuality::Balanced,
-            ProfileUpscalingQuality::Performance => UpscalingQuality::Performance,
+    /// Kill an existing scaling process if one exists
+    fn kill_scaling_process(&mut self) {
+        if let Some(mut child) = self.scaling_process.take() {
+            log::info!("Killing existing scaling process");
+            
+            // Try to kill the process gracefully
+            #[cfg(windows)]
+            {
+                // On Windows, we call the Win32 API to try to send WM_CLOSE first
+                use windows::Win32::System::Threading::TerminateProcess;
+                use windows::Win32::Foundation::HANDLE;
+                unsafe {
+                    let _ = TerminateProcess(HANDLE(child.id() as isize), 0);
+                }
+            }
+
+            // Fallback to kill() if terminate isn't available or didn't work
+            match child.kill() {
+                Ok(_) => {
+                    let _ = child.wait(); // Clean up zombie process
+                    log::info!("Successfully killed scaling process");
+                },
+                Err(e) => {
+                    log::warn!("Failed to kill scaling process: {}", e);
+                    // Process might have already terminated
+                }
+            }
         }
+    }
+}
+
+// Add a cleanup function to ensure we kill the scaling process on exit
+impl Drop for AppState {
+    fn drop(&mut self) {
+        self.kill_scaling_process();
+    }
+}
+
+// Map profile UpscalingTechnology to library UpscalingTechnology
+fn map_tech(&self, tech: &ProfileUpscalingTechnology) -> UpscalingTechnology {
+    match tech {
+        ProfileUpscalingTechnology::None => UpscalingTechnology::Fallback,
+        ProfileUpscalingTechnology::FSR => UpscalingTechnology::FSR,
+        ProfileUpscalingTechnology::DLSS => UpscalingTechnology::DLSS,
+        ProfileUpscalingTechnology::Fallback => UpscalingTechnology::Fallback,
+        ProfileUpscalingTechnology::Custom => UpscalingTechnology::Fallback,
+    }
+}
+
+// Map profile UpscalingQuality to library UpscalingQuality
+fn map_quality(&self, quality: &ProfileUpscalingQuality) -> UpscalingQuality {
+    match quality {
+        ProfileUpscalingQuality::Ultra => UpscalingQuality::Ultra,
+        ProfileUpscalingQuality::Quality => UpscalingQuality::Quality,
+        ProfileUpscalingQuality::Balanced => UpscalingQuality::Balanced,
+        ProfileUpscalingQuality::Performance => UpscalingQuality::Performance,
     }
 }
 
