@@ -5,12 +5,13 @@ use egui::{
     TextureHandle,
     *,
 };
-// Remove unused imports
+// Standard library imports
 use std::{
     path::PathBuf,
-    sync::mpsc::{Receiver, Sender},
+    sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}}, 
     thread,
-    time::Duration
+    time::{Duration, Instant},
+    marker::PhantomData
 };
 
 // Use crate:: for lib modules
@@ -156,7 +157,7 @@ impl Default for AppState {
 }
 
 impl eframe::App for AppState {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
         self.configure_fonts(ctx);
 
         // Set dark mode for the UI
@@ -213,8 +214,8 @@ impl eframe::App for AppState {
 
 impl AppState {
     /// Configure custom fonts
-    fn configure_fonts(&self, ctx: &egui::Context) {
-        let fonts = egui::FontDefinitions::default();
+    fn configure_fonts(&self, ctx: &eframe::egui::Context) {
+        let fonts = eframe::egui::FontDefinitions::default();
         // Could add custom fonts here
         ctx.set_fonts(fonts);
     }
@@ -388,7 +389,7 @@ impl AppState {
     }
     
     /// Show the region selection dialog
-    fn show_region_dialog(&mut self, ctx: &egui::Context) {
+    fn show_region_dialog(&mut self, ctx: &eframe::egui::Context) {
         let mut dialog = RegionDialog::new();
         
         // Set initial region values
@@ -988,10 +989,10 @@ impl AppState {
     
     /// Update the application upscaling mode state
     /// Renders the captured frames with the upscaler
-    fn update_upscaling_mode(&mut self, ctx: &egui::Context) {
+    fn update_upscaling_mode(&mut self, ctx: &eframe::egui::Context) {
         // Clear the UI and display only the upscaled frame
-        egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(Color32::BLACK))
+        eframe::egui::CentralPanel::default()
+            .frame(eframe::egui::Frame::none().fill(eframe::egui::Color32::BLACK))
             .show(ctx, |ui| {
                 // Check if we have a buffer
                 if let Some(buffer) = &self.upscaling_buffer {
@@ -1009,8 +1010,8 @@ impl AppState {
                         let texture = self.frame_texture.get_or_insert_with(|| {
                             ui.ctx().load_texture(
                                 "captured_frame",
-                                ColorImage::from_rgba_unmultiplied(size, pixels),
-                                TextureOptions::LINEAR
+                                eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels),
+                                eframe::egui::TextureOptions::LINEAR
                             )
                         });
                         
@@ -1018,11 +1019,11 @@ impl AppState {
                         if texture.size() != size {
                             *texture = ui.ctx().load_texture(
                                 "captured_frame",
-                                ColorImage::from_rgba_unmultiplied(size, pixels),
-                                TextureOptions::LINEAR
+                                eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels),
+                                eframe::egui::TextureOptions::LINEAR
                             );
                         } else {
-                            texture.set(ColorImage::from_rgba_unmultiplied(size, pixels), TextureOptions::LINEAR);
+                            texture.set(eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels), eframe::egui::TextureOptions::LINEAR);
                         }
                         
                         // Display the texture full screen
@@ -1030,12 +1031,12 @@ impl AppState {
                         ui.image(texture, available_size);
                     } else {
                         ui.centered_and_justified(|ui| {
-                            ui.label(RichText::new("Waiting for frames...").size(24.0).color(Color32::WHITE));
+                            ui.label(eframe::egui::RichText::new("Waiting for frames...").size(24.0).color(eframe::egui::Color32::WHITE));
                         });
                     }
                 } else {
                     ui.centered_and_justified(|ui| {
-                        ui.label(RichText::new("No frame buffer available").size(24.0).color(Color32::RED));
+                        ui.label(eframe::egui::RichText::new("No frame buffer available").size(24.0).color(eframe::egui::Color32::RED));
                     });
                 }
             });
@@ -1158,9 +1159,13 @@ impl AppState {
 
 /// Run the egui application
 pub fn run_app() -> Result<()> {
-    let native_options = eframe::NativeOptions {
-        initial_window_size: Some(egui::vec2(1024.0, 768.0)),
-        min_window_size: Some(egui::vec2(800.0, 600.0)),
+    let options = eframe::NativeOptions {
+        initial_window_size: Some(eframe::egui::vec2(1024.0, 768.0)),
+        min_window_size: Some(eframe::egui::vec2(800.0, 600.0)),
+        vsync: true,
+        decorated: true,
+        centered: true,
+        hardware_acceleration: eframe::HardwareAcceleration::Preferred,
         renderer: eframe::Renderer::Wgpu,
         default_theme: eframe::Theme::Dark,
         ..Default::default()
@@ -1168,7 +1173,7 @@ pub fn run_app() -> Result<()> {
     
     eframe::run_native(
         "NU Scale",
-        native_options,
+        options,
         Box::new(|cc| {
             let mut app_state = AppState::default();
             Box::new(app_state)

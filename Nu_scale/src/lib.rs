@@ -6,6 +6,7 @@ pub mod capture;
 pub mod ui;
 pub mod upscale;
 pub mod renderer;
+pub mod logger;
 
 // Explicitly re-export top-level modules
 // pub use upscale; // Make upscale directly accessible as crate::upscale
@@ -31,7 +32,21 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Application initialization
 pub fn init() -> Result<()> {
-    // Initialize app components
+    // Initialize logger
+    let logs_dir = dirs::data_dir()
+        .map(|dir| dir.join("NU_Scaler").join("logs").to_string_lossy().to_string())
+        .unwrap_or_else(|| "logs".to_string());
+    
+    // Initialize logger with logs directory
+    if let Err(e) = logger::init_logger(Some(&logs_dir), true) {
+        eprintln!("Warning: Failed to initialize logger: {}", e);
+    }
+    
+    // Log application startup
+    log::info!("NU_Scaler v{} starting up", VERSION);
+    
+    // Initialize other app components here
+    
     Ok(())
 }
 
@@ -67,9 +82,19 @@ pub fn start_borderless_upscale(
     algorithm: Option<upscale::common::UpscalingAlgorithm>,
 ) -> Result<()> {
     use std::sync::atomic::Ordering;
+    use log::{debug, info, warn, error};
+    
+    info!("Starting borderless upscaling with {:?} technology at {:?} quality", technology, quality);
+    debug!("Target FPS: {}, Algorithm: {:?}", fps, algorithm);
     
     // Create a capturer for the source
-    let mut capturer = capture::create_capturer()?;
+    let mut capturer = match capture::create_capturer() {
+        Ok(c) => c,
+        Err(e) => {
+            error!("Failed to create screen capturer: {}", e);
+            return Err(anyhow::anyhow!("Failed to create screen capturer: {}", e));
+        }
+    };
     
     // Create a stop signal for the upscaling thread
     let stop_signal = Arc::new(AtomicBool::new(false));
@@ -79,9 +104,16 @@ pub fn start_borderless_upscale(
     let frame_buffer = Arc::new(capture::common::FrameBuffer::new(5));
     let frame_buffer_clone = frame_buffer.clone();
     
+    info!("Starting capture thread");
+    
     // Start a capture thread
     let capture_thread = std::thread::spawn(move || {
         let target_frame_time = std::time::Duration::from_secs_f64(1.0 / fps as f64);
+        let mut frames_captured = 0;
+        let mut last_fps_log = std::time::Instant::now();
+        let mut errors_count = 0;
+        
+        debug!("Capture thread started, target frame time: {:?}", target_frame_time);
         
         while !stop_signal_clone.load(Ordering::SeqCst) {
             let start_time = std::time::Instant::now();
@@ -89,12 +121,46 @@ pub fn start_borderless_upscale(
             // Capture frame
             match capturer.capture_frame(&source) {
                 Ok(frame) => {
+                    // Log dimensions occasionally
+                    if frames_captured % 100 == 0 {
+                        debug!("Captured frame {}x{}", frame.width(), frame.height());
+                    }
+                    
+                    // Log performance every second
+                    if last_fps_log.elapsed().as_secs() >= 1 {
+                        let actual_fps = frames_captured as f32 / last_fps_log.elapsed().as_secs_f32();
+                        debug!("Capture performance: {:.2} FPS", actual_fps);
+                        frames_captured = 0;
+                        last_fps_log = std::time::Instant::now();
+                    }
+                    
+                    // Track frame count
+                    frames_captured += 1;
+                    
+                    // Use our logger utility
+                    logger::log_capture_event(
+                        &format!("{:?}", source),
+                        frame.width(),
+                        frame.height()
+                    );
+                    
                     // Push frame to buffer
-                    frame_buffer_clone.add_frame(frame).ok();
+                    if let Err(e) = frame_buffer_clone.add_frame(frame) {
+                        warn!("Failed to add frame to buffer: {}", e);
+                    }
                 },
                 Err(e) => {
-                    eprintln!("Error capturing frame: {:?}", e);
-                    break;
+                    errors_count += 1;
+                    error!("Error capturing frame: {}", e);
+                    
+                    // Break after too many consecutive errors
+                    if errors_count > 10 {
+                        error!("Too many capture errors, stopping capture thread");
+                        break;
+                    }
+                    
+                    // Add small delay before trying again
+                    std::thread::sleep(std::time::Duration::from_millis(100));
                 }
             }
             
@@ -102,23 +168,42 @@ pub fn start_borderless_upscale(
             let elapsed = start_time.elapsed();
             if elapsed < target_frame_time {
                 std::thread::sleep(target_frame_time - elapsed);
+            } else if frames_captured % 10 == 0 {
+                // Log if we're falling behind on FPS
+                warn!("Frame capture taking longer than target: {:?} > {:?}", 
+                      elapsed, target_frame_time);
             }
         }
+        
+        info!("Capture thread stopped");
     });
     
     // Start the fullscreen UI
-    let result = renderer::fullscreen::run_fullscreen_upscaler(
+    info!("Starting fullscreen renderer");
+    let result = match renderer::fullscreen::run_fullscreen_upscaler(
         frame_buffer,
         stop_signal,
         technology,
         quality,
         algorithm,
-    ).map_err(|e| anyhow::anyhow!("{}", e))?;
+    ) {
+        Ok(_) => {
+            info!("Fullscreen renderer completed successfully");
+            Ok(())
+        },
+        Err(e) => {
+            error!("Fullscreen renderer failed: {}", e);
+            Err(anyhow::anyhow!("{}", e))
+        }
+    };
     
     // Wait for capture thread to finish
-    capture_thread.join().expect("Failed to join capture thread");
+    match capture_thread.join() {
+        Ok(_) => info!("Capture thread joined successfully"),
+        Err(e) => error!("Failed to join capture thread: {:?}", e),
+    }
     
-    Ok(())
+    result
 }
 
 /// Upscale a single image file
