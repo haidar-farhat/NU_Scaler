@@ -17,20 +17,19 @@ use std::{
     marker::PhantomData,
 };
 
-// Crate-level imports
-use crate::capture::{CaptureError, CaptureTarget, ScreenCapture, CaptureEvent};
+// Use crate:: for lib modules
+use crate::capture::{CaptureError, CaptureTarget, ScreenCapture};
 use crate::capture::common::FrameBuffer;
-use crate::texture_manager::TextureManager;
 use crate::upscale::{
     create_upscaler, Upscaler, UpscalingQuality, UpscalingTechnology,
     common::UpscalingAlgorithm,
 };
-use crate::profile::{Profile, CaptureSource, UpscalingTechnology as ProfileUpscalingTechnology, UpscalingQuality as ProfileUpscalingQuality};
-use crate::settings::AppSettings;
-use crate::hotkeys::{register_global_hotkey, KEY_TOGGLE_CAPTURE, KEY_CAPTURE_FRAME, KEY_TOGGLE_OVERLAY};
-use crate::renderer; // Assuming renderer is a top-level module
+use crate::renderer;
 
 // UI-internal imports (using super::)
+use super::profile::{Profile, CaptureSource, UpscalingTechnology as ProfileUpscalingTechnology, UpscalingQuality as ProfileUpscalingQuality};
+use super::settings::AppSettings;
+use super::hotkeys::{register_global_hotkey, KEY_TOGGLE_CAPTURE, KEY_CAPTURE_FRAME, KEY_TOGGLE_OVERLAY};
 use super::components::{self, StatusBar, StatusMessageType};
 use super::region_dialog::RegionDialog;
 use super::tabs::{self, TabState};
@@ -88,8 +87,6 @@ pub struct AppState {
     status_bar: StatusBar,
     /// Region dialog
     region_dialog: RegionDialog,
-    /// Texture manager
-    texture_manager: Arc<Mutex<TextureManager>>,
     /// Frame buffer
     frame_buffer: Arc<FrameBuffer>,
     /// Stop signal
@@ -111,45 +108,37 @@ type UpscalingBufferType = Arc<FrameBuffer>;
 
 impl Default for AppState {
     fn default() -> Self {
-        // Load settings
         let settings = AppSettings::load().unwrap_or_default();
-        
-        // Load profile
-        let profile = Profile::load(&settings.last_profile_path.clone().unwrap_or_default()).unwrap_or_default();
-        
-        // Determine capture source index based on profile capture_source field
+        let profile_path = format!("{}.json", settings.current_profile);
+        let profile = Profile::load(&profile_path).unwrap_or_default();
+
+        // Determine capture source index AND region *before* moving profile
         let capture_source_index = profile.capture_source;
-        
-        // Get region from profile
         let region = (
             profile.region_x,
             profile.region_y,
             profile.region_width,
             profile.region_height
         );
-        
-        // Get available profiles
-        let available_profiles = Profile::list_profiles().unwrap_or_default();
-        
-        // Get available windows
+
         let available_windows = crate::capture::common::list_available_windows()
             .map(|windows| windows.iter().map(|w| w.title.clone()).collect())
             .unwrap_or_default();
-        
+
         Self {
-            profile,
             settings,
+            profile, // Move profile here
             is_capturing: false,
             is_fullscreen: false,
             is_upscaling: false,
             _toggle_capture_hotkey: "Ctrl+Alt+C".to_string(),
             single_frame_hotkey: "Ctrl+Alt+S".to_string(),
             toggle_overlay_hotkey: "Ctrl+Alt+O".to_string(),
-            available_profiles,
+            available_profiles: super::profile::Profile::list_profiles().unwrap_or_default(),
             available_windows,
             selected_window_index: 0,
-            capture_source_index,
-            region,
+            capture_source_index, // Use the value determined before move
+            region, // Use the value determined before move
             show_region_dialog: false,
             status_message: "Ready".to_string(),
             status_message_type: StatusMessageType::Info,
@@ -157,9 +146,8 @@ impl Default for AppState {
             upscaling_buffer: None,
             upscaling_stop_signal: None,
             frame_texture: None,
-            status_bar: StatusBar::new(),
+            status_bar: StatusBar::new(String::new(), StatusMessageType::Info),
             region_dialog: RegionDialog::new(),
-            texture_manager: Arc::new(Mutex::new(TextureManager::new())),
             frame_buffer: Arc::new(FrameBuffer::new(10)),
             stop_signal: Arc::new(AtomicBool::new(false)),
             capture_status: Arc::new(Mutex::new("Idle".to_string())),
@@ -625,7 +613,7 @@ impl AppState {
                         ui.add_space(8.0);
                         
                         if ui.button(RichText::new("🔄 Refresh").size(14.0)).clicked() {
-                            // Refresh window list
+                            // Refresh window list - Use crate:: path
                             self.available_windows = crate::capture::common::list_available_windows()
                                 .map(|windows| windows.iter().map(|w| w.title.clone()).collect())
                                 .unwrap_or_default();
@@ -984,7 +972,7 @@ impl AppState {
         let buffer = Arc::new(FrameBuffer::new(10)); 
         let stop_signal = Arc::new(AtomicBool::new(false));
         
-        // Start capture thread
+        // Use crate:: path
         let _capture_handle = crate::capture::common::start_live_capture_thread(
             source,
             fps,
@@ -1133,6 +1121,7 @@ impl AppState {
         let thread_algorithm = algorithm;
 
         let _app_handle = std::thread::spawn(move || {
+            // Use crate:: path
             if let Err(e) = crate::renderer::fullscreen::run_fullscreen_upscaler(
                 thread_frame_buffer,
                 thread_stop_signal,
@@ -1186,8 +1175,6 @@ pub fn run_app() -> Result<()> {
         native_options,
         Box::new(|cc| {
             let mut app_state = AppState::default();
-            app_state.texture_manager = Arc::new(Mutex::new(TextureManager::new(cc.egui_ctx.clone())));
-            app_state.region_dialog = RegionDialog::new();
             Box::new(app_state)
         }),
     )

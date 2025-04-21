@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use super::{CaptureTarget, ScreenCapture};
 use crate::ui::profile::{UpscalingTechnology, UpscalingQuality};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Type aliases for upscaling functionality to avoid import issues
 #[allow(dead_code)]
@@ -242,42 +243,62 @@ pub fn start_fullscreen_upscaled_capture(
     Ok(handle)
 }
 
-/// Start live capture in a separate thread, storing frames in a buffer
+/// Starts a live capture thread that pushes frames to a buffer.
 pub fn start_live_capture_thread(
     target: CaptureTarget,
     fps: u32,
     buffer: Arc<FrameBuffer>,
-    stop_signal: Arc<Mutex<bool>>,
+    stop_signal: Arc<AtomicBool>,
 ) -> Result<thread::JoinHandle<Result<()>>> {
-    // Clone Arc references for the closure
-    let buffer_clone = Arc::clone(&buffer);
-    let stop_signal_clone = Arc::clone(&stop_signal);
+    let buffer_clone = buffer.clone_arc();
+    let stop_signal_clone = stop_signal.clone();
     
-    let handle = thread::spawn(move || {
+    let handle = thread::spawn(move || -> Result<()> {
         let mut capturer = super::create_capturer()?;
-        
-        // Create a callback function that will add frames to the buffer
-        let mut callback = move |frame: &RgbaImage| -> Result<bool> {
-            // Check if we should stop
-            let should_stop = {
-                let guard = stop_signal_clone.lock().map_err(|_| anyhow::anyhow!("Mutex lock failed"))?;
-                *guard
-            };
-            
-            if should_stop {
-                return Ok(false);
+        let frame_duration = std::time::Duration::from_secs_f64(1.0 / fps as f64);
+        let mut next_frame_time = std::time::Instant::now();
+
+        loop {
+            // Check stop signal using load()
+            if stop_signal_clone.load(Ordering::SeqCst) {
+                println!("Capture thread received stop signal.");
+                break;
             }
-            
-            // Add frame to buffer
-            buffer_clone.add_frame(frame.clone())?;
-            
-            Ok(true)
-        };
-        
-        // Start capture
-        capturer.start_live_capture(&target, fps, &mut callback)
+
+            let frame_start_time = std::time::Instant::now();
+            match capturer.capture_frame(&target) {
+                Ok(frame) => {
+                    if let Err(e) = buffer_clone.add_frame(frame) {
+                        eprintln!("Error adding frame to buffer: {}", e);
+                        // Decide if error is fatal or recoverable
+                        // break; // Optionally stop on buffer error
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error capturing frame: {}", e);
+                    // Consider if specific errors should stop the loop
+                    // break;
+                }
+            }
+
+            // Calculate time until next frame and sleep
+            next_frame_time += frame_duration;
+            let elapsed = frame_start_time.elapsed();
+            let now = std::time::Instant::now();
+
+            if next_frame_time > now {
+                let sleep_duration = next_frame_time.duration_since(now);
+                std::thread::sleep(sleep_duration);
+            } else {
+                // We're behind, find next valid frame time slot
+                let behind = now.duration_since(next_frame_time);
+                let frames_behind = (behind.as_secs_f64() / frame_duration.as_secs_f64()).ceil() as u32;
+                next_frame_time += frame_duration * frames_behind;
+            }
+        }
+        Ok(())
     });
-    
+
     Ok(handle)
 }
 

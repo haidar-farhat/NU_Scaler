@@ -8,7 +8,7 @@ pub mod region_dialog;
 pub mod components;
 pub mod tabs;
 
-// Use fully qualified paths for re-exports
+// Use crate:: paths for re-exports and imports from lib/ui scope
 #[cfg(not(feature = "disable_gui"))]
 pub use crate::ui::egui_ui::{AppState, run_app};
 pub use crate::ui::profile::Profile;
@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
-// Use fully qualified paths for imports
+// Use crate:: paths for imports from lib scope
 use crate::capture::common::FrameBuffer;
 use crate::upscale::Upscaler;
 use crate::upscale::common::UpscalingAlgorithm;
@@ -97,4 +97,4 @@ pub fn string_to_algorithm(algorithm: &str) -> UpscalingAlgorithm {
         "balanced" => UpscalingAlgorithm::Balanced,
         _ => UpscalingAlgorithm::Lanczos3, // Default
     }
-} 
+}

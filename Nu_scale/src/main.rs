@@ -1,6 +1,3 @@
-mod capture;
-mod ui;
-
 use anyhow::{Result, anyhow};
 use clap::{Arg, App, SubCommand};
 use nu_scaler::capture::CaptureTarget;
