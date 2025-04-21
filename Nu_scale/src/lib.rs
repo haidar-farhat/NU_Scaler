@@ -6,19 +6,25 @@ pub mod capture;
 pub mod ui;
 pub mod upscale;
 pub mod import_test;
+pub mod renderer;
+
+// Explicitly re-export top-level modules
+// pub use upscale; // Make upscale directly accessible as crate::upscale
+// pub use renderer; // Make renderer directly accessible as crate::renderer
 
 // Re-export modules for internal use
 #[allow(unused_imports)]
 pub use crate as nu_scaler;
 
 // Import Upscaler trait for is_supported() methods
-use upscale::Upscaler;
+use crate::upscale::Upscaler;
 // Import ScreenCapture trait
-use capture::ScreenCapture;
+use crate::capture::ScreenCapture;
 // Re-export upscaling algorithm types
-pub use upscale::common::UpscalingAlgorithm;
+pub use crate::upscale::common::UpscalingAlgorithm;
 use std::sync::{Arc, Mutex};
 use image::RgbaImage;
+use std::sync::atomic::AtomicBool;
 
 /// Application version
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -40,8 +46,15 @@ pub fn app_version() -> &'static str {
 }
 
 /// Toggle fullscreen mode for the current window
+#[cfg(not(feature = "disable_gui"))]
 pub fn toggle_fullscreen(app_state: &mut ui::AppState) -> Result<()> {
     app_state.toggle_fullscreen_mode()
+}
+
+#[cfg(feature = "disable_gui")]
+pub fn toggle_fullscreen(_: &mut ()) -> Result<()> {
+    println!("Fullscreen toggle not available in CLI mode");
+    Ok(())
 }
 
 /// Starts a borderless window with upscaling functionality 
@@ -53,19 +66,13 @@ pub fn start_borderless_upscale(
     fps: u32,
     algorithm: Option<upscale::common::UpscalingAlgorithm>,
 ) -> Result<()> {
-    use std::sync::{Arc, Mutex};
+    use std::sync::atomic::Ordering;
     
     // Create a capturer for the source
     let mut capturer = capture::create_capturer()?;
     
-    // Create an upscaler with the given technology and quality
-    let mut upscaler = upscale::create_upscaler(technology, quality, algorithm)?;
-    
-    // Set quality explicitly
-    upscaler.set_quality(quality);
-    
     // Create a stop signal for the upscaling thread
-    let stop_signal = Arc::new(Mutex::new(false));
+    let stop_signal = Arc::new(AtomicBool::new(false));
     let stop_signal_clone = stop_signal.clone();
     
     // Create a frame buffer to share frames between threads
@@ -76,7 +83,7 @@ pub fn start_borderless_upscale(
     let capture_thread = std::thread::spawn(move || {
         let target_frame_time = std::time::Duration::from_secs_f64(1.0 / fps as f64);
         
-        while !*stop_signal_clone.lock().unwrap() {
+        while !stop_signal_clone.load(Ordering::SeqCst) {
             let start_time = std::time::Instant::now();
             
             // Capture frame
@@ -100,12 +107,18 @@ pub fn start_borderless_upscale(
     });
     
     // Start the fullscreen UI
-    let result = ui::run_fullscreen_upscaler(frame_buffer, stop_signal, upscaler, algorithm);
+    let result = renderer::fullscreen::run_fullscreen_upscaler(
+        frame_buffer,
+        stop_signal,
+        technology,
+        quality,
+        algorithm,
+    ).map_err(|e| anyhow::anyhow!("{}", e))?;
     
     // Wait for capture thread to finish
     capture_thread.join().expect("Failed to join capture thread");
     
-    result
+    Ok(())
 }
 
 /// Upscale a single image file

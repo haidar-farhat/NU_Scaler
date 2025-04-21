@@ -1,24 +1,39 @@
-use std::sync::{Arc, Mutex};
-use anyhow::{Result, anyhow};
-use eframe::{self, egui};
+use anyhow::{anyhow, Result};
 use egui::{
-    Color32, Context, Frame, RichText, TextureHandle, Ui, Slider, TextEdit, Stroke, 
-    Rounding, Vec2, ColorImage, TextureOptions
+    epaint::ahash::{HashMap, HashMapExt},
+    widgets::*,
+    TextureHandle,
+    *,
 };
-use image::RgbaImage;
+use std::{
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, Sender},
+        Arc, Mutex,
+    },
+    thread,
+    time::{Duration, Instant},
+    marker::PhantomData,
+};
 
-// Import modules from the crate
-use crate::capture::{CaptureTarget, ScreenCapture, create_capturer};
-use crate::capture::common::FrameBuffer;
-use crate::hotkeys::{Hotkey, register_hotkey, unregister_hotkey};
-use crate::upscale::{create_upscaler, Upscaler};
-use crate::upscale::common::{UpscalingQuality, UpscalingTechnology, UpscalingAlgorithm};
-use crate::{toggle_fullscreen, start_upscaling_session, start_borderless_upscale};
+// Crate-level imports
+use crate::capture::{CaptureError, CaptureEvent, CaptureTarget, ScreenCapture};
+use crate::frame_buffer::FrameBuffer;
+use crate::texture_manager::TextureManager;
+use crate::upscale::{
+    create_upscaler, Upscaler, UpscalingQuality, UpscalingTechnology,
+    common::UpscalingAlgorithm,
+};
+use crate::profile::{Profile, CaptureSource, UpscalingTechnology as ProfileUpscalingTechnology, UpscalingQuality as ProfileUpscalingQuality};
+use crate::settings::AppSettings;
+use crate::hotkeys::{register_global_hotkey, KEY_TOGGLE_CAPTURE, KEY_CAPTURE_FRAME, KEY_TOGGLE_OVERLAY};
+use crate::renderer; // Assuming renderer is a top-level module
 
-// Import local modules
-use super::profile::{CaptureSource, Profile, UpscalingTechnology, UpscalingQuality, SystemPlatform};
-use super::settings::AppSettings;
-use super::hotkeys::{register_global_hotkey, KEY_TOGGLE_CAPTURE, KEY_CAPTURE_FRAME, KEY_TOGGLE_OVERLAY};
+// UI-internal imports (using super::)
+use super::components::{self, StatusBar, StatusMessage, StatusMessageType};
+use super::region_dialog::RegionDialog;
+use super::tabs::{self, TabState, Tab};
 
 // External crate imports were removed
 
@@ -69,19 +84,30 @@ pub struct AppState {
     upscaling_stop_signal: Option<Arc<Mutex<bool>>>,
     /// Current frame texture
     frame_texture: Option<TextureHandle>,
+    /// Status bar
+    status_bar: StatusBar,
+    /// Region dialog
+    region_dialog: RegionDialog,
+    /// Texture manager
+    texture_manager: Arc<Mutex<TextureManager>>,
+    /// Frame buffer
+    frame_buffer: Arc<FrameBuffer>,
+    /// Stop signal
+    stop_signal: Arc<Mutex<bool>>,
+    /// Capture status
+    capture_status: Arc<Mutex<String>>,
+    /// Temporary status message
+    temp_status_message: Arc<Mutex<Option<(String, StatusMessageType, Instant)>>>,
+    /// Show error dialog
+    show_error_dialog: bool,
+    /// Error message
+    error_message: String,
+    /// Phantom data
+    _phantom: PhantomData<()>,
 }
 
 // Type definition for upscaling buffer
 type UpscalingBufferType = Arc<FrameBuffer>;
-
-#[derive(PartialEq)]
-enum StatusMessageType {
-    Info,
-    Success,
-    #[allow(dead_code)]
-    Warning,
-    Error,
-}
 
 impl Default for AppState {
     fn default() -> Self {
@@ -91,18 +117,16 @@ impl Default for AppState {
         // Load profile
         let profile = settings.get_current_profile().unwrap_or_default();
         
-        // Determine capture source index
-        let capture_source_index = match profile.source {
-            CaptureSource::Fullscreen => 0,
-            CaptureSource::Window(_) => 1,
-            CaptureSource::Region { .. } => 2,
-        };
+        // Determine capture source index based on profile capture_source field
+        let capture_source_index = profile.capture_source;
         
-        // Get region
-        let region = match profile.source {
-            CaptureSource::Region { x, y, width, height } => (x, y, width, height),
-            _ => (0, 0, 800, 600),
-        };
+        // Get region from profile
+        let region = (
+            profile.region_x,
+            profile.region_y,
+            profile.region_width,
+            profile.region_height
+        );
         
         // Get available profiles
         let available_profiles = Profile::list_profiles().unwrap_or_default();
@@ -133,6 +157,16 @@ impl Default for AppState {
             upscaling_buffer: None,
             upscaling_stop_signal: None,
             frame_texture: None,
+            status_bar: StatusBar::new(),
+            region_dialog: RegionDialog::new(),
+            texture_manager: Arc::new(Mutex::new(TextureManager::new())),
+            frame_buffer: Arc::new(FrameBuffer::new(10)),
+            stop_signal: Arc::new(Mutex::new(false)),
+            capture_status: Arc::new(Mutex::new("Idle".to_string())),
+            temp_status_message: Arc::new(Mutex::new(None)),
+            show_error_dialog: false,
+            error_message: String::new(),
+            _phantom: PhantomData,
         }
     }
 }
@@ -193,12 +227,6 @@ impl eframe::App for AppState {
     }
 }
 
-enum TabState {
-    Capture,
-    Settings,
-    Advanced,
-}
-
 impl AppState {
     /// Configure custom fonts
     fn configure_fonts(&self, ctx: &egui::Context) {
@@ -216,7 +244,7 @@ impl AppState {
             
             let save_button = ui.button(RichText::new("💾 Save Profile").size(14.0));
             if save_button.clicked() {
-                if let Err(e) = self.profile.save() {
+                if let Err(e) = self.profile.save(None) {
                     self.status_message = format!("Error saving profile: {}", e);
                     self.status_message_type = StatusMessageType::Error;
                 } else {
@@ -377,86 +405,36 @@ impl AppState {
     
     /// Show the region selection dialog
     fn show_region_dialog(&mut self, ctx: &egui::Context) {
-        egui::Window::new("Select Region")
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .default_width(400.0)
-            .show(ctx, |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.heading(RichText::new("Select Capture Region").size(20.0));
-                });
-                
-                ui.add_space(16.0);
-                
-                // X coordinate
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("X:").strong());
-                    ui.add(
-                        Slider::new(&mut self.region.0, -2000..=2000)
-                            .text("px")
-                            .fixed_decimals(0)
-                    );
-                });
-                
-                // Y coordinate
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Y:").strong());
-                    ui.add(
-                        Slider::new(&mut self.region.1, -2000..=2000)
-                            .text("px")
-                            .fixed_decimals(0)
-                    );
-                });
-                
-                ui.add_space(8.0);
-                
-                // Convert to i32 for the slider UI
-                let mut width_i32 = self.region.2 as i32;
-                let mut height_i32 = self.region.3 as i32;
-                
-                // Add sliders for width and height
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Width:").strong());
-                    ui.add(
-                        Slider::new(&mut width_i32, 100..=3840)
-                            .text("px")
-                            .fixed_decimals(0)
-                    );
-                });
-                
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Height:").strong());
-                    ui.add(
-                        Slider::new(&mut height_i32, 100..=2160)
-                            .text("px")
-                            .fixed_decimals(0)
-                    );
-                });
-                
-                // Store values back 
-                self.region.2 = width_i32 as u32;
-                self.region.3 = height_i32 as u32;
-                
-                ui.add_space(16.0);
-                
-                ui.horizontal(|ui| {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::BOTTOM), |ui| {
-                        if ui.button(RichText::new("OK")).clicked() {
-                            self.show_region_dialog = false;
-                            self.profile.source = CaptureSource::Region {
-                                x: self.region.0,
-                                y: self.region.1,
-                                width: self.region.2,
-                                height: self.region.3,
-                            };
-                        }
-                        if ui.button(RichText::new("Cancel")).clicked() {
-                            self.show_region_dialog = false;
-                        }
-                    });
-                });
-            });
+        let mut dialog = RegionDialog::new();
+        
+        // Set initial region values
+        dialog.set_region(
+            self.region.0, 
+            self.region.1, 
+            self.region.2 as i32, 
+            self.region.3 as i32
+        );
+        
+        if dialog.show(ctx) {
+            // Dialog was confirmed with OK
+            self.show_region_dialog = false;
+            
+            // Get region values from dialog
+            let (x, y, width, height) = dialog.get_region();
+            
+            // Update the region
+            self.region = (x, y, width as u32, height as u32);
+            
+            // Update the profile
+            self.profile.capture_source = 2; // Region capture
+            self.profile.region_x = x;
+            self.profile.region_y = y;
+            self.profile.region_width = width as u32;
+            self.profile.region_height = height as u32;
+        } else if dialog.was_cancelled() {
+            // Dialog was cancelled
+            self.show_region_dialog = false;
+        }
     }
     
     /// Show the capture tab
@@ -479,14 +457,110 @@ impl AppState {
                         .selected_text(RichText::new(&self.profile.name).strong())
                         .width(200.0)
                         .show_ui(ui, |ui| {
-                            for profile_name in &self.available_profiles {
-                                ui.selectable_value(
-                                    &mut self.profile.name, 
-                                    profile_name.clone(), 
+                            // Need to clone names to avoid borrowing issues if profile changes
+                            let profile_names = self.available_profiles.clone();
+                            let mut selected_profile_name_in_combo = self.profile.name.clone(); // Use a temporary variable for the combo box state
+                            let mut profile_changed = false;
+                            for profile_name in &profile_names {
+                                if ui.selectable_value(
+                                    &mut selected_profile_name_in_combo,
+                                    profile_name.clone(),
                                     profile_name
-                                );
+                                ).changed() {
+                                    profile_changed = true; // Mark that a change occurred
+                                }
                             }
+                            // If the selection changed, load the profile after the loop
+                            if profile_changed && selected_profile_name_in_combo != self.profile.name {
+                                 // Load the selected profile
+                                 if let Ok(loaded_profile) = Profile::load(&format!("{}.json", selected_profile_name_in_combo)) { // Use the temp variable
+                                     self.profile = loaded_profile;
+                                     self.capture_source_index = self.profile.capture_source; // Update index
+                                     self.region = (self.profile.region_x, self.profile.region_y, self.profile.region_width, self.profile.region_height); // Update region
+                                     self.settings.current_profile = selected_profile_name_in_combo; // Assign the final selected name
+                                     let _ = self.settings.save(); // Save settings immediately
+                                     self.status_message = format!("Loaded profile: {}", self.profile.name);
+                                     self.status_message_type = StatusMessageType::Info;
+                                 } else {
+                                     self.status_message = format!("Failed to load profile: {}", selected_profile_name_in_combo);
+                                     self.status_message_type = StatusMessageType::Error;
+                                      // Optionally revert selected_profile_name_in_combo back to self.profile.name if load fails
+                                 }
+                             }
                         });
+                });
+                
+                ui.horizontal(|ui| {
+                    if ui.button(RichText::new("Save").size(14.0)).clicked() {
+                        // Ensure profile name is filesystem-safe before saving if needed
+                        let profile_path = format!("{}.json", self.profile.name); // Simple path for now
+                        if let Err(e) = self.profile.save(Some(&profile_path)) { // Pass path to save
+                             // Use status bar instead of Dialog
+                            self.status_message = format!("Failed to save profile: {}", e);
+                            self.status_message_type = StatusMessageType::Error;
+                        } else {
+                            self.status_message = "Profile saved".to_string();
+                            self.status_message_type = StatusMessageType::Success;
+                            // Ensure saved profile is in the list
+                            if !self.available_profiles.contains(&self.profile.name) {
+                                self.available_profiles.push(self.profile.name.clone());
+                            }
+                        }
+                    }
+                    
+                    if ui.button(RichText::new("📋 New").size(14.0)).clicked() {
+                        // TODO: Show profile name input dialog for better UX
+                        let new_name = format!("Profile_{}", self.available_profiles.len() + 1);
+                        self.profile = Profile::new(&new_name);
+                         // Reset UI state associated with the profile
+                        self.capture_source_index = self.profile.capture_source;
+                        self.region = (self.profile.region_x, self.profile.region_y, self.profile.region_width, self.profile.region_height);
+                        // Save the new profile immediately so it exists
+                        let profile_path = format!("{}.json", self.profile.name);
+                        if let Err(e) = self.profile.save(Some(&profile_path)) {
+                             self.status_message = format!("Failed to save new profile: {}", e);
+                             self.status_message_type = StatusMessageType::Error;
+                        } else {
+                             self.available_profiles.push(new_name); // Add only if save succeeded
+                             self.status_message = "New profile created".to_string();
+                             self.status_message_type = StatusMessageType::Success;
+                        }
+                    }
+                    
+                    if ui.button(RichText::new("❌ Delete").size(14.0)).clicked() {
+                        // TODO: Show confirmation dialog
+                        let profile_to_delete = self.profile.name.clone();
+                        // Prevent deleting the last profile if needed, or ensure a default exists
+                        if profile_to_delete != "Default" && self.available_profiles.len() > 1 { // Example: don't delete "Default" or the last one
+                             let profile_path = format!("{}.json", profile_to_delete);
+                             if let Ok(_) = std::fs::remove_file(&profile_path) { // Use std::fs directly
+                                 self.status_message = "Profile deleted".to_string();
+                                 self.status_message_type = StatusMessageType::Success;
+
+                                 // Remove from available list
+                                 self.available_profiles.retain(|p| p != &profile_to_delete);
+
+                                 // Load the first available profile (or default)
+                                 let next_profile_name = self.available_profiles.first().cloned().unwrap_or_else(|| "Default".to_string());
+                                 if let Ok(loaded_profile) = Profile::load(&format!("{}.json", next_profile_name)) {
+                                     self.profile = loaded_profile;
+                                 } else {
+                                     self.profile = Profile::default(); // Fallback to default
+                                 }
+                                 self.capture_source_index = self.profile.capture_source;
+                                 self.region = (self.profile.region_x, self.profile.region_y, self.profile.region_width, self.profile.region_height);
+                                 self.settings.current_profile = self.profile.name.clone();
+                                 let _ = self.settings.save();
+
+                             } else {
+                                 self.status_message = "Error deleting profile file".to_string();
+                                 self.status_message_type = StatusMessageType::Error;
+                             }
+                        } else {
+                             self.status_message = "Cannot delete the last or default profile".to_string();
+                             self.status_message_type = StatusMessageType::Warning;
+                        }
+                    }
                 });
             });
             
@@ -496,25 +570,29 @@ impl AppState {
                 ui.add_space(12.0);
                 
                 // Fullscreen
-                let fullscreen_selected = ui.radio_value(
-                    &mut self.capture_source_index, 
-                    0, 
+                if ui.radio_value(
+                    &mut self.capture_source_index,
+                    0,
                     RichText::new("🖥️ Fullscreen").size(14.0)
-                ).clicked();
-                
-                if fullscreen_selected || self.capture_source_index == 0 {
-                    self.profile.source = CaptureSource::Fullscreen;
+                ).changed() {
+                    self.profile.capture_source = 0;
                 }
                 
                 ui.add_space(4.0);
                 
                 // Window
                 ui.horizontal(|ui| {
-                    let _window_selected = ui.radio_value(
-                        &mut self.capture_source_index, 
-                        1, 
+                    if ui.radio_value(
+                        &mut self.capture_source_index,
+                        1,
                         RichText::new("🪟 Window").size(14.0)
-                    ).clicked();
+                    ).changed() {
+                         self.profile.capture_source = 1;
+                         // Update window title if a window is selected
+                         if let Some(win_title) = self.available_windows.get(self.selected_window_index) {
+                             self.profile.window_title = win_title.clone();
+                         }
+                    }
                     
                     if self.capture_source_index == 1 {
                         ui.add_space(16.0);
@@ -527,10 +605,20 @@ impl AppState {
                             )
                             .width(240.0)
                             .show_ui(ui, |ui| {
+                                let mut changed = false;
                                 for (i, window_name) in self.available_windows.iter().enumerate() {
-                                    if ui.selectable_value(&mut self.selected_window_index, i, window_name).changed() {
-                                        self.profile.source = CaptureSource::Window(window_name.clone());
+                                    // Use selectable_value correctly
+                                    if ui.selectable_label(self.selected_window_index == i, window_name).clicked() {
+                                        if self.selected_window_index != i {
+                                            self.selected_window_index = i;
+                                            changed = true;
+                                        }
                                     }
+                                }
+                                // Update profile only if selection changed
+                                if changed {
+                                    self.profile.capture_source = 1;
+                                    self.profile.window_title = self.available_windows[self.selected_window_index].clone();
                                 }
                             });
                             
@@ -541,6 +629,13 @@ impl AppState {
                             self.available_windows = crate::capture::common::list_available_windows()
                                 .map(|windows| windows.iter().map(|w| w.title.clone()).collect())
                                 .unwrap_or_default();
+                            // Reset selection if current index is out of bounds
+                            if self.selected_window_index >= self.available_windows.len() {
+                                self.selected_window_index = 0;
+                                if self.profile.capture_source == 1 { // Update profile title if window was selected
+                                    self.profile.window_title = self.available_windows.first().cloned().unwrap_or_default();
+                                }
+                            }
                         }
                     }
                 });
@@ -549,11 +644,18 @@ impl AppState {
                 
                 // Region
                 ui.horizontal(|ui| {
-                    let _region_selected = ui.radio_value(
-                        &mut self.capture_source_index, 
-                        2, 
+                     if ui.radio_value(
+                        &mut self.capture_source_index,
+                        2,
                         RichText::new("📏 Region").size(14.0)
-                    ).clicked();
+                    ).changed() {
+                         self.profile.capture_source = 2;
+                         // Update profile region fields when Region is selected
+                         self.profile.region_x = self.region.0;
+                         self.profile.region_y = self.region.1;
+                         self.profile.region_width = self.region.2;
+                         self.profile.region_height = self.region.3;
+                    }
                     
                     if self.capture_source_index == 2 {
                         ui.add_space(16.0);
@@ -564,37 +666,15 @@ impl AppState {
                         
                         ui.add_space(8.0);
                         
-                        let (x, y, width, height) = match self.profile.source {
-                            CaptureSource::Region { x, y, width, height } => (x, y, width, height),
-                            _ => self.region,
-                        };
+                        // Update region display from self.region, not profile directly
+                        // as profile might only update when the dialog confirms
+                        let (x, y, width, height) = self.region;
                         
                         ui.label(
                             RichText::new(format!("({}, {}, {}x{})", x, y, width, height))
                                 .monospace()
                         );
                     }
-                });
-            });
-            
-            // Platform selection
-            Self::card_frame().show(ui, |ui| {
-                ui.strong(RichText::new("System Platform").size(16.0).color(ACCENT_COLOR));
-                ui.add_space(12.0);
-                
-                ui.horizontal(|ui| {
-                    ui.label("Platform:");
-                    ui.add_space(8.0);
-                    
-                    egui::ComboBox::from_id_source("platform_selector")
-                        .selected_text(format!("{:?}", self.profile.platform))
-                        .width(200.0)
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut self.profile.platform, SystemPlatform::Auto, "Auto");
-                            ui.selectable_value(&mut self.profile.platform, SystemPlatform::Windows, "Windows");
-                            ui.selectable_value(&mut self.profile.platform, SystemPlatform::X11, "X11");
-                            ui.selectable_value(&mut self.profile.platform, SystemPlatform::Wayland, "Wayland");
-                        });
                 });
             });
         });
@@ -631,15 +711,25 @@ impl AppState {
                     ui.label("Upscaling Technology:");
                     ui.add_space(8.0);
                     
+                    // Map usize back to string for display
+                    let tech_text = match self.profile.upscaling_tech {
+                         0 => "Auto", // Assuming 0 is Auto/None
+                         1 => "AMD FSR",
+                         2 => "NVIDIA DLSS",
+                         3 => "Fallback/Basic",
+                         _ => "Unknown",
+                    };
+                    
                     egui::ComboBox::from_id_source("upscale_tech")
-                        .selected_text(format!("{:?}", self.profile.upscaling_tech))
+                        .selected_text(tech_text) // Display mapped text
                         .width(300.0)
                         .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut self.profile.upscaling_tech, UpscalingTechnology::None, "None");
-                            ui.selectable_value(&mut self.profile.upscaling_tech, UpscalingTechnology::FSR, "AMD FidelityFX Super Resolution (FSR)");
-                            ui.selectable_value(&mut self.profile.upscaling_tech, UpscalingTechnology::DLSS, "NVIDIA Deep Learning Super Sampling (DLSS)");
-                            ui.selectable_value(&mut self.profile.upscaling_tech, UpscalingTechnology::Fallback, "Traditional Algorithms");
-                            ui.selectable_value(&mut self.profile.upscaling_tech, UpscalingTechnology::Custom, "Custom");
+                            // Use usize values directly
+                            ui.selectable_value(&mut self.profile.upscaling_tech, 0, "Auto");
+                            ui.selectable_value(&mut self.profile.upscaling_tech, 1, "AMD FSR");
+                            ui.selectable_value(&mut self.profile.upscaling_tech, 2, "NVIDIA DLSS");
+                            ui.selectable_value(&mut self.profile.upscaling_tech, 3, "Fallback/Basic");
+                            // Removed Custom as it wasn't in the Profile struct definition
                         });
                 });
                 
@@ -650,99 +740,86 @@ impl AppState {
                     ui.label("Upscaling Quality:");
                     ui.add_space(8.0);
                     
+                    // Map usize back to string for display
+                    let quality_text = match self.profile.upscaling_quality {
+                        0 => "Ultra",
+                        1 => "Quality",
+                        2 => "Balanced",
+                        3 => "Performance",
+                        _ => "Unknown",
+                    };
+                    
                     egui::ComboBox::from_id_source("upscale_quality")
-                        .selected_text(format!("{:?}", self.profile.upscaling_quality))
+                        .selected_text(quality_text) // Display mapped text
                         .width(300.0)
                         .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut self.profile.upscaling_quality, UpscalingQuality::Ultra, "Ultra Quality");
-                            ui.selectable_value(&mut self.profile.upscaling_quality, UpscalingQuality::Quality, "Quality");
-                            ui.selectable_value(&mut self.profile.upscaling_quality, UpscalingQuality::Balanced, "Balanced");
-                            ui.selectable_value(&mut self.profile.upscaling_quality, UpscalingQuality::Performance, "Performance");
+                             // Use usize values directly
+                            ui.selectable_value(&mut self.profile.upscaling_quality, 0, "Ultra Quality");
+                            ui.selectable_value(&mut self.profile.upscaling_quality, 1, "Quality");
+                            ui.selectable_value(&mut self.profile.upscaling_quality, 2, "Balanced");
+                            ui.selectable_value(&mut self.profile.upscaling_quality, 3, "Performance");
                         });
                 });
                 
-                // Only show algorithm selection for Traditional/Fallback upscaling
-                if self.profile.upscaling_tech == UpscalingTechnology::Fallback {
+                // Only show algorithm selection for Traditional/Fallback upscaling (index 3)
+                if self.profile.upscaling_tech == 3 {
                     ui.add_space(8.0);
                     
-                    // Initialize algorithm if not set
-                    if self.profile.upscaling_algorithm.is_none() {
-                        self.profile.upscaling_algorithm = Some("Lanczos3".to_string());
-                    }
-                    
-                    // Upscaling algorithm 
+                    // Upscaling algorithm is usize
                     ui.horizontal(|ui| {
                         ui.label("Upscaling Algorithm:");
                         ui.add_space(8.0);
                         
-                        let mut current_algorithm = self.profile.upscaling_algorithm.clone().unwrap_or_else(|| "Lanczos3".to_string());
+                        // Map usize back to string for display
+                        let algo_text = match self.profile.upscaling_algorithm {
+                             0 => "Lanczos (a=3)",
+                             1 => "Bicubic",
+                             2 => "Bilinear",
+                             3 => "Nearest-Neighbor",
+                             _ => "Unknown", // Or default to Lanczos3 text
+                        };
+                        let mut current_algorithm_index = self.profile.upscaling_algorithm;
                         
                         egui::ComboBox::from_id_source("upscale_algorithm")
-                            .selected_text(match current_algorithm.as_str() {
-                                "NearestNeighbor" => "Nearest-Neighbor",
-                                "Bilinear" => "Bilinear",
-                                "Bicubic" => "Bicubic",
-                                "Lanczos2" => "Lanczos (a=2)",
-                                "Lanczos3" => "Lanczos (a=3)",
-                                "Mitchell" => "Mitchell-Netravali",
-                                "Area" => "Area (Box) Resample",
-                                _ => "Lanczos (a=3)",
-                            })
+                            .selected_text(algo_text) // Use mapped text
                             .width(300.0)
                             .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut current_algorithm, "NearestNeighbor".to_string(), 
-                                    "Nearest-Neighbor - Zero smoothing, zero blur, but aliased");
-                                ui.selectable_value(&mut current_algorithm, "Bilinear".to_string(), 
-                                    "Bilinear - Fast and smooth, but tends to blur sharp edges");
-                                ui.selectable_value(&mut current_algorithm, "Bicubic".to_string(), 
-                                    "Bicubic - Preserves more edge sharpness than bilinear");
-                                ui.selectable_value(&mut current_algorithm, "Lanczos2".to_string(), 
-                                    "Lanczos (a=2) - Good edge preservation with 4×4 kernel");
-                                ui.selectable_value(&mut current_algorithm, "Lanczos3".to_string(), 
-                                    "Lanczos (a=3) - Best edge preservation with 6×6 kernel");
-                                ui.selectable_value(&mut current_algorithm, "Mitchell".to_string(), 
-                                    "Mitchell-Netravali - Tunable cubic filter for balanced results");
-                                ui.selectable_value(&mut current_algorithm, "Area".to_string(), 
-                                    "Area (Box) - Excellent for downscaling, useful for upscaling to avoid overshoot");
+                                // Use usize values
+                                ui.selectable_value(&mut current_algorithm_index, 3, "Nearest-Neighbor"); // Index 3
+                                ui.selectable_value(&mut current_algorithm_index, 2, "Bilinear");       // Index 2
+                                ui.selectable_value(&mut current_algorithm_index, 1, "Bicubic");        // Index 1
+                                ui.selectable_value(&mut current_algorithm_index, 0, "Lanczos (a=3)");  // Index 0
+                                // Add other algorithms if defined in Profile struct with corresponding indices
                             });
-                            
-                        self.profile.upscaling_algorithm = Some(current_algorithm);
+                        // Update the profile if the index changed
+                        if current_algorithm_index != self.profile.upscaling_algorithm {
+                             self.profile.upscaling_algorithm = current_algorithm_index;
+                        }
                     });
                     
-                    // Add algorithm description
-                    if let Some(algorithm) = &self.profile.upscaling_algorithm {
-                        ui.add_space(4.0);
-                        ui.horizontal(|ui| {
-                            ui.add_space(138.0); // Align with dropdown content
-                            
-                            let description = match algorithm.as_str() {
-                                "NearestNeighbor" => 
-                                    "Copies each input pixel to an N×N block. Zero smoothing, zero blur, but aliased.",
-                                "Bilinear" => 
-                                    "Computes a weighted average of the four nearest input pixels. Fast and smooth, but tends to blur sharp edges.",
-                                "Bicubic" => 
-                                    "Uses cubic convolution on a 4×4 neighborhood to preserve more edge sharpness than bilinear, at moderate cost.",
-                                "Lanczos2" => 
-                                    "Windowed sinc filter over a 4×4 kernel. Good edge preservation with moderate compute.",
-                                "Lanczos3" => 
-                                    "Windowed sinc filter over a 6×6 kernel. Best edge preservation among traditional kernels, heavier compute.",
-                                "Mitchell" => 
-                                    "Tunable two-parameter cubic filters that trade off ringing vs. smoothness.",
-                                "Area" => 
-                                    "Averages all pixels covered by the destination pixel's footprint. Excellent for downscaling, sometimes used for upscaling.",
-                                _ => "",
-                            };
-                            
-                            ui.label(RichText::new(description).weak().italics());
-                        });
-                    }
-                } else {
-                    // Reset algorithm when not using traditional upscaling
-                    self.profile.upscaling_algorithm = None;
+                    // Add algorithm description based on the usize index
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.add_space(138.0); // Align with dropdown content
+                        
+                        let description = match self.profile.upscaling_algorithm {
+                             3 => "Copies each input pixel to an N×N block. Zero smoothing, zero blur, but aliased.",
+                             2 => "Computes a weighted average of the four nearest input pixels. Fast and smooth, but tends to blur sharp edges.",
+                             1 => "Uses cubic convolution on a 4×4 neighborhood to preserve more edge sharpness than bilinear, at moderate cost.",
+                             0 => "Windowed sinc filter over a 6×6 kernel. Best edge preservation among traditional kernels, heavier compute.",
+                             _ => "", // Default or handle unknown index
+                        };
+                        
+                        ui.label(RichText::new(description).weak().italics());
+                    });
+                    
                 }
+                // No else needed, algorithm index remains as is when tech is not Fallback
             });
             
-            // Hotkey settings
+            // Hotkey settings - REMOVED as `hotkey` field doesn't exist on Profile
+            // Self::card_frame().show(ui, |ui| { ... });
+            // Use settings fields for hotkeys instead
             Self::card_frame().show(ui, |ui| {
                 ui.strong(RichText::new("Hotkey Settings").size(16.0).color(ACCENT_COLOR));
                 ui.add_space(12.0);
@@ -751,9 +828,10 @@ impl AppState {
                 ui.horizontal(|ui| {
                     ui.label("Start/Stop Capture:");
                     ui.add_space(8.0);
-                    let text_edit = TextEdit::singleline(&mut self.profile.hotkey)
+                    // Use the field from AppSettings
+                    let text_edit = TextEdit::singleline(&mut self.settings.toggle_capture_hotkey)
                         .desired_width(200.0)
-                        .hint_text("Enter hotkey (e.g., Ctrl+Alt+C)");
+                        .hint_text("Enter hotkey (e.g., Ctrl+Shift+C)");
                     ui.add(text_edit);
                 });
                 
@@ -763,9 +841,10 @@ impl AppState {
                 ui.horizontal(|ui| {
                     ui.label("Capture Single Frame:");
                     ui.add_space(8.0);
-                    let text_edit = TextEdit::singleline(&mut self.single_frame_hotkey)
+                     // Use the field from AppSettings
+                    let text_edit = TextEdit::singleline(&mut self.settings.capture_frame_hotkey)
                         .desired_width(200.0)
-                        .hint_text("Enter hotkey (e.g., Ctrl+Alt+S)");
+                        .hint_text("Enter hotkey (e.g., Ctrl+Shift+F)");
                     ui.add(text_edit);
                 });
                 
@@ -775,11 +854,13 @@ impl AppState {
                 ui.horizontal(|ui| {
                     ui.label("Toggle Overlay:");
                     ui.add_space(8.0);
-                    let text_edit = TextEdit::singleline(&mut self.toggle_overlay_hotkey)
+                    // Use the field from AppSettings
+                    let text_edit = TextEdit::singleline(&mut self.settings.toggle_overlay_hotkey)
                         .desired_width(200.0)
-                        .hint_text("Enter hotkey (e.g., Ctrl+Alt+O)");
+                        .hint_text("Enter hotkey (e.g., Ctrl+Shift+O)");
                     ui.add(text_edit);
                 });
+                 ui.label("Note: Hotkey changes might require restart."); // Add note
             });
             
             // FPS settings
@@ -790,19 +871,12 @@ impl AppState {
                 ui.horizontal(|ui| {
                     ui.label("Target FPS:");
                     ui.add_space(8.0);
-                    let slider = Slider::new(&mut self.profile.fps, 1..=240)
+                     // Fix slider range type
+                    let slider = Slider::new(&mut self.profile.fps, 1.0..=240.0)
                         .text("fps");
                     let _response = ui.add_sized([300.0, 20.0], slider);
                     ui.label(format!("{} fps", self.profile.fps));
                 });
-            });
-            
-            // Overlay settings
-            Self::card_frame().show(ui, |ui| {
-                ui.strong(RichText::new("Overlay").size(16.0).color(ACCENT_COLOR));
-                ui.add_space(12.0);
-                
-                ui.checkbox(&mut self.profile.enable_overlay, "Enable Overlay");
             });
         });
     }
@@ -821,13 +895,15 @@ impl AppState {
                 
                 // Checkboxes for application settings
                 ui.vertical(|ui| {
-                    ui.checkbox(&mut self.settings.start_minimized, "Start Minimized");
-                    ui.add_space(4.0);
-                    ui.checkbox(&mut self.settings.start_with_system, "Start with System");
-                    ui.add_space(4.0);
-                    ui.checkbox(&mut self.settings.check_for_updates, "Check for Updates");
-                    ui.add_space(4.0);
-                    ui.checkbox(&mut self.settings.auto_save_profiles, "Auto-save Profiles");
+                    // REMOVED: ui.checkbox(&mut self.settings.start_minimized, "Start Minimized");
+                    // REMOVED: ui.checkbox(&mut self.settings.start_with_system, "Start with System");
+                    // REMOVED: ui.checkbox(&mut self.settings.check_for_updates, "Check for Updates");
+                    // Corrected field name:
+                    ui.checkbox(&mut self.settings.auto_save_frames, "Auto-save Captured Frames");
+                     ui.add_space(4.0);
+                     ui.checkbox(&mut self.settings.show_fps_counter, "Show FPS counter");
+                     ui.add_space(4.0);
+                     ui.checkbox(&mut self.settings.show_notifications, "Show notifications");
                 });
                 
                 ui.add_space(8.0);
@@ -838,10 +914,11 @@ impl AppState {
                     ui.add_space(8.0);
                     
                     egui::ComboBox::from_id_source("theme")
-                        .selected_text(&self.settings.theme)
+                        .selected_text(&self.settings.theme) // Theme is already String
                         .width(200.0)
                         .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut self.settings.theme, "system".to_string(), "System");
+                            // Theme field is String, no need for System value? Assuming dark/light
+                            // ui.selectable_value(&mut self.settings.theme, "system".to_string(), "System");
                             ui.selectable_value(&mut self.settings.theme, "light".to_string(), "Light");
                             ui.selectable_value(&mut self.settings.theme, "dark".to_string(), "Dark");
                         });
@@ -857,6 +934,17 @@ impl AppState {
                     ui.label("Advanced settings will be available in future versions.");
                 });
             });
+            
+             // Save settings button for this tab
+             if ui.button("Save Application Settings").clicked() {
+                 if let Err(e) = self.settings.save() {
+                     self.status_message = format!("Failed to save settings: {}", e);
+                     self.status_message_type = StatusMessageType::Error;
+                 } else {
+                     self.status_message = "Application settings saved".to_string();
+                     self.status_message_type = StatusMessageType::Success;
+                 }
+             }
         });
     }
 
@@ -887,41 +975,29 @@ impl AppState {
     pub fn start_upscaling_mode(
         &mut self,
         source: CaptureTarget,
-        technology: LibUpscalingTechnology,
-        quality: LibUpscalingQuality,
+        technology: UpscalingTechnology,
+        quality: UpscalingQuality,
         fps: u32,
-        algorithm: Option<LibUpscalingAlgorithm>,
+        algorithm: Option<UpscalingAlgorithm>,
     ) -> Result<()> {
-        // Create a buffer to share frames between threads
-        let buffer = Arc::new(FrameBuffer::new(10));
-        
-        // Create a stop signal
-        let stop_signal = Arc::new(Mutex::new(false));
-        
-        // Clone for capture thread
-        let capture_buffer = Arc::clone(&buffer);
-        let capture_stop = Arc::clone(&stop_signal);
+        // Create buffer with capacity for 10 frames and a stop signal
+        let buffer = Arc::new(FrameBuffer::new(10)); 
+        let stop_signal = Arc::new(AtomicBool::new(false));
         
         // Start capture thread
-        let capture_handle = crate::capture::common::start_live_capture_thread(
+        let _capture_handle = crate::capture::common::start_live_capture_thread(
             source,
             fps,
-            capture_buffer,
-            capture_stop,
+            buffer.clone(),
+            stop_signal.clone(),
         )?;
         
-        // Create upscaler
-        let mut upscaler = create_upscaler(technology, quality, algorithm)?;
+        // Store references for cleanup
+        self.upscaling_buffer = Some(buffer);
+        self.upscaling_stop_signal = Some(stop_signal);
         
-        // Store buffer and stop signal
-        self.upscaling_buffer = Some(Arc::clone(&buffer));
-        self.upscaling_stop_signal = Some(Arc::clone(&stop_signal));
-        
-        // Set upscaling mode
+        // Set state
         self.is_upscaling = true;
-        
-        // Store capture thread handle to join later
-        // TODO: Store thread handle to join when done
         
         Ok(())
     }
@@ -980,20 +1056,20 @@ impl AppState {
                 }
             });
         
-        // Handle Escape key to exit upscaling mode
-        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.is_upscaling = false;
-            
-            // Stop capture thread
-            if let Some(stop_signal) = &self.upscaling_stop_signal {
-                if let Ok(mut stop) = stop_signal.lock() {
-                    *stop = true;
-                }
+        let mut should_stop = false;
+        if let Some(stop_signal_mutex) = &self.upscaling_stop_signal {
+            if let Ok(stop) = stop_signal_mutex.lock() {
+                should_stop = *stop;
             }
-            
-            // Clear buffer references
+        }
+
+        if should_stop {
+            self.is_upscaling = false;
             self.upscaling_buffer = None;
             self.upscaling_stop_signal = None;
+            self.status_message = "Upscaling stopped.".to_string();
+            self.status_message_type = StatusMessageType::Info;
+            return;
         }
         
         // Request continuous repainting
@@ -1002,85 +1078,95 @@ impl AppState {
     
     /// Launch the fullscreen upscaling mode with current profile settings
     fn launch_fullscreen_mode(&mut self) {
-        // Create capture target from profile
-        let target = match &self.profile.source {
-            CaptureSource::Fullscreen => CaptureTarget::FullScreen,
-            CaptureSource::Window(title) => CaptureTarget::WindowByTitle(title.clone()),
-            CaptureSource::Region { x, y, width, height } => CaptureTarget::Region {
-                x: *x,
-                y: *y,
-                width: *width,
-                height: *height,
+        // Get the capture target based on the profile configuration
+        let target = match self.profile.capture_source {
+            0 => CaptureTarget::FullScreen,
+            1 => CaptureTarget::WindowByTitle(self.profile.window_title.clone()),
+            2 => CaptureTarget::Region {
+                x: self.profile.region_x,
+                y: self.profile.region_y,
+                width: self.profile.region_width,
+                height: self.profile.region_height,
             },
+            _ => CaptureTarget::FullScreen, // Default fallback
         };
         
-        // Convert upscaling technology
-        let technology = self.map_tech(&self.profile.upscaling_tech);
+        // Map technology and quality
+        let tech = match self.profile.upscaling_tech {
+            0 => UpscalingTechnology::FSR,
+            1 => UpscalingTechnology::DLSS,
+            2 => UpscalingTechnology::Fallback,
+            3 => UpscalingTechnology::Fallback,
+            _ => UpscalingTechnology::Fallback,
+        };
         
-        // Convert quality setting
-        let quality = self.map_quality(&self.profile.upscaling_quality);
+        let quality = match self.profile.upscaling_quality {
+            0 => UpscalingQuality::Ultra,
+            1 => UpscalingQuality::Quality,
+            2 => UpscalingQuality::Balanced,
+            3 => UpscalingQuality::Performance,
+            _ => UpscalingQuality::Balanced,
+        };
         
-        // Convert algorithm if using fallback technology
-        let algorithm = if self.profile.upscaling_tech == UpscalingTechnology::Fallback {
-            if let Some(alg_str) = &self.profile.upscaling_algorithm {
-                nu_scaler::string_to_algorithm(alg_str)
-            } else {
-                None
+        // Determine algorithm based on technology
+        let algorithm = if tech == UpscalingTechnology::Fallback {
+            match self.profile.upscaling_algorithm {
+                0 => Some(UpscalingAlgorithm::Lanczos3),
+                1 => Some(UpscalingAlgorithm::NearestNeighbor),
+                2 => Some(UpscalingAlgorithm::Bilinear),
+                4 => Some(UpscalingAlgorithm::Bicubic),
+                _ => Some(UpscalingAlgorithm::Lanczos3),
             }
         } else {
             None
         };
         
-        // Save the profile before launching fullscreen mode
-        if let Err(e) = self.profile.save() {
-            self.status_message = format!("Warning: Failed to save profile before launching fullscreen: {}", e);
-            self.status_message_type = StatusMessageType::Warning;
-        }
-        
-        // Start upscaling mode directly within the current window
-        match self.toggle_fullscreen_mode()
-            .and_then(|_| self.start_upscaling_mode(
-                target,
-                technology,
-                quality,
-                self.profile.fps,
-                algorithm,
-            ))
-        {
-            Ok(_) => {
-                self.status_message = "Upscaling mode started. Press ESC to exit.".to_string();
-                self.status_message_type = StatusMessageType::Success;
-            },
-            Err(e) => {
-                self.status_message = format!("Failed to start upscaling mode: {}", e);
-                self.status_message_type = StatusMessageType::Error;
-                
-                // Exit fullscreen mode if we entered it
-                if self.is_fullscreen {
-                    self.toggle_fullscreen_mode().ok();
-                }
+        // Create the FrameBuffer and the LOCAL AtomicBool stop signal for fullscreen
+        let frame_buffer = Arc::new(FrameBuffer::new(60));
+        let stop_signal = Arc::new(AtomicBool::new(false));
+
+        // Launch the fullscreen UI thread
+        let thread_frame_buffer = frame_buffer.clone();
+        let thread_stop_signal = stop_signal.clone();
+        let thread_tech = tech;
+        let thread_quality = quality;
+        let thread_algorithm = algorithm;
+
+        let _app_handle = std::thread::spawn(move || {
+            if let Err(e) = crate::renderer::fullscreen::run_fullscreen_upscaler(
+                thread_frame_buffer,
+                thread_stop_signal,
+                thread_tech,
+                thread_quality,
+                thread_algorithm,
+            ) {
+                eprintln!("Failed to run fullscreen renderer: {}", e);
             }
-        }
+        });
+
+        self.is_fullscreen = true;
+        self.status_message = "Launched fullscreen mode.".to_string();
+        self.status_message_type = StatusMessageType::Info;
     }
 
     // Map profile UpscalingTechnology to library UpscalingTechnology
-    fn map_tech(&self, tech: &super::profile::UpscalingTechnology) -> LibUpscalingTechnology {
+    fn map_tech(&self, tech: &ProfileUpscalingTechnology) -> UpscalingTechnology {
         match tech {
-            super::profile::UpscalingTechnology::None => LibUpscalingTechnology::Fallback,
-            super::profile::UpscalingTechnology::FSR => LibUpscalingTechnology::FSR,
-            super::profile::UpscalingTechnology::DLSS => LibUpscalingTechnology::DLSS,
-            super::profile::UpscalingTechnology::Fallback => LibUpscalingTechnology::Fallback,
-            super::profile::UpscalingTechnology::Custom => LibUpscalingTechnology::Fallback,
+            ProfileUpscalingTechnology::None => UpscalingTechnology::Fallback,
+            ProfileUpscalingTechnology::FSR => UpscalingTechnology::FSR,
+            ProfileUpscalingTechnology::DLSS => UpscalingTechnology::DLSS,
+            ProfileUpscalingTechnology::Fallback => UpscalingTechnology::Fallback,
+            ProfileUpscalingTechnology::Custom => UpscalingTechnology::Fallback,
         }
     }
 
     // Map profile UpscalingQuality to library UpscalingQuality
-    fn map_quality(&self, quality: &super::profile::UpscalingQuality) -> LibUpscalingQuality {
+    fn map_quality(&self, quality: &ProfileUpscalingQuality) -> UpscalingQuality {
         match quality {
-            super::profile::UpscalingQuality::Ultra => LibUpscalingQuality::Ultra,
-            super::profile::UpscalingQuality::Quality => LibUpscalingQuality::Quality,
-            super::profile::UpscalingQuality::Balanced => LibUpscalingQuality::Balanced,
-            super::profile::UpscalingQuality::Performance => LibUpscalingQuality::Performance,
+            ProfileUpscalingQuality::Ultra => UpscalingQuality::Ultra,
+            ProfileUpscalingQuality::Quality => UpscalingQuality::Quality,
+            ProfileUpscalingQuality::Balanced => UpscalingQuality::Balanced,
+            ProfileUpscalingQuality::Performance => UpscalingQuality::Performance,
         }
     }
 }
@@ -1098,230 +1184,14 @@ pub fn run_app() -> Result<()> {
     eframe::run_native(
         "NU Scale",
         native_options,
-        Box::new(|_cc| Box::new(AppState::default())),
-    )
-    .map_err(|e| anyhow::anyhow!("Failed to run application: {}", e))
-}
-
-/// Run a fullscreen renderer using wgpu and egui for hardware-accelerated upscaling
-pub fn run_fullscreen_renderer(
-    buffer: Arc<FrameBuffer>,
-    stop_signal: Arc<Mutex<bool>>,
-    processor: impl FnMut(&RgbaImage) -> anyhow::Result<RgbaImage> + Send + 'static,
-) -> anyhow::Result<()> {
-    // This is a placeholder implementation
-    println!("Fullscreen renderer called (placeholder implementation)");
-    
-    // Signal to stop
-    if let Ok(mut stop) = stop_signal.lock() {
-        *stop = true;
-    }
-    
-    Ok(())
-}
-
-/// Runs a fullscreen egui application for upscaling images
-pub fn run_fullscreen_upscaler(
-    frame_buffer: Arc<FrameBuffer>,
-    stop_signal: Arc<Mutex<bool>>,
-    upscaler: Box<dyn Upscaler>,
-    algorithm: Option<UpscalingAlgorithm>,
-) -> Result<()> {
-    let native_options = eframe::NativeOptions {
-        initial_window_size: Some(egui::vec2(1280.0, 720.0)),
-        maximized: true,
-        decorated: false,
-        transparent: false,
-        fullscreen: true,
-        ..Default::default()
-    };
-    
-    // Clone algorithm to move into closure
-    let algorithm_clone = algorithm.clone();
-    
-    eframe::run_native(
-        "NU_Scaler Fullscreen",
-        native_options,
-        Box::new(move |cc| {
-            Box::new(FullscreenUpscalerUi::new(
-                cc,
-                frame_buffer,
-                stop_signal,
-                upscaler,
-                algorithm_clone,
-            ))
+        Box::new(|cc| {
+            let mut app_state = AppState::default();
+            app_state.texture_manager = Arc::new(Mutex::new(TextureManager::new(cc.egui_ctx.clone())));
+            app_state.region_dialog = RegionDialog::new(cc.egui_ctx.clone());
+            Box::new(app_state)
         }),
     )
-    .map_err(|e| anyhow::anyhow!("Failed to run fullscreen upscaler: {}", e))
-}
+    .map_err(|e| anyhow!("Failed to run application: {}", e))?;
 
-// Implementation of the fullscreen upscaler UI
-struct FullscreenUpscalerUi {
-    frame_buffer: Arc<FrameBuffer>,
-    stop_signal: Arc<Mutex<bool>>,
-    upscaler: Box<dyn Upscaler>,
-    algorithm: Option<UpscalingAlgorithm>,
-    texture: Option<egui::TextureHandle>,
-    last_frame_time: std::time::Instant,
-    fps: f32,
-    frames_processed: u64,
-}
-
-impl FullscreenUpscalerUi {
-    fn new(
-        cc: &eframe::CreationContext<'_>,
-        frame_buffer: Arc<FrameBuffer>,
-        stop_signal: Arc<Mutex<bool>>,
-        upscaler: Box<dyn Upscaler>,
-        algorithm: Option<UpscalingAlgorithm>,
-    ) -> Self {
-        // Set up the theme
-        let mut style = (*cc.egui_ctx.style()).clone();
-        style.text_styles = [
-            (egui::TextStyle::Heading, egui::FontId::new(22.0, egui::FontFamily::Proportional)),
-            (egui::TextStyle::Body, egui::FontId::new(18.0, egui::FontFamily::Proportional)),
-            (egui::TextStyle::Monospace, egui::FontId::new(16.0, egui::FontFamily::Monospace)),
-            (egui::TextStyle::Button, egui::FontId::new(18.0, egui::FontFamily::Proportional)),
-            (egui::TextStyle::Small, egui::FontId::new(14.0, egui::FontFamily::Proportional)),
-        ].into();
-        cc.egui_ctx.set_style(style);
-        
-        // Configure keyboard focus for ESC key detection
-        cc.egui_ctx.set_visuals(egui::Visuals::dark());
-        
-        Self {
-            frame_buffer,
-            stop_signal,
-            upscaler,
-            algorithm,
-            texture: None,
-            last_frame_time: std::time::Instant::now(),
-            fps: 0.0,
-            frames_processed: 0,
-        }
-    }
-    
-    fn update_texture(&mut self, ctx: &egui::Context) {
-        if let Ok(Some(frame)) = self.frame_buffer.get_latest_frame() {
-            // Measure time for FPS calculation
-            let now = std::time::Instant::now();
-            let elapsed = now.duration_since(self.last_frame_time).as_secs_f32();
-            self.last_frame_time = now;
-            self.fps = 0.9 * self.fps + 0.1 * (1.0 / elapsed);
-            self.frames_processed += 1;
-            
-            // Process the frame with the upscaler
-            let upscaled_frame = match &self.algorithm {
-                Some(_algorithm) => {
-                    match self.upscaler.upscale(&frame) {
-                        Ok(output) => output,
-                        Err(e) => {
-                            eprintln!("Upscaling error: {}", e);
-                            return;
-                        }
-                    }
-                },
-                None => {
-                    match self.upscaler.upscale(&frame) {
-                        Ok(output) => output,
-                        Err(e) => {
-                            eprintln!("Upscaling error: {}", e);
-                            return;
-                        }
-                    }
-                }
-            };
-            
-            // Create or update texture
-            let size = [upscaled_frame.width() as _, upscaled_frame.height() as _];
-            let pixels = upscaled_frame.as_raw();
-            
-            let texture = self.texture.get_or_insert_with(|| {
-                ctx.load_texture(
-                    "upscaled-frame",
-                    egui::ColorImage::from_rgba_unmultiplied(size, pixels),
-                    egui::TextureOptions::default(),
-                )
-            });
-            
-            texture.set(
-                egui::ColorImage::from_rgba_unmultiplied(size, pixels),
-                TextureOptions::default()
-            );
-        }
-    }
-}
-
-impl eframe::App for FullscreenUpscalerUi {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        // Handle ESC key to exit
-        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            if let Ok(mut stop) = self.stop_signal.lock() {
-                *stop = true;
-            }
-            frame.close();
-            return;
-        }
-        
-        // Update the texture with the latest captured frame
-        self.update_texture(ctx);
-        
-        // Draw the upscaled frame fullscreen
-        egui::CentralPanel::default()
-            .frame(egui::Frame::none())
-            .show(ctx, |ui| {
-                if let Some(texture) = &self.texture {
-                    let available_size = ui.available_size();
-                    let texture_size = texture.size_vec2();
-                    
-                    // Calculate scale to fit screen while maintaining aspect ratio
-                    let scale = (available_size.x / texture_size.x)
-                        .min(available_size.y / texture_size.y);
-                    
-                    let scaled_size = texture_size * scale;
-                    let position = egui::pos2(
-                        (available_size.x - scaled_size.x) * 0.5,
-                        (available_size.y - scaled_size.y) * 0.5,
-                    );
-                    
-                    ui.put(
-                        egui::Rect::from_min_size(position, scaled_size),
-                        egui::Image::new(texture, scaled_size)
-                    );
-                    
-                    // Display FPS in the corner
-                    ui.put(
-                        egui::Rect::from_min_size(
-                            egui::pos2(10.0, 10.0),
-                            egui::vec2(100.0, 20.0),
-                        ),
-                        egui::Label::new(
-                            egui::RichText::new(format!("FPS: {:.1}", self.fps))
-                                .color(egui::Color32::GREEN)
-                                .background_color(egui::Color32::from_black_alpha(150))
-                        ),
-                    );
-                    
-                    // Press ESC to exit message
-                    ui.put(
-                        egui::Rect::from_min_size(
-                            egui::pos2(10.0, ui.available_height() - 30.0),
-                            egui::vec2(200.0, 20.0),
-                        ),
-                        egui::Label::new(
-                            egui::RichText::new("Press ESC to exit")
-                                .color(egui::Color32::WHITE)
-                                .background_color(egui::Color32::from_black_alpha(150))
-                        ),
-                    );
-                } else {
-                    ui.centered_and_justified(|ui| {
-                        ui.label("Waiting for frames...");
-                    });
-                }
-            });
-        
-        // Request continuous repaints for smooth animation
-        ctx.request_repaint();
-    }
+    Ok(())
 } 

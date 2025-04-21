@@ -9,32 +9,35 @@ use super::profile::Profile;
 /// Application settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
-    /// Last used profile
-    pub last_profile: Option<String>,
-    /// Start minimized
-    pub start_minimized: bool,
-    /// Start with system
-    pub start_with_system: bool,
-    /// Check for updates
-    pub check_for_updates: bool,
-    /// Auto-save profiles
-    pub auto_save_profiles: bool,
-    /// Theme (light, dark, or system)
+    /// Current profile
+    pub current_profile: String,
+    /// Theme (dark/light)
     pub theme: String,
-    /// Language
-    pub language: String,
+    /// Auto-save captured frames
+    pub auto_save_frames: bool,
+    /// Show FPS counter
+    pub show_fps_counter: bool,
+    /// Show notifications
+    pub show_notifications: bool,
+    /// Toggle capture hotkey
+    pub toggle_capture_hotkey: String,
+    /// Capture frame hotkey
+    pub capture_frame_hotkey: String,
+    /// Toggle overlay hotkey
+    pub toggle_overlay_hotkey: String,
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            last_profile: None,
-            start_minimized: false,
-            start_with_system: false,
-            check_for_updates: true,
-            auto_save_profiles: true,
-            theme: "system".to_string(),
-            language: "en".to_string(),
+            current_profile: "Default".to_string(),
+            theme: "dark".to_string(),
+            auto_save_frames: false,
+            show_fps_counter: true,
+            show_notifications: true,
+            toggle_capture_hotkey: "Ctrl+Shift+C".to_string(),
+            capture_frame_hotkey: "Ctrl+Shift+F".to_string(),
+            toggle_overlay_hotkey: "Ctrl+Shift+O".to_string(),
         }
     }
 }
@@ -80,15 +83,12 @@ impl AppSettings {
     
     /// Get the current profile
     pub fn get_current_profile(&self) -> Result<Profile> {
-        match &self.last_profile {
-            Some(name) => Profile::load(name),
-            None => Ok(Profile::default()),
-        }
+        Ok(Profile::default())
     }
     
     /// Set the current profile
     pub fn set_current_profile(&mut self, name: &str) -> Result<()> {
-        self.last_profile = Some(name.to_string());
+        self.current_profile = name.to_string();
         self.save()
     }
 } 

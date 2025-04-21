@@ -38,6 +38,13 @@ pub trait Upscaler: Send + Sync {
     // Upscale a single image
     fn upscale(&self, input: &RgbaImage) -> Result<RgbaImage>;
     
+    // Upscale a single image with a specific algorithm
+    // This is primarily used for the basic upscaler that can switch algorithms
+    fn upscale_with_algorithm(&self, input: &RgbaImage, algorithm: UpscalingAlgorithm) -> Result<RgbaImage> {
+        // Default implementation just calls upscale() and ignores algorithm
+        self.upscale(input)
+    }
+    
     // Cleanup resources
     fn cleanup(&mut self) -> Result<()>;
     

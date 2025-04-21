@@ -2,16 +2,8 @@ mod capture;
 mod ui;
 
 use anyhow::{Result, anyhow};
-use clap::{App, Arg, SubCommand};
-#[cfg(feature = "capture_opencv")]
-use std::path::Path;
-#[cfg(feature = "capture_opencv")]
-use std::sync::{Arc, Mutex};
-#[cfg(feature = "capture_opencv")]
-use std::time::{Duration, Instant};
+use clap::{Arg, App, SubCommand};
 use nu_scaler::capture::CaptureTarget;
-#[cfg(feature = "capture_opencv")]
-use nu_scaler::capture::{common, window_finder};
 use nu_scaler::upscale::{UpscalingTechnology, UpscalingQuality};
 use nu_scaler::UpscalingAlgorithm;
 use nu_scaler::{init, start_borderless_upscale};
@@ -20,246 +12,129 @@ fn main() -> Result<()> {
     // Initialize global configuration for the application
     init()?;
 
-    // Parse command-line arguments
-    let args: Vec<String> = std::env::args().collect();
-    let command = args.get(1).map(|s| s.as_str());
-    
-    // Handle fullscreen command
-    if command == Some("fullscreen") {
-        // Default values
-        let mut source = CaptureTarget::FullScreen;
-        let mut tech = UpscalingTechnology::Fallback;
-        let mut quality = UpscalingQuality::Performance;
-        let mut fps = 60;
-        let mut algorithm = None;
+    // Simple CLI app to bypass the GUI issues
+    let matches = App::new("NU_Scaler")
+        .version("0.1.0")
+        .author("NU_Scaler Team")
+        .about("Real-time upscaling app for screen capture")
+        .subcommand(
+            SubCommand::with_name("fullscreen")
+                .about("Capture and upscale the screen in fullscreen mode")
+                .arg(
+                    Arg::with_name("source")
+                        .long("source")
+                        .help("Source to capture: fullscreen, window:<title>, or region:<x>,<y>,<width>,<height>")
+                        .takes_value(true)
+                        .default_value("fullscreen")
+                )
+                .arg(
+                    Arg::with_name("tech")
+                        .long("tech")
+                        .help("Upscaling technology: fsr, dlss, or fallback")
+                        .takes_value(true)
+                        .default_value("fallback")
+                )
+                .arg(
+                    Arg::with_name("quality")
+                        .long("quality")
+                        .help("Upscaling quality: ultra, quality, balanced, or performance")
+                        .takes_value(true)
+                        .default_value("quality")
+                )
+                .arg(
+                    Arg::with_name("fps")
+                        .long("fps")
+                        .help("Target frame rate")
+                        .takes_value(true)
+                        .default_value("60")
+                )
+                .arg(
+                    Arg::with_name("algorithm")
+                        .long("algorithm")
+                        .help("Upscaling algorithm (for fallback tech): lanczos3, bilinear, bicubic, etc.")
+                        .takes_value(true)
+                )
+        )
+        .get_matches();
+
+    // If fullscreen command is used, capture the screen and upscale
+    if let Some(matches) = matches.subcommand_matches("fullscreen") {
+        // Process source
+        let source_str = matches.value_of("source").unwrap_or("fullscreen");
+        let source = parse_source(source_str)?;
         
-        // Parse remaining arguments
-        for i in 2..args.len() {
-            if args[i] == "--source" && i + 1 < args.len() {
-                let source_str = &args[i + 1];
-                source = match source_str {
-                    s if s == "fullscreen" => CaptureTarget::FullScreen,
-                    s if s.starts_with("window:") => {
-                        let title = s.strip_prefix("window:").unwrap_or("").to_string();
-                        CaptureTarget::WindowByTitle(title)
-                    }
-                    s if s.starts_with("region:") => {
-                        let params = s.strip_prefix("region:").unwrap_or("").split(',')
-                            .filter_map(|s| s.parse::<i32>().ok())
-                            .collect::<Vec<_>>();
-                        
-                        if params.len() >= 4 {
-                            CaptureTarget::Region {
-                                x: params[0],
-                                y: params[1],
-                                width: params[2] as u32,
-                                height: params[3] as u32,
-                            }
-                        } else {
-                            return Err(anyhow!("Invalid region format"));
-                        }
-                    }
-                    _ => return Err(anyhow!("Invalid source format")),
-                };
-            } else if args[i] == "--tech" && i + 1 < args.len() {
-                tech = match args[i + 1].as_str() {
-                    "fsr" => UpscalingTechnology::FSR,
-                    "dlss" => UpscalingTechnology::DLSS,
-                    "fallback" | _ => UpscalingTechnology::Fallback,
-                };
-            } else if args[i] == "--quality" && i + 1 < args.len() {
-                quality = match args[i + 1].as_str() {
-                    "ultra" => UpscalingQuality::Ultra,
-                    "quality" => UpscalingQuality::Quality,
-                    "balanced" => UpscalingQuality::Balanced,
-                    "performance" | _ => UpscalingQuality::Performance,
-                };
-            } else if args[i] == "--fps" && i + 1 < args.len() {
-                if let Ok(f) = args[i + 1].parse::<u32>() {
-                    fps = f;
-                }
-            } else if args[i] == "--algorithm" && i + 1 < args.len() {
-                algorithm = local_string_to_algorithm(&args[i + 1]);
-            }
-        }
+        // Process technology
+        let tech_str = matches.value_of("tech").unwrap_or("fallback");
+        let tech = match tech_str {
+            "fsr" => UpscalingTechnology::FSR,
+            "dlss" => UpscalingTechnology::DLSS,
+            "fallback" | _ => UpscalingTechnology::Fallback,
+        };
         
-        // Run the fullscreen renderer directly
-        return start_borderless_upscale(source, tech, quality, fps, algorithm);
-    }
-    
-    // If upscale command is used, process a single frame
-    if command == Some("upscale") {
-        // TODO: Implement upscale command
-        println!("Upscale command not implemented yet");
+        // Process quality
+        let quality_str = matches.value_of("quality").unwrap_or("quality");
+        let quality = match quality_str {
+            "ultra" => UpscalingQuality::Ultra,
+            "quality" => UpscalingQuality::Quality,
+            "balanced" => UpscalingQuality::Balanced,
+            "performance" | _ => UpscalingQuality::Performance,
+        };
+        
+        // Process FPS
+        let fps = matches.value_of("fps")
+            .unwrap_or("60")
+            .parse::<u32>()
+            .unwrap_or(60);
+        
+        // Process algorithm
+        let algorithm = matches.value_of("algorithm")
+            .map(|alg| local_string_to_algorithm(alg));
+        
+        // Start fullscreen upscaling
+        println!("Starting fullscreen upscaling with {:?} technology at {:?} quality", tech, quality);
+        println!("Press ESC to exit");
+        start_borderless_upscale(source, tech, quality, fps, algorithm)?;
         return Ok(());
     }
-
-    // Launch the GUI by default
-    nu_scaler::ui::run_app()
-}
-
-/// Run the command-line interface demo
-#[cfg(feature = "capture_opencv")]
-fn run_cli_demo() -> Result<()> {
-    println!("OS-Specific Screen Capture Demo");
     
-    // List all available windows
-    println!("\nAvailable windows:");
-    let windows = common::list_available_windows()?;
-    for (i, window) in windows.iter().enumerate() {
-        println!("{}: {} ({:?})", i + 1, window.title, window.id);
-    }
-    
-    // Get screen dimensions
-    let (width, height) = common::get_screen_dimensions()?;
-    println!("\nScreen dimensions: {}x{}", width, height);
-    
-    // Capture fullscreen
-    println!("\nCapturing fullscreen...");
-    let fullscreen_path = Path::new("fullscreen.png");
-    common::capture_screenshot(&CaptureTarget::FullScreen, fullscreen_path)?;
-    println!("Saved to {}", fullscreen_path.display());
-    
-    // Capture a specific window if available
-    if !windows.is_empty() {
-        let window = &windows[0];
-        println!("\nCapturing window: {}", window.title);
-        let window_path = Path::new("window.png");
-        common::capture_screenshot(&CaptureTarget::WindowById(window.id.clone()), window_path)?;
-        println!("Saved to {}", window_path.display());
-    }
-    
-    // Capture a specific region
-    println!("\nCapturing region (top-left quarter of screen)...");
-    let region_path = Path::new("region.png");
-    common::capture_screenshot(
-        &CaptureTarget::Region { 
-            x: 0, 
-            y: 0, 
-            width: width / 2, 
-            height: height / 2 
-        },
-        region_path
-    )?;
-    println!("Saved to {}", region_path.display());
-    
-    // Demo window finder
-    if windows.len() > 1 {
-        println!("\nWindow finder demo:");
-        let search_term = "browser";  // Example search term
-        println!("Searching for windows matching '{}'", search_term);
-        
-        let matches = window_finder::find_matching_windows(&windows, search_term);
-        if !matches.is_empty() {
-            println!("Found {} matching windows:", matches.len());
-            for (window, score) in matches {
-                println!("- {} (match score: {:.2})", window.title, score);
-            }
-        } else {
-            println!("No matching windows found");
-        }
-    }
-
-    // Ask if user wants to run the live capture demo
-    println!("\nDo you want to run the live capture demo? (y/n)");
-    let mut input = String::new();
-    std::io::stdin().read_line(&mut input)?;
-    
-    if input.trim().to_lowercase() == "y" {
-        run_live_capture_demo()?;
-    }
-    
+    // Launch the GUI by default (but we'll bypass it for now)
+    println!("NU_Scaler CLI");
+    println!("Run with 'fullscreen' subcommand to start the upscaler");
+    println!("Example: nu_scaler fullscreen --source fullscreen --tech fallback --quality balanced --fps 60 --algorithm lanczos3");
     Ok(())
 }
 
-/// Demonstrates the live capture functionality
-#[cfg(feature = "capture_opencv")]
-fn run_live_capture_demo() -> Result<()> {
-    println!("Starting live capture demo (will capture 100 frames)...");
-    
-    // Create a frame buffer with capacity for 10 frames
-    let buffer = Arc::new(common::FrameBuffer::new(10));
-    let stop_signal = Arc::new(Mutex::new(false));
-    
-    // Target to capture (fullscreen)
-    let target = CaptureTarget::FullScreen;
-    
-    // Start live capture thread at 30 FPS
-    let capture_buffer = Arc::clone(&buffer);
-    let capture_stop = Arc::clone(&stop_signal);
-    let capture_handle = common::start_live_capture_thread(
-        target,
-        30, // 30 FPS
-        capture_buffer,
-        capture_stop,
-    )?;
-    
-    // Start a frame processor thread
-    let process_buffer = Arc::clone(&buffer);
-    let process_stop = Arc::clone(&stop_signal);
-    let process_handle = common::process_frame_buffer(
-        process_buffer,
-        process_stop,
-        30, // Process at same rate as capture
-        |frame| {
-            // In a real application, this is where you would perform upscaling and interpolation
-            // For now, just print frame dimensions and time
-            println!(
-                "Processing frame: {}x{} at {:?}", 
-                frame.width(), 
-                frame.height(), 
-                Instant::now()
-            );
-            Ok(())
-        }
-    )?;
-    
-    // Wait for 100 frames (approximately 3-4 seconds at 30 FPS)
-    let frames_to_capture = 100;
-    let start_time = Instant::now();
-    
-    println!("Capturing frames for approximately {} seconds...", frames_to_capture / 30);
-    
-    // Monitor frame count
-    loop {
-        let frame_count = buffer.len()?;
-        if frame_count >= frames_to_capture {
-            break;
-        }
+/// Parse the source string into a CaptureTarget
+fn parse_source(source_str: &str) -> Result<CaptureTarget> {
+    if source_str == "fullscreen" {
+        return Ok(CaptureTarget::FullScreen);
+    } else if source_str.starts_with("window:") {
+        let title = source_str.strip_prefix("window:")
+            .unwrap_or("")
+            .to_string();
+        return Ok(CaptureTarget::WindowByTitle(title));
+    } else if source_str.starts_with("region:") {
+        let coords = source_str.strip_prefix("region:")
+            .unwrap_or("")
+            .split(',')
+            .filter_map(|s| s.parse::<i32>().ok())
+            .collect::<Vec<_>>();
         
-        // Also break if it's taking too long (timeout after 10 seconds)
-        if start_time.elapsed() > Duration::from_secs(10) {
-            println!("Timeout reached. Captured {} frames.", frame_count);
-            break;
+        if coords.len() >= 4 {
+            return Ok(CaptureTarget::Region {
+                x: coords[0],
+                y: coords[1],
+                width: coords[2] as u32,
+                height: coords[3] as u32,
+            });
         }
-        
-        std::thread::sleep(Duration::from_millis(100));
+        return Err(anyhow!("Invalid region format. Use region:x,y,width,height"));
     }
     
-    // Signal threads to stop
-    {
-        let mut stop = stop_signal.lock().unwrap();
-        *stop = true;
-    }
-    
-    // Wait for threads to finish
-    let _ = capture_handle.join();
-    let _ = process_handle.join();
-    
-    // Print statistics
-    let elapsed = start_time.elapsed();
-    let frame_count = buffer.len()?;
-    let fps = frame_count as f64 / elapsed.as_secs_f64();
-    
-    println!("Live capture demo finished!");
-    println!("Frames captured: {}", frame_count);
-    println!("Elapsed time: {:.2} seconds", elapsed.as_secs_f64());
-    println!("Average FPS: {:.2}", fps);
-    
-    Ok(())
+    Err(anyhow!("Invalid source format. Use fullscreen, window:<title>, or region:x,y,width,height"))
 }
 
 /// Utility function to convert a string algorithm name to the UpscalingAlgorithm enum
-fn local_string_to_algorithm(alg_str: &str) -> Option<nu_scaler::UpscalingAlgorithm> {
-    nu_scaler::string_to_algorithm(alg_str)
+fn local_string_to_algorithm(alg_str: &str) -> UpscalingAlgorithm {
+    nu_scaler::string_to_algorithm(alg_str).unwrap_or(UpscalingAlgorithm::Lanczos3)
 }
