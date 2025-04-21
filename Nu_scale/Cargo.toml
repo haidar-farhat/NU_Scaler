@@ -41,6 +41,7 @@ windows = { version = "0.48", features = [
     "Win32_System_Threading",
     "Win32_System_Memory",
     "Win32_Security",
+    "Win32_System_ProcessStatus",
 ] }
 
 [target.'cfg(unix)'.dependencies]
