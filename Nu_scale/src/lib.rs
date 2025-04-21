@@ -5,7 +5,6 @@ use anyhow::Result;
 pub mod capture;
 pub mod ui;
 pub mod upscale;
-pub mod import_test;
 pub mod renderer;
 
 // Explicitly re-export top-level modules
@@ -22,6 +21,7 @@ use crate::upscale::Upscaler;
 use crate::capture::ScreenCapture;
 // Re-export upscaling algorithm types
 pub use crate::upscale::common::UpscalingAlgorithm;
+
 use std::sync::{Arc, Mutex};
 use image::RgbaImage;
 use std::sync::atomic::AtomicBool;
@@ -186,7 +186,7 @@ pub fn start_fullscreen_upscale_renderer(
     Ok(())
 }
 
-/// Convert a string algorithm name to the UpscalingAlgorithm enum
+// Convert a string algorithm name to the UpscalingAlgorithm enum
 pub fn string_to_algorithm(alg_str: &str) -> Option<UpscalingAlgorithm> {
     match alg_str.to_lowercase().as_str() {
         "nearest" | "nearestneighbor" => Some(UpscalingAlgorithm::NearestNeighbor),
@@ -196,6 +196,11 @@ pub fn string_to_algorithm(alg_str: &str) -> Option<UpscalingAlgorithm> {
         "lanczos3" => Some(UpscalingAlgorithm::Lanczos3),
         "mitchell" => Some(UpscalingAlgorithm::Mitchell),
         "area" => Some(UpscalingAlgorithm::Area),
-        _ => None
+        _ => None,
     }
 } 
+
+#[cfg(test)]
+mod import_test {
+    use super::*;
+}

@@ -137,7 +137,7 @@ impl FsrUpscaler {
     }
     
     /// Create a mock upscaled image using FSR-like processing
-    fn create_mock_fsr_upscaled(&self, input: &RgbaImage) -> Result<RgbaImage> {
+    pub fn create_mock_fsr_upscaled(&self, input: &RgbaImage) -> Result<RgbaImage> {
         // In a real implementation, this would:
         // 1. Convert the input RgbaImage to a format that FSR can process
         // 2. Call the FSR3 API (ffxFsr3Dispatch) to upscale

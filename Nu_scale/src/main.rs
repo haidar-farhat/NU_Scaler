@@ -85,7 +85,7 @@ fn main() -> Result<()> {
         
         // Process algorithm
         let algorithm = matches.value_of("algorithm")
-            .map(|alg| local_string_to_algorithm(alg));
+            .and_then(|alg| local_string_to_algorithm(alg));
         
         // Start fullscreen upscaling
         println!("Starting fullscreen upscaling with {:?} technology at {:?} quality", tech, quality);
@@ -132,6 +132,6 @@ fn parse_source(source_str: &str) -> Result<CaptureTarget> {
 }
 
 /// Utility function to convert a string algorithm name to the UpscalingAlgorithm enum
-fn local_string_to_algorithm(alg_str: &str) -> UpscalingAlgorithm {
-    nu_scaler::string_to_algorithm(alg_str).unwrap_or(UpscalingAlgorithm::Lanczos3)
+fn local_string_to_algorithm(alg_str: &str) -> Option<nu_scaler::UpscalingAlgorithm> {
+    nu_scaler::string_to_algorithm(alg_str)
 }
