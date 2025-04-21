@@ -16,7 +16,8 @@ fn main() -> Result<()> {
             Arg::with_name("verbose")
                 .short('v')
                 .long("verbose")
-                .multiple(true)
+                .multiple(false)
+                .takes_value(false)
                 .help("Sets the level of verbosity (can be used multiple times)")
         )
         .arg(
@@ -70,8 +71,8 @@ fn main() -> Result<()> {
         .get_matches();
 
     // Get logging options
-    let verbose = matches.occurrences_of("verbose") > 0;
     let log_dir = matches.value_of("log-dir");
+    let verbose = matches.is_present("verbose");
     
     // Initialize application (including logging)
     if let Err(e) = nu_scaler::logger::init_logger(log_dir, verbose) {
