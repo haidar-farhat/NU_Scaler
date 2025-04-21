@@ -198,41 +198,94 @@ impl Upscaler for BasicUpscaler {
                         let p01 = input.get_pixel(x0, y1);
                         let p11 = input.get_pixel(x1, y1);
                         
-                        let r = ((1.0 - dx) * (1.0 - dy) * p00[0] as f32 +
-                                 dx * (1.0 - dy) * p10[0] as f32 +
-                                 (1.0 - dx) * dy * p01[0] as f32 +
-                                 dx * dy * p11[0] as f32) as u8;
-                                 
-                        let g = ((1.0 - dx) * (1.0 - dy) * p00[1] as f32 +
-                                 dx * (1.0 - dy) * p10[1] as f32 +
-                                 (1.0 - dx) * dy * p01[1] as f32 +
-                                 dx * dy * p11[1] as f32) as u8;
-                                 
-                        let b = ((1.0 - dx) * (1.0 - dy) * p00[2] as f32 +
-                                 dx * (1.0 - dy) * p10[2] as f32 +
-                                 (1.0 - dx) * dy * p01[2] as f32 +
-                                 dx * dy * p11[2] as f32) as u8;
-                                 
-                        let a = ((1.0 - dx) * (1.0 - dy) * p00[3] as f32 +
-                                 dx * (1.0 - dy) * p10[3] as f32 +
-                                 (1.0 - dx) * dy * p01[3] as f32 +
-                                 dx * dy * p11[3] as f32) as u8;
+                        // Interpolate each channel
+                        let mut color = [0u8; 4];
+                        for i in 0..4 {
+                            let top = p00.0[i] as f32 * (1.0 - dx) + p10.0[i] as f32 * dx;
+                            let bottom = p01.0[i] as f32 * (1.0 - dx) + p11.0[i] as f32 * dx;
+                            let value = top * (1.0 - dy) + bottom * dy;
+                            color[i] = value.clamp(0.0, 255.0) as u8;
+                        }
                         
-                        output.put_pixel(x, y, Rgba([r, g, b, a]));
+                        output.put_pixel(x, y, Rgba(color));
                     }
                 }
             },
-            // Other algorithms would be implemented here
-            // For now, fall back to nearest neighbor for unimplemented algorithms
-            _ => {
-                for y in 0..self.output_height {
-                    for x in 0..self.output_width {
-                        let src_x = (x * self.input_width / self.output_width).min(self.input_width - 1);
-                        let src_y = (y * self.input_height / self.output_height).min(self.input_height - 1);
-                        let pixel = input.get_pixel(src_x, src_y);
-                        output.put_pixel(x, y, *pixel);
-                    }
-                }
+            UpscalingAlgorithm::Bicubic => {
+                // Use image crate's bicubic implementation which is more efficient
+                let resized = imageops::resize(
+                    input, 
+                    self.output_width, 
+                    self.output_height, 
+                    imageops::FilterType::CatmullRom // Bicubic (Catmull-Rom)
+                );
+                output = resized;
+            },
+            UpscalingAlgorithm::Lanczos3 => {
+                // Use image crate's Lanczos3 implementation which is high quality
+                let resized = imageops::resize(
+                    input, 
+                    self.output_width, 
+                    self.output_height, 
+                    imageops::FilterType::Lanczos3
+                );
+                output = resized;
+            },
+            UpscalingAlgorithm::Lanczos2 => {
+                let resized = imageops::resize(
+                    input, 
+                    self.output_width, 
+                    self.output_height, 
+                    imageops::FilterType::Triangle // Similar to Lanczos2
+                );
+                output = resized;
+            },
+            UpscalingAlgorithm::Mitchell => {
+                let resized = imageops::resize(
+                    input, 
+                    self.output_width, 
+                    self.output_height, 
+                    imageops::FilterType::Triangle // Approximate Mitchell
+                );
+                output = resized;
+            },
+            UpscalingAlgorithm::Area => {
+                // Best for downscaling
+                let resized = imageops::resize(
+                    input, 
+                    self.output_width, 
+                    self.output_height, 
+                    imageops::FilterType::Nearest // Replacement for Area sampling
+                );
+                output = resized;
+            },
+            UpscalingAlgorithm::Balanced => {
+                // Choose best algorithm based on scale factor
+                let scale_factor = self.output_width as f32 / self.input_width as f32;
+                let filter_type = if scale_factor <= 0.5 {
+                    // Downscaling by more than 2x - use Area
+                    imageops::FilterType::Nearest
+                } else if scale_factor <= 1.0 {
+                    // Downscaling - use Lanczos3
+                    imageops::FilterType::Lanczos3
+                } else if scale_factor <= 2.0 {
+                    // Slight upscaling - use Lanczos3
+                    imageops::FilterType::Lanczos3
+                } else if scale_factor <= 3.0 {
+                    // Medium upscaling - use Bicubic
+                    imageops::FilterType::CatmullRom
+                } else {
+                    // Large upscaling - use Bilinear
+                    imageops::FilterType::Triangle
+                };
+                
+                let resized = imageops::resize(
+                    input, 
+                    self.output_width, 
+                    self.output_height, 
+                    filter_type
+                );
+                output = resized;
             },
         };
         
