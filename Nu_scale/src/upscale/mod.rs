@@ -91,43 +91,31 @@ pub fn create_upscaler(
     quality: UpscalingQuality,
     algorithm: Option<UpscalingAlgorithm>,
 ) -> Result<Box<dyn Upscaler>> {
+    // First check if technology is supported to avoid initialization attempts
+    // that would eventually fail and cause multiple fallbacks
     match technology {
         UpscalingTechnology::FSR => {
-            if fsr::FsrUpscaler::is_supported() {
-                let upscaler = fsr::FsrUpscaler::new(quality)?;
-                Ok(Box::new(upscaler))
-            } else {
-                // Fall back to basic upscaling if FSR is not supported
-                let upscaler = if let Some(alg) = algorithm {
-                    common::BasicUpscaler::with_algorithm(quality, alg)
-                } else {
-                    common::BasicUpscaler::new(quality)
-                };
-                println!("FSR not supported, falling back to basic upscaling");
-                Ok(Box::new(upscaler))
+            if !fsr::FsrUpscaler::is_supported() {
+                log::info!("FSR not supported, falling back to basic upscaling");
+                return create_basic_upscaler(quality, algorithm);
             }
+            let upscaler = fsr::FsrUpscaler::new(quality)?;
+            Ok(Box::new(upscaler))
         },
         UpscalingTechnology::DLSS => {
-            if dlss::DlssUpscaler::is_supported() {
-                let upscaler = dlss::DlssUpscaler::new(quality)?;
-                Ok(Box::new(upscaler))
-            } else {
-                // Fall back to FSR if DLSS is not supported
+            if !dlss::DlssUpscaler::is_supported() {
+                // Check FSR support before attempting to create it
                 if fsr::FsrUpscaler::is_supported() {
+                    log::info!("DLSS not supported, falling back to FSR");
                     let upscaler = fsr::FsrUpscaler::new(quality)?;
-                    println!("DLSS not supported, falling back to FSR");
-                    Ok(Box::new(upscaler))
+                    return Ok(Box::new(upscaler));
                 } else {
-                    // Fall back to basic upscaling if neither is supported
-                    let upscaler = if let Some(alg) = algorithm {
-                        common::BasicUpscaler::with_algorithm(quality, alg)
-                    } else {
-                        common::BasicUpscaler::new(quality)
-                    };
-                    println!("Neither DLSS nor FSR supported, falling back to basic upscaling");
-                    Ok(Box::new(upscaler))
+                    log::info!("Neither DLSS nor FSR supported, falling back to basic upscaling");
+                    return create_basic_upscaler(quality, algorithm);
                 }
             }
+            let upscaler = dlss::DlssUpscaler::new(quality)?;
+            Ok(Box::new(upscaler))
         },
         UpscalingTechnology::None => {
             // No upscaling, just return a pass-through upscaler
@@ -136,14 +124,22 @@ pub fn create_upscaler(
         },
         UpscalingTechnology::Fallback => {
             // Basic upscaling with specified algorithm if provided
-            let upscaler = if let Some(alg) = algorithm {
-                common::BasicUpscaler::with_algorithm(quality, alg)
-            } else {
-                common::BasicUpscaler::new(quality)
-            };
-            Ok(Box::new(upscaler))
+            create_basic_upscaler(quality, algorithm)
         },
     }
+}
+
+// Helper function to create a basic upscaler to reduce code duplication
+fn create_basic_upscaler(
+    quality: UpscalingQuality,
+    algorithm: Option<UpscalingAlgorithm>
+) -> Result<Box<dyn Upscaler>> {
+    let upscaler = if let Some(alg) = algorithm {
+        common::BasicUpscaler::with_algorithm(quality, alg)
+    } else {
+        common::BasicUpscaler::new(quality)
+    };
+    Ok(Box::new(upscaler))
 }
 
 // Utility function to upscale an image file

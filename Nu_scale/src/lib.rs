@@ -177,7 +177,7 @@ pub fn start_borderless_upscale(
         info!("Capture thread stopped");
     });
     
-    // Start the fullscreen UI
+    // Start the fullscreen UI on the main thread to avoid multiple event loops
     info!("Starting fullscreen renderer");
     let result = match renderer::fullscreen::run_fullscreen_upscaler(
         frame_buffer,
