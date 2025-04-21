@@ -4,16 +4,27 @@ use nu_scaler::capture::CaptureTarget;
 use nu_scaler::upscale::{UpscalingTechnology, UpscalingQuality};
 use nu_scaler::UpscalingAlgorithm;
 use nu_scaler::{init, start_borderless_upscale};
+use log::{debug, info, warn, error};
 
 fn main() -> Result<()> {
-    // Initialize global configuration for the application
-    init()?;
-
-    // Simple CLI app to bypass the GUI issues
+    // Simple CLI app with all needed commands
     let matches = App::new("NU_Scaler")
         .version("0.1.0")
         .author("NU_Scaler Team")
         .about("Real-time upscaling app for screen capture")
+        .arg(
+            Arg::with_name("verbose")
+                .short("v")
+                .long("verbose")
+                .multiple(true)
+                .help("Sets the level of verbosity (can be used multiple times)")
+        )
+        .arg(
+            Arg::with_name("log-dir")
+                .long("log-dir")
+                .takes_value(true)
+                .help("Directory to store log files. Default is user data directory.")
+        )
         .subcommand(
             SubCommand::with_name("fullscreen")
                 .about("Capture and upscale the screen in fullscreen mode")
@@ -52,8 +63,27 @@ fn main() -> Result<()> {
                         .takes_value(true)
                 )
         )
+        .subcommand(
+            SubCommand::with_name("cli")
+                .about("Force CLI mode even if GUI is available")
+        )
         .get_matches();
 
+    // Get logging options
+    let verbose = matches.occurrences_of("verbose") > 0;
+    let log_dir = matches.value_of("log-dir");
+    
+    // Initialize application (including logging)
+    if let Err(e) = nu_scaler::logger::init_logger(log_dir, verbose) {
+        eprintln!("Warning: Failed to initialize logger: {}", e);
+    }
+    
+    // Continue with the rest of the initialization
+    if let Err(e) = init() {
+        error!("Failed to initialize application: {}", e);
+        return Err(anyhow!("Failed to initialize application: {}", e));
+    }
+    
     // If fullscreen command is used, capture the screen and upscale
     if let Some(matches) = matches.subcommand_matches("fullscreen") {
         // Process source
@@ -87,14 +117,44 @@ fn main() -> Result<()> {
         let algorithm = matches.value_of("algorithm")
             .and_then(|alg| local_string_to_algorithm(alg));
         
+        // Log the fullscreen upscaling parameters
+        info!("Starting fullscreen upscaling");
+        debug!("  Source: {:?}", source);
+        debug!("  Technology: {:?}", tech);
+        debug!("  Quality: {:?}", quality);
+        debug!("  FPS: {}", fps);
+        debug!("  Algorithm: {:?}", algorithm);
+        
         // Start fullscreen upscaling
         println!("Starting fullscreen upscaling with {:?} technology at {:?} quality", tech, quality);
         println!("Press ESC to exit");
-        start_borderless_upscale(source, tech, quality, fps, algorithm)?;
+        
+        // Measure and log performance
+        let start_time = std::time::Instant::now();
+        let result = start_borderless_upscale(source, tech, quality, fps, algorithm);
+        let elapsed = start_time.elapsed();
+        
+        if let Err(ref e) = result {
+            error!("Fullscreen upscaling failed after {:.2?}: {}", elapsed, e);
+            return result;
+        }
+        
+        info!("Fullscreen upscaling completed after {:.2?}", elapsed);
         return Ok(());
     }
     
-    // Launch the GUI by default (but we'll bypass it for now)
+    // Check if "cli" subcommand was explicitly used
+    let force_cli = matches.subcommand_matches("cli").is_some();
+    
+    // Launch GUI if available and not forced to CLI mode
+    #[cfg(feature = "gui")]
+    if !force_cli {
+        info!("Starting NU_Scaler GUI");
+        return nu_scaler::ui::run_app();
+    }
+    
+    // Fall back to CLI mode if GUI is not available or if forced
+    info!("Running in CLI mode");
     println!("NU_Scaler CLI");
     println!("Run with 'fullscreen' subcommand to start the upscaler");
     println!("Example: nu_scaler fullscreen --source fullscreen --tech fallback --quality balanced --fps 60 --algorithm lanczos3");
@@ -104,11 +164,13 @@ fn main() -> Result<()> {
 /// Parse the source string into a CaptureTarget
 fn parse_source(source_str: &str) -> Result<CaptureTarget> {
     if source_str == "fullscreen" {
+        debug!("Using fullscreen capture");
         return Ok(CaptureTarget::FullScreen);
     } else if source_str.starts_with("window:") {
         let title = source_str.strip_prefix("window:")
             .unwrap_or("")
             .to_string();
+        debug!("Using window capture with title: {}", title);
         return Ok(CaptureTarget::WindowByTitle(title));
     } else if source_str.starts_with("region:") {
         let coords = source_str.strip_prefix("region:")
@@ -118,6 +180,7 @@ fn parse_source(source_str: &str) -> Result<CaptureTarget> {
             .collect::<Vec<_>>();
         
         if coords.len() >= 4 {
+            debug!("Using region capture with coords: {:?}", coords);
             return Ok(CaptureTarget::Region {
                 x: coords[0],
                 y: coords[1],
@@ -125,13 +188,21 @@ fn parse_source(source_str: &str) -> Result<CaptureTarget> {
                 height: coords[3] as u32,
             });
         }
+        warn!("Invalid region format: {}", source_str);
         return Err(anyhow!("Invalid region format. Use region:x,y,width,height"));
     }
     
+    warn!("Invalid source format: {}", source_str);
     Err(anyhow!("Invalid source format. Use fullscreen, window:<title>, or region:x,y,width,height"))
 }
 
 /// Utility function to convert a string algorithm name to the UpscalingAlgorithm enum
 fn local_string_to_algorithm(alg_str: &str) -> Option<nu_scaler::UpscalingAlgorithm> {
-    nu_scaler::string_to_algorithm(alg_str)
+    let result = nu_scaler::string_to_algorithm(alg_str);
+    if result.is_none() {
+        warn!("Unknown upscaling algorithm: {}", alg_str);
+    } else {
+        debug!("Using upscaling algorithm: {}", alg_str);
+    }
+    result
 }
