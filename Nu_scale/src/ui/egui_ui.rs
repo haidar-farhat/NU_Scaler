@@ -5,16 +5,12 @@ use egui::{
     TextureHandle,
     *,
 };
+// Remove unused imports
 use std::{
     path::PathBuf,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, Sender},
-        Arc, Mutex,
-    },
+    sync::mpsc::{Receiver, Sender},
     thread,
-    time::{Duration, Instant},
-    marker::PhantomData,
+    time::Duration
 };
 
 // Use crate:: for lib modules
