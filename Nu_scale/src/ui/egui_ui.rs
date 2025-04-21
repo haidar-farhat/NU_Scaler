@@ -18,8 +18,8 @@ use std::{
 };
 
 // Crate-level imports
-use crate::capture::{CaptureError, CaptureEvent, CaptureTarget, ScreenCapture};
-use crate::frame_buffer::FrameBuffer;
+use crate::capture::{CaptureError, CaptureTarget, ScreenCapture, CaptureEvent};
+use crate::capture::common::FrameBuffer;
 use crate::texture_manager::TextureManager;
 use crate::upscale::{
     create_upscaler, Upscaler, UpscalingQuality, UpscalingTechnology,
@@ -31,9 +31,9 @@ use crate::hotkeys::{register_global_hotkey, KEY_TOGGLE_CAPTURE, KEY_CAPTURE_FRA
 use crate::renderer; // Assuming renderer is a top-level module
 
 // UI-internal imports (using super::)
-use super::components::{self, StatusBar, StatusMessage, StatusMessageType};
+use super::components::{self, StatusBar, StatusMessageType};
 use super::region_dialog::RegionDialog;
-use super::tabs::{self, TabState, Tab};
+use super::tabs::{self, TabState};
 
 // External crate imports were removed
 
@@ -81,7 +81,7 @@ pub struct AppState {
     /// Frame buffer for upscaling mode
     upscaling_buffer: Option<Arc<FrameBuffer>>,
     /// Stop signal for upscaling mode
-    upscaling_stop_signal: Option<Arc<Mutex<bool>>>,
+    upscaling_stop_signal: Option<Arc<AtomicBool>>,
     /// Current frame texture
     frame_texture: Option<TextureHandle>,
     /// Status bar
@@ -93,7 +93,7 @@ pub struct AppState {
     /// Frame buffer
     frame_buffer: Arc<FrameBuffer>,
     /// Stop signal
-    stop_signal: Arc<Mutex<bool>>,
+    stop_signal: Arc<AtomicBool>,
     /// Capture status
     capture_status: Arc<Mutex<String>>,
     /// Temporary status message
@@ -115,7 +115,7 @@ impl Default for AppState {
         let settings = AppSettings::load().unwrap_or_default();
         
         // Load profile
-        let profile = settings.get_current_profile().unwrap_or_default();
+        let profile = Profile::load(&settings.last_profile_path.clone().unwrap_or_default()).unwrap_or_default();
         
         // Determine capture source index based on profile capture_source field
         let capture_source_index = profile.capture_source;
@@ -161,7 +161,7 @@ impl Default for AppState {
             region_dialog: RegionDialog::new(),
             texture_manager: Arc::new(Mutex::new(TextureManager::new())),
             frame_buffer: Arc::new(FrameBuffer::new(10)),
-            stop_signal: Arc::new(Mutex::new(false)),
+            stop_signal: Arc::new(AtomicBool::new(false)),
             capture_status: Arc::new(Mutex::new("Idle".to_string())),
             temp_status_message: Arc::new(Mutex::new(None)),
             show_error_dialog: false,
@@ -1057,11 +1057,11 @@ impl AppState {
             });
         
         let mut should_stop = false;
-        if let Some(stop_signal_mutex) = &self.upscaling_stop_signal {
-            if let Ok(stop) = stop_signal_mutex.lock() {
-                should_stop = *stop;
-            }
-        }
+        if let Some(stop_signal_atomic) = &self.upscaling_stop_signal {
+            // Load the AtomicBool directly
+            should_stop = stop_signal_atomic.load(Ordering::Relaxed);
+             // Optionally use Ordering::SeqCst for stronger guarantees
+        } // No lock needed
 
         if should_stop {
             self.is_upscaling = false;
@@ -1187,7 +1187,7 @@ pub fn run_app() -> Result<()> {
         Box::new(|cc| {
             let mut app_state = AppState::default();
             app_state.texture_manager = Arc::new(Mutex::new(TextureManager::new(cc.egui_ctx.clone())));
-            app_state.region_dialog = RegionDialog::new(cc.egui_ctx.clone());
+            app_state.region_dialog = RegionDialog::new();
             Box::new(app_state)
         }),
     )
