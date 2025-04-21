@@ -1,5 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::fs::{File, OpenOptions};
+use std::io::{Error as IoError, ErrorKind};
 use anyhow::Result;
 use eframe::{self, egui};
 use egui::{Vec2, ColorImage, TextureOptions, TextureId};
@@ -8,6 +10,60 @@ use image::RgbaImage;
 use crate::capture::common::FrameBuffer;
 use crate::upscale::{Upscaler, UpscalingTechnology, UpscalingQuality};
 use crate::upscale::common::UpscalingAlgorithm;
+
+// Define a constant for the lock file path
+const LOCK_FILE_PATH: &str = "nu_scaler_fullscreen.lock";
+
+/// Create a lock file to ensure only one instance can run fullscreen mode
+fn create_lock_file() -> std::io::Result<Option<File>> {
+    // Try to get the app data directory
+    let lock_path = if let Some(data_dir) = dirs::data_dir() {
+        let app_dir = data_dir.join("NU_Scaler");
+        // Create the directory if it doesn't exist
+        if !app_dir.exists() {
+            std::fs::create_dir_all(&app_dir)?;
+        }
+        app_dir.join(LOCK_FILE_PATH)
+    } else {
+        std::path::PathBuf::from(LOCK_FILE_PATH)
+    };
+    
+    // Try to create the lock file with exclusive access
+    match OpenOptions::new().write(true).create_new(true).open(&lock_path) {
+        Ok(file) => {
+            log::info!("Created lock file at {:?}", lock_path);
+            // Write the current process ID to the lock file
+            if let Err(e) = std::io::Write::write_all(&mut std::io::BufWriter::new(&file), 
+                                                     format!("{}", std::process::id()).as_bytes()) {
+                log::warn!("Failed to write PID to lock file: {}", e);
+            }
+            Ok(Some(file))
+        },
+        Err(e) if e.kind() == ErrorKind::AlreadyExists => {
+            log::warn!("Lock file already exists at {:?}, another instance may be running", lock_path);
+            Ok(None)
+        },
+        Err(e) => {
+            log::error!("Failed to create lock file: {}", e);
+            Err(e)
+        }
+    }
+}
+
+/// Remove the lock file when the application exits
+fn remove_lock_file() {
+    let lock_path = if let Some(data_dir) = dirs::data_dir() {
+        data_dir.join("NU_Scaler").join(LOCK_FILE_PATH)
+    } else {
+        std::path::PathBuf::from(LOCK_FILE_PATH)
+    };
+    
+    if let Err(e) = std::fs::remove_file(&lock_path) {
+        log::warn!("Failed to remove lock file: {}", e);
+    } else {
+        log::info!("Removed lock file at {:?}", lock_path);
+    }
+}
 
 /// Fullscreen upscaler UI
 pub struct FullscreenUpscalerUi {
@@ -460,27 +516,26 @@ pub fn run_fullscreen_upscaler(
     quality: UpscalingQuality,
     algorithm: Option<UpscalingAlgorithm>,
 ) -> Result<(), String> {
-    // Use a static flag to ensure only one EventLoop is created per process
-    use std::sync::Once;
-    static EVENT_LOOP_INIT: Once = Once::new();
-    static mut EVENT_LOOP_INITIALIZED: bool = false;
-    
-    // Check if an EventLoop has already been created in this process
-    let already_initialized = unsafe { EVENT_LOOP_INITIALIZED };
-    if already_initialized {
-        log::warn!("Attempted to create multiple EventLoops - returning to avoid panic");
-        return Err("Cannot create multiple EventLoops in the same process. The application may need to be restarted to create a new window.".to_string());
-    }
-    
-    // Mark that we're initializing the EventLoop
-    EVENT_LOOP_INIT.call_once(|| {
-        unsafe { EVENT_LOOP_INITIALIZED = true; }
-    });
+    // Try to create a lock file to ensure only one instance runs
+    let lock_file = match create_lock_file() {
+        Ok(Some(file)) => file,
+        Ok(None) => {
+            return Err("Another instance of NU_Scaler is already running in fullscreen mode. Please close it before starting a new session.".to_string());
+        },
+        Err(e) => {
+            log::error!("Failed to check for running instances: {}", e);
+            // Continue anyway, but log the error
+        }
+    };
     
     // Create an upscaler with the given technology and quality
     let upscaler = match create_upscaler(technology, quality, algorithm) {
         Ok(u) => u,
-        Err(e) => return Err(format!("Failed to create upscaler: {}", e)),
+        Err(e) => {
+            // Release the lock if we fail to create the upscaler
+            remove_lock_file();
+            return Err(format!("Failed to create upscaler: {}", e));
+        }
     };
     
     // Log the upscaler we're actually using
@@ -515,8 +570,8 @@ pub fn run_fullscreen_upscaler(
         })
     ).map_err(|e| format!("Failed to run fullscreen upscaler: {}", e));
     
-    // Reset the initialization flag when done
-    unsafe { EVENT_LOOP_INITIALIZED = false; }
+    // Release the lock file when done
+    remove_lock_file();
     
     result
 }

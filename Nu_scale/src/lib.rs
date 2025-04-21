@@ -195,9 +195,9 @@ pub fn start_borderless_upscale(
             stop_signal.store(true, Ordering::SeqCst);
             
             error!("Fullscreen renderer failed: {}", e);
-            // If it's the EventLoop error, provide a more user-friendly message
-            if e.contains("EventLoop") {
-                Err(anyhow::anyhow!("Another window is already open. Please close it before starting a new upscaling session."))
+            // If it's the lock file or EventLoop error, provide a more user-friendly message
+            if e.contains("another instance") || e.contains("already running") {
+                Err(anyhow::anyhow!("Another NU_Scaler window is already open. Please close it before starting a new upscaling session."))
             } else {
                 Err(anyhow::anyhow!("{}", e))
             }
