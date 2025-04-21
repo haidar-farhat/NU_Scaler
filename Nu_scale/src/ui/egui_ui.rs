@@ -14,6 +14,13 @@ use std::{
     marker::PhantomData
 };
 
+// Windows API for process management (cfg guard added in implementation)
+#[cfg(windows)]
+use windows::{
+    Win32::System::Threading::TerminateProcess,
+    Win32::Foundation::HANDLE,
+};
+
 // Use crate:: for lib modules
 use crate::capture::{CaptureError, CaptureTarget, ScreenCapture};
 use crate::capture::common::FrameBuffer;
@@ -1243,10 +1250,10 @@ impl AppState {
             #[cfg(windows)]
             {
                 // On Windows, we call the Win32 API to try to send WM_CLOSE first
-                use windows::Win32::System::Threading::TerminateProcess;
-                use windows::Win32::Foundation::HANDLE;
+                let process_id = child.id();
                 unsafe {
-                    let _ = TerminateProcess(HANDLE(child.id() as isize), 0);
+                    let handle = HANDLE(process_id as isize);
+                    let _ = TerminateProcess(handle, 0);
                 }
             }
 
@@ -1263,33 +1270,33 @@ impl AppState {
             }
         }
     }
+
+    // Map profile UpscalingTechnology to library UpscalingTechnology
+    fn map_tech(&self, tech: &ProfileUpscalingTechnology) -> UpscalingTechnology {
+        match tech {
+            ProfileUpscalingTechnology::None => UpscalingTechnology::Fallback,
+            ProfileUpscalingTechnology::FSR => UpscalingTechnology::FSR,
+            ProfileUpscalingTechnology::DLSS => UpscalingTechnology::DLSS,
+            ProfileUpscalingTechnology::Fallback => UpscalingTechnology::Fallback,
+            ProfileUpscalingTechnology::Custom => UpscalingTechnology::Fallback,
+        }
+    }
+
+    // Map profile UpscalingQuality to library UpscalingQuality
+    fn map_quality(&self, quality: &ProfileUpscalingQuality) -> UpscalingQuality {
+        match quality {
+            ProfileUpscalingQuality::Ultra => UpscalingQuality::Ultra,
+            ProfileUpscalingQuality::Quality => UpscalingQuality::Quality,
+            ProfileUpscalingQuality::Balanced => UpscalingQuality::Balanced,
+            ProfileUpscalingQuality::Performance => UpscalingQuality::Performance,
+        }
+    }
 }
 
 // Add a cleanup function to ensure we kill the scaling process on exit
 impl Drop for AppState {
     fn drop(&mut self) {
         self.kill_scaling_process();
-    }
-}
-
-// Map profile UpscalingTechnology to library UpscalingTechnology
-fn map_tech(&self, tech: &ProfileUpscalingTechnology) -> UpscalingTechnology {
-    match tech {
-        ProfileUpscalingTechnology::None => UpscalingTechnology::Fallback,
-        ProfileUpscalingTechnology::FSR => UpscalingTechnology::FSR,
-        ProfileUpscalingTechnology::DLSS => UpscalingTechnology::DLSS,
-        ProfileUpscalingTechnology::Fallback => UpscalingTechnology::Fallback,
-        ProfileUpscalingTechnology::Custom => UpscalingTechnology::Fallback,
-    }
-}
-
-// Map profile UpscalingQuality to library UpscalingQuality
-fn map_quality(&self, quality: &ProfileUpscalingQuality) -> UpscalingQuality {
-    match quality {
-        ProfileUpscalingQuality::Ultra => UpscalingQuality::Ultra,
-        ProfileUpscalingQuality::Quality => UpscalingQuality::Quality,
-        ProfileUpscalingQuality::Balanced => UpscalingQuality::Balanced,
-        ProfileUpscalingQuality::Performance => UpscalingQuality::Performance,
     }
 }
 
