@@ -191,8 +191,16 @@ pub fn start_borderless_upscale(
             Ok(())
         },
         Err(e) => {
+            // Signal the capture thread to stop even if there was an error
+            stop_signal.store(true, Ordering::SeqCst);
+            
             error!("Fullscreen renderer failed: {}", e);
-            Err(anyhow::anyhow!("{}", e))
+            // If it's the EventLoop error, provide a more user-friendly message
+            if e.contains("EventLoop") {
+                Err(anyhow::anyhow!("Another window is already open. Please close it before starting a new upscaling session."))
+            } else {
+                Err(anyhow::anyhow!("{}", e))
+            }
         }
     };
     
