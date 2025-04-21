@@ -47,7 +47,7 @@ pub struct FullscreenUpscalerUi {
 
 impl FullscreenUpscalerUi {
     /// Create a new fullscreen upscaler UI
-    pub fn new(
+    fn new(
         cc: &eframe::CreationContext<'_>,
         frame_buffer: Arc<FrameBuffer>,
         stop_signal: Arc<AtomicBool>,
@@ -357,6 +357,12 @@ impl FullscreenUpscalerUi {
                 });
             });
     }
+
+    /// Configure UI settings after initialization
+    pub fn configure_ui(&mut self, ctx: &egui::Context) {
+        // Set up UI with dark mode
+        ctx.set_visuals(egui::Visuals::dark());
+    }
 }
 
 impl eframe::App for FullscreenUpscalerUi {
@@ -460,6 +466,9 @@ pub fn run_fullscreen_upscaler(
         Err(e) => return Err(format!("Failed to create upscaler: {}", e)),
     };
     
+    // Log the upscaler we're actually using
+    log::info!("Using upscaler: {} with quality: {:?}", upscaler.name(), upscaler.quality());
+    
     // Create eframe options for fullscreen
     let options = eframe::NativeOptions {
         maximized: true,
@@ -470,16 +479,68 @@ pub fn run_fullscreen_upscaler(
         ..Default::default()
     };
     
+    // Create the UI and wrap it in a Box so we can move it into the eframe run function
+    let ui = FullscreenUpscalerUi::new_boxed(
+        frame_buffer,
+        stop_signal,
+        upscaler,
+        algorithm,
+    );
+    
     // Run the application
     eframe::run_native(
         "NU Scale - Fullscreen Mode",
         options,
-        Box::new(move |cc| Box::new(FullscreenUpscalerUi::new(
-            cc,
+        Box::new(move |cc| {
+            // Configure the UI with the creation context
+            FullscreenUpscalerUi::configure(cc);
+            ui
+        })
+    ).map_err(|e| format!("Failed to run fullscreen upscaler: {}", e))
+}
+
+impl FullscreenUpscalerUi {
+    // Separate configuration of the context
+    fn configure(cc: &eframe::CreationContext<'_>) {
+        // Enable vsync and fullscreen
+        if let Some(ctx) = &cc.wgpu_render_state {
+            // Configure wgpu renderer if available
+            let _ = ctx.adapter.features();
+            // Additional wgpu configuration can be done here
+        }
+        
+        // Set up UI with dark mode
+        cc.egui_ctx.set_visuals(egui::Visuals::dark());
+    }
+    
+    // Create a new boxed instance of FullscreenUpscalerUi
+    fn new_boxed(
+        frame_buffer: Arc<FrameBuffer>,
+        stop_signal: Arc<AtomicBool>,
+        upscaler: Box<dyn Upscaler>,
+        algorithm: Option<UpscalingAlgorithm>,
+    ) -> Box<Self> {
+        // Get upscaler information
+        let upscaler_name = upscaler.name().to_string();
+        let upscaler_quality = upscaler.quality();
+        
+        Box::new(Self {
             frame_buffer,
             stop_signal,
             upscaler,
             algorithm,
-        )))
-    ).map_err(|e| format!("Failed to run fullscreen upscaler: {}", e))
+            texture: None,
+            last_frame_time: std::time::Instant::now(),
+            fps: 0.0,
+            frames_processed: 0,
+            upscaler_name,
+            upscaler_quality,
+            show_overlay: true,
+            fps_history: Vec::with_capacity(120),
+            upscale_time_history: Vec::with_capacity(120),
+            last_upscale_time: 0.0,
+            input_size: (0, 0),
+            output_size: (0, 0),
+        })
+    }
 } 
