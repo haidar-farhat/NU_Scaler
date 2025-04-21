@@ -1,5 +1,5 @@
 use anyhow::Result;
-use log::{debug, error, info, trace, warn, LevelFilter};
+use log::{debug, error, info, trace, LevelFilter};
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::Path;
@@ -11,6 +11,9 @@ static INIT: Once = Once::new();
 
 /// Initialize the logger with both console and file output
 pub fn init_logger(log_dir: Option<&str>, verbose: bool) -> Result<()> {
+    // Convert Option<&str> to Option<String> to avoid lifetime issues with threads
+    let log_dir_owned = log_dir.map(|dir| dir.to_string());
+    
     let result = std::thread::spawn(move || {
         INIT.call_once(|| {
             // Determine log level based on verbose flag
@@ -24,9 +27,9 @@ pub fn init_logger(log_dir: Option<&str>, verbose: bool) -> Result<()> {
             builder.filter_level(log_level);
             
             // If log_dir is provided, add a file logger
-            if let Some(dir) = log_dir {
+            if let Some(dir) = log_dir_owned {
                 // Create log directory if it doesn't exist
-                let log_dir_path = Path::new(dir);
+                let log_dir_path = Path::new(&dir);
                 if !log_dir_path.exists() {
                     if let Err(e) = fs::create_dir_all(log_dir_path) {
                         eprintln!("Failed to create log directory: {}", e);
@@ -114,20 +117,17 @@ fn log_system_info() {
 
 /// Log available upscaling technologies
 fn log_available_upscalers() {
-    use crate::upscale::fsr::FsrUpscaler;
-    use crate::upscale::dlss::DlssUpscaler;
-    
     info!("Checking available upscalers...");
     
     #[cfg(feature = "fsr")]
     {
-        let fsr_supported = FsrUpscaler::is_supported();
+        let fsr_supported = crate::is_fsr_supported();
         info!("FSR support: {}", if fsr_supported { "Available" } else { "Not available" });
     }
     
     #[cfg(feature = "dlss")]
     {
-        let dlss_supported = DlssUpscaler::is_supported();
+        let dlss_supported = crate::is_dlss_supported();
         info!("DLSS support: {}", if dlss_supported { "Available" } else { "Not available" });
     }
     

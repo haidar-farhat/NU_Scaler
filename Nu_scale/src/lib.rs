@@ -23,8 +23,7 @@ use crate::capture::ScreenCapture;
 // Re-export upscaling algorithm types
 pub use crate::upscale::common::UpscalingAlgorithm;
 
-use std::sync::{Arc, Mutex};
-use image::RgbaImage;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 /// Application version
@@ -255,11 +254,11 @@ pub fn is_dlss_supported() -> bool {
 
 /// Start fullscreen upscaling mode which captures, upscales and renders frames in real-time
 pub fn start_fullscreen_upscale_renderer(
-    source: capture::CaptureTarget,
+    _source: capture::CaptureTarget,
     technology: upscale::UpscalingTechnology,
     quality: upscale::UpscalingQuality,
-    fps: u32,
-    algorithm: Option<UpscalingAlgorithm>,
+    _fps: u32,
+    _algorithm: Option<UpscalingAlgorithm>,
 ) -> Result<()> {
     println!("Starting fullscreen upscaling with {:?} technology at {:?} quality", 
              technology, quality);
