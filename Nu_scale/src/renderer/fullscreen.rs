@@ -460,6 +460,23 @@ pub fn run_fullscreen_upscaler(
     quality: UpscalingQuality,
     algorithm: Option<UpscalingAlgorithm>,
 ) -> Result<(), String> {
+    // Use a static flag to ensure only one EventLoop is created per process
+    use std::sync::Once;
+    static EVENT_LOOP_INIT: Once = Once::new();
+    static mut EVENT_LOOP_INITIALIZED: bool = false;
+    
+    // Check if an EventLoop has already been created in this process
+    let already_initialized = unsafe { EVENT_LOOP_INITIALIZED };
+    if already_initialized {
+        log::warn!("Attempted to create multiple EventLoops - returning to avoid panic");
+        return Err("Cannot create multiple EventLoops in the same process. The application may need to be restarted to create a new window.".to_string());
+    }
+    
+    // Mark that we're initializing the EventLoop
+    EVENT_LOOP_INIT.call_once(|| {
+        unsafe { EVENT_LOOP_INITIALIZED = true; }
+    });
+    
     // Create an upscaler with the given technology and quality
     let upscaler = match create_upscaler(technology, quality, algorithm) {
         Ok(u) => u,
@@ -488,7 +505,7 @@ pub fn run_fullscreen_upscaler(
     );
     
     // Run the application
-    eframe::run_native(
+    let result = eframe::run_native(
         "NU Scale - Fullscreen Mode",
         options,
         Box::new(move |cc| {
@@ -496,7 +513,12 @@ pub fn run_fullscreen_upscaler(
             FullscreenUpscalerUi::configure(cc);
             ui
         })
-    ).map_err(|e| format!("Failed to run fullscreen upscaler: {}", e))
+    ).map_err(|e| format!("Failed to run fullscreen upscaler: {}", e));
+    
+    // Reset the initialization flag when done
+    unsafe { EVENT_LOOP_INITIALIZED = false; }
+    
+    result
 }
 
 impl FullscreenUpscalerUi {
