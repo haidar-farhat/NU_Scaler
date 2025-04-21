@@ -14,7 +14,7 @@ fn main() -> Result<()> {
         .about("Real-time upscaling app for screen capture")
         .arg(
             Arg::with_name("verbose")
-                .short("v")
+                .short('v')
                 .long("verbose")
                 .multiple(true)
                 .help("Sets the level of verbosity (can be used multiple times)")
