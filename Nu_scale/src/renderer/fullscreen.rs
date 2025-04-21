@@ -27,6 +27,22 @@ pub struct FullscreenUpscalerUi {
     fps: f32,
     /// Number of frames processed
     frames_processed: u64,
+    /// Current upscaler name
+    upscaler_name: String,
+    /// Current upscaling quality
+    upscaler_quality: UpscalingQuality,
+    /// Show performance overlay
+    show_overlay: bool,
+    /// Performance metrics history
+    fps_history: Vec<f32>,
+    /// Upscaling time history (ms)
+    upscale_time_history: Vec<f32>,
+    /// Last upscale time (ms)
+    last_upscale_time: f32,
+    /// Input size
+    input_size: (u32, u32),
+    /// Output size 
+    output_size: (u32, u32),
 }
 
 impl FullscreenUpscalerUi {
@@ -48,6 +64,10 @@ impl FullscreenUpscalerUi {
         // Set up UI with dark mode
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
         
+        // Get upscaler information
+        let upscaler_name = upscaler.name().to_string();
+        let upscaler_quality = upscaler.quality();
+        
         Self {
             frame_buffer,
             stop_signal,
@@ -57,6 +77,14 @@ impl FullscreenUpscalerUi {
             last_frame_time: std::time::Instant::now(),
             fps: 0.0,
             frames_processed: 0,
+            upscaler_name,
+            upscaler_quality,
+            show_overlay: true,
+            fps_history: Vec::with_capacity(120),
+            upscale_time_history: Vec::with_capacity(120),
+            last_upscale_time: 0.0,
+            input_size: (0, 0),
+            output_size: (0, 0),
         }
     }
     
@@ -64,8 +92,27 @@ impl FullscreenUpscalerUi {
     fn update_texture(&mut self, ctx: &egui::Context) {
         // Get the latest frame from the buffer
         if let Ok(Some(frame)) = self.frame_buffer.get_latest_frame() {
+            // Store input size
+            self.input_size = (frame.width(), frame.height());
+            
+            // Measure upscaling time
+            let upscale_start = std::time::Instant::now();
+            
             // Upscale the frame
             if let Ok(upscaled) = self.upscale_frame(&frame) {
+                // Measure upscaling time
+                let upscale_time = upscale_start.elapsed().as_secs_f32() * 1000.0;
+                self.last_upscale_time = upscale_time;
+                
+                // Keep history of upscale times (max 120 frames)
+                self.upscale_time_history.push(upscale_time);
+                if self.upscale_time_history.len() > 120 {
+                    self.upscale_time_history.remove(0);
+                }
+                
+                // Store output size
+                self.output_size = (upscaled.width(), upscaled.height());
+                
                 // Convert to egui::ColorImage
                 let size = [upscaled.width() as usize, upscaled.height() as usize];
                 let mut color_data = Vec::with_capacity(size[0] * size[1] * 4);
@@ -94,17 +141,222 @@ impl FullscreenUpscalerUi {
                 let elapsed = self.last_frame_time.elapsed();
                 self.fps = 1.0 / elapsed.as_secs_f32();
                 self.last_frame_time = std::time::Instant::now();
+                
+                // Keep history of fps (max 120 frames)
+                self.fps_history.push(self.fps);
+                if self.fps_history.len() > 120 {
+                    self.fps_history.remove(0);
+                }
+                
+                // Log performance metrics occasionally
+                if self.frames_processed % 100 == 0 {
+                    let avg_fps = self.fps_history.iter().sum::<f32>() / self.fps_history.len() as f32;
+                    let avg_upscale_time = self.upscale_time_history.iter().sum::<f32>() / self.upscale_time_history.len() as f32;
+                    
+                    log::info!("Performance: Avg FPS: {:.1}, Avg upscale time: {:.2}ms, Input: {}x{}, Output: {}x{}", 
+                              avg_fps, avg_upscale_time, 
+                              self.input_size.0, self.input_size.1,
+                              self.output_size.0, self.output_size.1);
+                }
             }
         }
     }
     
     /// Upscale a frame using the configured upscaler
     fn upscale_frame(&mut self, frame: &RgbaImage) -> Result<RgbaImage> {
+        // Check if upscaler needs initialization
+        if self.upscaler.needs_initialization() || 
+           frame.width() != self.upscaler.input_width() || 
+           frame.height() != self.upscaler.input_height() {
+            log::debug!("Initializing upscaler with dimensions {}x{} -> {}x{}", 
+                      frame.width(), frame.height(), 
+                      (frame.width() as f32 * 1.5) as u32, 
+                      (frame.height() as f32 * 1.5) as u32);
+            
+            // Initialize with 1.5x scale factor by default
+            let _ = self.upscaler.initialize(
+                frame.width(), 
+                frame.height(), 
+                (frame.width() as f32 * 1.5) as u32, 
+                (frame.height() as f32 * 1.5) as u32
+            );
+        }
+        
         // Use the configured upscaler to process the frame with the algorithm
         match self.algorithm {
             Some(alg) => self.upscaler.upscale_with_algorithm(frame, alg),
             None => self.upscaler.upscale(frame)
         }
+    }
+    
+    /// Draw the performance overlay
+    fn draw_performance_overlay(&self, ui: &mut egui::Ui) {
+        // Early return if overlay is disabled
+        if !self.show_overlay {
+            return;
+        }
+        
+        // Background panel for metrics
+        egui::Frame::default()
+            .fill(egui::Color32::from_rgba_premultiplied(0, 0, 0, 180))
+            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 60, 60)))
+            .inner_margin(egui::Margin::same(10.0))
+            .rounding(egui::Rounding::same(5.0))
+            .show(ui, |ui| {
+                ui.vertical(|ui| {
+                    // Title
+                    ui.add(egui::Label::new(
+                        egui::RichText::new("NU_Scaler Performance")
+                            .size(16.0)
+                            .color(egui::Color32::from_rgb(220, 220, 220))
+                    ));
+                    
+                    ui.add_space(5.0);
+                    
+                    // FPS and frame count
+                    ui.horizontal(|ui| {
+                        ui.add(egui::Label::new(
+                            egui::RichText::new(format!("FPS: {:.1}", self.fps))
+                                .color(egui::Color32::from_rgb(120, 220, 120))
+                                .size(14.0)
+                        ));
+                        
+                        ui.add_space(15.0);
+                        
+                        ui.add(egui::Label::new(
+                            egui::RichText::new(format!("Frames: {}", self.frames_processed))
+                                .color(egui::Color32::WHITE)
+                                .size(14.0)
+                        ));
+                    });
+                    
+                    // Upscaler info
+                    ui.horizontal(|ui| {
+                        ui.add(egui::Label::new(
+                            egui::RichText::new(format!("Upscaler: {}", self.upscaler_name))
+                                .color(egui::Color32::from_rgb(220, 180, 120))
+                                .size(14.0)
+                        ));
+                        
+                        ui.add_space(15.0);
+                        
+                        let quality_color = match self.upscaler_quality {
+                            UpscalingQuality::Ultra => egui::Color32::from_rgb(120, 220, 120),
+                            UpscalingQuality::Quality => egui::Color32::from_rgb(180, 220, 120),
+                            UpscalingQuality::Balanced => egui::Color32::from_rgb(220, 220, 120),
+                            UpscalingQuality::Performance => egui::Color32::from_rgb(220, 180, 120),
+                        };
+                        
+                        ui.add(egui::Label::new(
+                            egui::RichText::new(format!("Quality: {:?}", self.upscaler_quality))
+                                .color(quality_color)
+                                .size(14.0)
+                        ));
+                    });
+                    
+                    // Algorithm info if present
+                    if let Some(alg) = self.algorithm {
+                        ui.add(egui::Label::new(
+                            egui::RichText::new(format!("Algorithm: {:?}", alg))
+                                .color(egui::Color32::from_rgb(180, 180, 220))
+                                .size(14.0)
+                        ));
+                    }
+                    
+                    // Resolution info
+                    ui.horizontal(|ui| {
+                        ui.add(egui::Label::new(
+                            egui::RichText::new(format!("Input: {}x{}", self.input_size.0, self.input_size.1))
+                                .color(egui::Color32::WHITE)
+                                .size(14.0)
+                        ));
+                        
+                        ui.add_space(10.0);
+                        
+                        ui.add(egui::Label::new(
+                            egui::RichText::new("→")
+                                .color(egui::Color32::from_rgb(180, 180, 180))
+                                .size(14.0)
+                        ));
+                        
+                        ui.add_space(10.0);
+                        
+                        ui.add(egui::Label::new(
+                            egui::RichText::new(format!("Output: {}x{}", self.output_size.0, self.output_size.1))
+                                .color(egui::Color32::WHITE)
+                                .size(14.0)
+                        ));
+                        
+                        // Calculate and show scale factor
+                        if self.input_size.0 > 0 && self.input_size.1 > 0 {
+                            let scale_x = self.output_size.0 as f32 / self.input_size.0 as f32;
+                            let scale_y = self.output_size.1 as f32 / self.input_size.1 as f32;
+                            
+                            ui.add_space(10.0);
+                            
+                            ui.add(egui::Label::new(
+                                egui::RichText::new(format!("({:.1}x)", (scale_x + scale_y) / 2.0))
+                                    .color(egui::Color32::from_rgb(180, 220, 180))
+                                    .size(14.0)
+                            ));
+                        }
+                    });
+                    
+                    // Performance details
+                    ui.add_space(5.0);
+                    
+                    ui.add(egui::Label::new(
+                        egui::RichText::new(format!("Upscale time: {:.2}ms", self.last_upscale_time))
+                            .color(egui::Color32::from_rgb(220, 220, 120))
+                            .size(14.0)
+                    ));
+                    
+                    // FPS Graph if we have enough history
+                    if self.fps_history.len() > 2 {
+                        ui.add_space(10.0);
+                        
+                        let max_fps = self.fps_history.iter().cloned().fold(0.0_f32, f32::max).max(1.0);
+                        
+                        ui.add(egui::Label::new(
+                            egui::RichText::new("FPS History")
+                                .color(egui::Color32::WHITE)
+                                .size(12.0)
+                        ));
+                        
+                        let height = 40.0;
+                        let graph = egui::plot::Plot::new("fps_history")
+                            .height(height)
+                            .show_background(false)
+                            .allow_zoom(false)
+                            .allow_drag(false)
+                            .include_y(0.0)
+                            .include_y(max_fps)
+                            .show_axes([false; 2])
+                            .show_grid([false; 2]);
+                            
+                        graph.show(ui, |plot_ui| {
+                            let fps_points: Vec<[f64; 2]> = self.fps_history.iter()
+                                .enumerate()
+                                .map(|(i, &fps)| [i as f64, fps as f64])
+                                .collect();
+                            
+                            let line = egui::plot::Line::new(egui::plot::PlotPoints::from(fps_points))
+                                .color(egui::Color32::from_rgb(120, 220, 120))
+                                .width(1.5);
+                                
+                            plot_ui.line(line);
+                        });
+                    }
+                    
+                    // Help text
+                    ui.add_space(10.0);
+                    ui.add(egui::Label::new(
+                        egui::RichText::new("Press ESC to exit fullscreen mode")
+                            .color(egui::Color32::from_rgb(180, 180, 180))
+                            .size(12.0)
+                    ));
+                });
+            });
     }
 }
 
@@ -121,6 +373,11 @@ impl eframe::App for FullscreenUpscalerUi {
             // Close the application
             frame.close();
             return;
+        }
+        
+        // Check for F1 key to toggle performance overlay
+        if ctx.input(|i| i.key_pressed(egui::Key::F1)) {
+            self.show_overlay = !self.show_overlay;
         }
         
         // Show the upscaled frame on the entire window
@@ -158,23 +415,16 @@ impl eframe::App for FullscreenUpscalerUi {
                     // Draw the texture
                     ui.put(rect, egui::Image::new(texture.id(), texture_size));
                     
-                    // Show FPS in corner
-                    ui.painter().text(
-                        egui::pos2(10.0, 20.0),
-                        egui::Align2::LEFT_TOP,
-                        format!("FPS: {:.1}", self.fps),
-                        egui::FontId::proportional(14.0),
-                        egui::Color32::WHITE
+                    // Draw performance overlay in the top-right corner
+                    let overlay_width = 250.0;
+                    let overlay_rect = egui::Rect::from_min_size(
+                        egui::pos2(ui.available_rect_before_wrap().right() - overlay_width - 10.0, 10.0),
+                        Vec2::new(overlay_width, 0.0) // Height will be determined by content
                     );
                     
-                    // Show frame count
-                    ui.painter().text(
-                        egui::pos2(10.0, 40.0),
-                        egui::Align2::LEFT_TOP,
-                        format!("Frames: {}", self.frames_processed),
-                        egui::FontId::proportional(14.0),
-                        egui::Color32::WHITE
-                    );
+                    ui.allocate_ui_at_rect(overlay_rect, |ui| {
+                        self.draw_performance_overlay(ui);
+                    });
                 } else {
                     // Show loading message if no texture is available
                     ui.centered_and_justified(|ui| {
