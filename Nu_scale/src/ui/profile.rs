@@ -1,4 +1,4 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use anyhow::{Result, anyhow};
@@ -56,57 +56,110 @@ pub enum UpscalingQuality {
     Performance,
 }
 
-/// Profile for capture and upscaling settings
+/// A profile for capturing and upscaling settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Profile {
-    /// Profile name
+    /// Name of the profile
     pub name: String,
-    /// Capture source
-    pub source: CaptureSource,
-    /// System platform
-    pub platform: SystemPlatform,
-    /// Upscaling factor (1.0 = no upscaling)
+    /// Capture source (0 = full screen, 1 = window, 2 = region)
+    pub capture_source: usize,
+    /// Window title (for window capture)
+    pub window_title: String,
+    /// Region coordinates (for region capture)
+    pub region_x: i32,
+    pub region_y: i32,
+    pub region_width: u32,
+    pub region_height: u32,
+    /// Upscaling technology (0 = auto, 1 = FSR, 2 = DLSS, 3 = basic)
+    pub upscaling_tech: usize,
+    /// Upscaling quality (0 = ultra quality, 1 = quality, 2 = balanced, 3 = performance)
+    pub upscaling_quality: usize,
+    /// Upscaling algorithm (0 = lanczos, 1 = bicubic, 2 = bilinear, 3 = nearest)
+    pub upscaling_algorithm: usize,
+    /// Target FPS
+    pub fps: f32,
+    /// Scale factor
     pub scale_factor: f32,
-    /// Upscaling technology
-    pub upscaling_tech: UpscalingTechnology,
-    /// Upscaling quality preset
-    pub upscaling_quality: UpscalingQuality,
-    /// Specific upscaling algorithm when using fallback technology
-    pub upscaling_algorithm: Option<String>,
-    /// Enable overlay
-    pub enable_overlay: bool,
-    /// Hotkey for starting/stopping capture
-    pub hotkey: String,
-    /// Capture FPS
-    pub fps: u32,
+    /// Post-processing options
+    pub sharpening: bool,
+    pub sharpening_amount: f32,
+    pub noise_reduction: bool,
+    pub noise_reduction_amount: f32,
 }
 
 impl Default for Profile {
     fn default() -> Self {
         Self {
             name: "Default".to_string(),
-            source: CaptureSource::Fullscreen,
-            platform: SystemPlatform::Auto,
-            scale_factor: 1.5,
-            upscaling_tech: UpscalingTechnology::None,
-            upscaling_quality: UpscalingQuality::Balanced,
-            upscaling_algorithm: None, // Let quality determine the algorithm
-            enable_overlay: false,
-            hotkey: "Ctrl+Alt+C".to_string(),
-            fps: 30,
+            capture_source: 0,
+            window_title: String::new(),
+            region_x: 0,
+            region_y: 0,
+            region_width: 1280,
+            region_height: 720,
+            upscaling_tech: 0,
+            upscaling_quality: 1,
+            upscaling_algorithm: 0,
+            fps: 60.0,
+            scale_factor: 2.0,
+            sharpening: true,
+            sharpening_amount: 0.5,
+            noise_reduction: false,
+            noise_reduction_amount: 0.3,
         }
     }
 }
 
 impl Profile {
-    /// Create a new profile with default settings
+    /// Create a new profile with the given name
     pub fn new(name: &str) -> Self {
-        Self {
-            name: name.to_string(),
-            ..Default::default()
-        }
+        let mut profile = Self::default();
+        profile.name = name.to_string();
+        profile
     }
-    
+
+    /// Save the profile to a file
+    pub fn save(&self, path: Option<&str>) -> Result<(), std::io::Error> {
+        let file_name = format!("{}.json", self.name);
+        let path = path.unwrap_or(&file_name);
+        let json = serde_json::to_string_pretty(self)?;
+        std::fs::write(path, json)
+    }
+
+    /// Load a profile from a file
+    pub fn load(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let json = std::fs::read_to_string(path)?;
+        let profile = serde_json::from_str(&json)?;
+        Ok(profile)
+    }
+
+    /// Load all profiles from a directory
+    pub fn load_all(dir: &str) -> Vec<Self> {
+        let mut profiles = Vec::new();
+        
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                if let Ok(file_type) = entry.file_type() {
+                    if file_type.is_file() {
+                        if let Some(extension) = entry.path().extension() {
+                            if extension == "json" {
+                                if let Ok(profile) = Self::load(entry.path().to_str().unwrap_or_default()) {
+                                    profiles.push(profile);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        if profiles.is_empty() {
+            profiles.push(Self::default());
+        }
+        
+        profiles
+    }
+
     /// Get profiles directory
     pub fn get_profiles_dir() -> Result<PathBuf> {
         let config_dir = dirs::config_dir()
@@ -119,28 +172,6 @@ impl Profile {
         }
         
         Ok(profiles_dir)
-    }
-    
-    /// Save profile to disk
-    pub fn save(&self) -> Result<()> {
-        let profiles_dir = Self::get_profiles_dir()?;
-        let file_path = profiles_dir.join(format!("{}.json", self.name));
-        
-        let json = serde_json::to_string_pretty(self)?;
-        fs::write(file_path, json)?;
-        
-        Ok(())
-    }
-    
-    /// Load profile from disk
-    pub fn load(name: &str) -> Result<Self> {
-        let profiles_dir = Self::get_profiles_dir()?;
-        let file_path = profiles_dir.join(format!("{}.json", name));
-        
-        let json = fs::read_to_string(file_path)?;
-        let profile = serde_json::from_str(&json)?;
-        
-        Ok(profile)
     }
     
     /// List all available profiles

@@ -22,11 +22,9 @@ clap = "3.2"
 [features]
 default = []
 capture_opencv = ["opencv"]
-
-# Add feature for AMD FSR support
 fsr = []
-# Add feature for NVIDIA DLSS support
 dlss = []
+disable_gui = []  # Feature to disable GUI components
 
 # Windows-specific dependencies
 [target.'cfg(windows)'.dependencies]
