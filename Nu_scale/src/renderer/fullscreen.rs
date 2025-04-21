@@ -331,8 +331,7 @@ impl FullscreenUpscalerUi {
                             .allow_drag(false)
                             .include_y(0.0)
                             .include_y(max_fps)
-                            .show_axes([false; 2])
-                            .show_grid([false; 2]);
+                            .show_axes([false; 2]);
                             
                         graph.show(ui, |plot_ui| {
                             let fps_points: Vec<[f64; 2]> = self.fps_history.iter()

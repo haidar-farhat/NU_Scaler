@@ -464,9 +464,9 @@ impl DlssUpscaler {
         output = detail_recovery_pass;
         
         // If we have a previous frame, apply temporal stabilization
+        // In real DLSS, motion vectors would be used for better temporal reprojection
+        // We'll do a simple blend for our simulation
         if let Some(prev_frame_data) = &context.previous_frame {
-            // In real DLSS, motion vectors would be used for better temporal reprojection
-            // We'll do a simple blend for our simulation
             if prev_frame_data.len() == (self.output_width * self.output_height * 4) as usize {
                 // Blend current frame with previous frame with temporal weight
                 for y in 0..self.output_height {
@@ -500,30 +500,13 @@ impl DlssUpscaler {
             }
         }
         
-        // Store current frame for next time
-        // In a real implementation, this would be handled by the DLSS API
-        // For our simulation, we need to manage it manually
-        let mut updated_context = context.clone();
+        // In a real implementation, we would update the context with the current frame
+        // But due to borrowing limitations in our mock implementation, we can't directly update it
+        // This would be handled internally by the DLSS API in a real implementation
         
-        // Convert output to flattened byte array
-        let mut current_frame_data = Vec::with_capacity((self.output_width * self.output_height * 4) as usize);
-        for y in 0..self.output_height {
-            for x in 0..self.output_width {
-                let pixel = output.get_pixel(x, y);
-                current_frame_data.push(pixel.0[0]);
-                current_frame_data.push(pixel.0[1]);
-                current_frame_data.push(pixel.0[2]);
-                current_frame_data.push(pixel.0[3]);
-            }
-        }
-        
-        // Update context
-        updated_context.previous_frame = Some(current_frame_data);
-        updated_context.frame_counter += 1;
-        
-        // In a real implementation, the context would be updated by the DLSS API
-        // For simulation, we need to update it manually (but can't due to borrowing rules)
-        // This would be updated via the API in a real implementation
+        // Note: In a real implementation, we would store the current frame for the next run
+        // and increment the frame counter for temporal processing
+        // In practice, NVIDIA NGX API would handle this internally
         
         Ok(output)
     }
