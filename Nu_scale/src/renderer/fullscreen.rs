@@ -28,6 +28,91 @@ fn create_lock_file() -> std::io::Result<Option<File>> {
         std::path::PathBuf::from(LOCK_FILE_PATH)
     };
     
+    // If lock file exists, check if it's stale
+    if lock_path.exists() {
+        let is_stale = match std::fs::read_to_string(&lock_path) {
+            Ok(content) => {
+                // Read PID from lock file
+                if let Ok(pid) = content.trim().parse::<u32>() {
+                    // On Windows, check if the process exists
+                    #[cfg(windows)]
+                    {
+                        use std::process::Command;
+                        // Try to query the process - if it doesn't exist, this will fail
+                        let output = Command::new("tasklist")
+                            .args(&["/FI", &format!("PID eq {}", pid), "/NH"])
+                            .output();
+                        
+                        match output {
+                            Ok(output) => {
+                                let output_str = String::from_utf8_lossy(&output.stdout);
+                                // If the process is not in the list, the lock is stale
+                                let is_stale = !output_str.contains(&pid.to_string());
+                                if is_stale {
+                                    log::info!("Detected stale lock file from non-existent process {}", pid);
+                                }
+                                is_stale
+                            },
+                            Err(_) => {
+                                // If we can't check, assume it's not stale
+                                false
+                            }
+                        }
+                    }
+                    
+                    // On Unix systems, check differently
+                    #[cfg(unix)]
+                    {
+                        use std::process::Command;
+                        // Check if the process exists
+                        let output = Command::new("ps")
+                            .args(&["-p", &pid.to_string()])
+                            .output();
+                            
+                        match output {
+                            Ok(output) => {
+                                // The process doesn't exist if ps returns no lines beyond the header
+                                let output_str = String::from_utf8_lossy(&output.stdout);
+                                let lines = output_str.lines().count();
+                                let is_stale = lines <= 1;
+                                if is_stale {
+                                    log::info!("Detected stale lock file from non-existent process {}", pid);
+                                }
+                                is_stale
+                            },
+                            Err(_) => false
+                        }
+                    }
+                    
+                    // Default for other platforms
+                    #[cfg(not(any(windows, unix)))]
+                    {
+                        // Can't check on other platforms, assume it's not stale
+                        false
+                    }
+                } else {
+                    // Invalid PID in lock file, consider it stale
+                    log::warn!("Invalid PID in lock file, treating as stale");
+                    true
+                }
+            },
+            Err(_) => {
+                // Can't read lock file, assume it's stale
+                log::warn!("Couldn't read lock file, treating as stale");
+                true
+            }
+        };
+        
+        // Remove stale lock file
+        if is_stale {
+            log::info!("Removing stale lock file at {:?}", lock_path);
+            let _ = std::fs::remove_file(&lock_path);
+        } else {
+            log::warn!("Lock file is active (not stale) at {:?}", lock_path);
+            return Ok(None);
+        }
+    }
+    
     // Try to create the lock file with exclusive access
     match OpenOptions::new().write(true).create_new(true).open(&lock_path) {
         Ok(file) => {
