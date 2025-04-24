@@ -3,6 +3,7 @@ use image::RgbaImage;
 use std::path::Path;
 
 pub mod fsr;
+pub mod fsr3;
 pub mod dlss;
 pub mod common;
 pub mod vulkan;
@@ -25,6 +26,8 @@ pub enum UpscalingTechnology {
     None,
     // AMD FidelityFX Super Resolution
     FSR,
+    // AMD FidelityFX Super Resolution 3 with Frame Generation
+    FSR3,
     // NVIDIA Deep Learning Super Sampling
     DLSS,
     // CUDA-based upscaling
@@ -85,7 +88,7 @@ pub fn create_upscaler(
     technology: UpscalingTechnology,
     quality: UpscalingQuality,
     algorithm: Option<UpscalingAlgorithm>,
-) -> Result<Box<dyn Upscaler>> {
+) -> Result<Box<dyn Upscaler + Send + Sync>> {
     match technology {
         UpscalingTechnology::FSR => {
             if !fsr::FsrUpscaler::is_supported() {
@@ -93,6 +96,20 @@ pub fn create_upscaler(
                 return create_basic_upscaler(quality, algorithm);
             }
             let upscaler = fsr::FsrUpscaler::new(quality)?;
+            Ok(Box::new(upscaler))
+        },
+        UpscalingTechnology::FSR3 => {
+            if !fsr3::Fsr3Upscaler::is_supported() {
+                log::info!("FSR3 not supported, falling back to FSR2");
+                // Try regular FSR first
+                if fsr::FsrUpscaler::is_supported() {
+                    log::info!("Falling back to FSR2");
+                    let upscaler = fsr::FsrUpscaler::new(quality)?;
+                    return Ok(Box::new(upscaler));
+                }
+                return create_basic_upscaler(quality, algorithm);
+            }
+            let upscaler = fsr3::Fsr3Upscaler::new(quality, true)?; // Enable frame generation
             Ok(Box::new(upscaler))
         },
         UpscalingTechnology::DLSS => {
@@ -202,7 +219,7 @@ pub fn create_upscaler(
 fn create_basic_upscaler(
     quality: UpscalingQuality,
     algorithm: Option<UpscalingAlgorithm>
-) -> Result<Box<dyn Upscaler>> {
+) -> Result<Box<dyn Upscaler + Send + Sync>> {
     let upscaler = if let Some(alg) = algorithm {
         common::BasicUpscaler::with_algorithm(quality, alg)
     } else {
