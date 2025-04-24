@@ -1093,16 +1093,131 @@ impl AppState {
                 if let Some(buffer) = &self.upscaling_buffer {
                     match buffer.get_latest_frame() {
                         Ok(Some(frame)) => {
+                            // Check for valid frame dimensions before proceeding
+                            if frame.width() == 0 || frame.height() == 0 {
+                                log::warn!("Received frame with invalid dimensions: {}x{}", frame.width(), frame.height());
+                                ui.centered_and_justified(|ui| {
+                                    ui.heading("Waiting for valid frame...");
+                                    ui.label("Received frame with zero dimensions. Please ensure the source window is visible.");
+                                });
+                                // Request continuous repainting until we get a valid frame
+                                ctx.request_repaint();
+                                return;
+                            }
+                            
                             // Frame received, proceed with upscaling
                             if let Some(upscaler) = &mut self.upscaler {
-                                // --- TEMPORARY DIAGNOSTIC: Bypass Upscaler ---
-                                log::debug!("DIAGNOSTIC: Bypassing upscaler, displaying raw frame.");
+                                // Check if upscaler needs initialization or re-initialization with correct dimensions
+                                if upscaler.needs_initialization() || 
+                                   upscaler.input_width() != frame.width() || 
+                                   upscaler.input_height() != frame.height() {
+                                    
+                                    log::info!("Initializing upscaler with dimensions {}x{}", frame.width(), frame.height());
+                                    
+                                    // Get the profile scaling factor and apply it to determine output dimensions
+                                    // The profile has numeric indexes for upscaling tech and quality
+                                    // Tech: 0 = auto, 1 = FSR, 2 = DLSS, 3 = basic
+                                    // Quality: 0 = ultra, 1 = quality, 2 = balanced, 3 = performance
+                                    let scale_factor = match self.profile.upscaling_tech {
+                                        1 => { // FSR
+                                            match self.profile.upscaling_quality {
+                                                0 => 1.3, // Ultra quality
+                                                1 => 1.5, // Quality
+                                                2 => 1.7, // Balanced
+                                                3 => 2.0, // Performance
+                                                _ => self.profile.scale_factor // Use profile's scale factor as fallback
+                                            }
+                                        },
+                                        2 => { // DLSS
+                                            match self.profile.upscaling_quality {
+                                                0 => 1.3, // Ultra quality
+                                                1 => 1.5, // Quality
+                                                2 => 1.7, // Balanced
+                                                3 => 2.0, // Performance
+                                                _ => self.profile.scale_factor // Use profile's scale factor as fallback
+                                            }
+                                        },
+                                        _ => self.profile.scale_factor // Use profile's scale factor for other tech
+                                    };
+                                    
+                                    let out_width = (frame.width() as f32 * scale_factor) as u32;
+                                    let out_height = (frame.height() as f32 * scale_factor) as u32;
+                                    
+                                    log::info!("Configuring upscaler for {}x{} -> {}x{} (scale: {}x)", 
+                                              frame.width(), frame.height(), out_width, out_height, scale_factor);
+                                    
+                                    if let Err(e) = upscaler.initialize(frame.width(), frame.height(), out_width, out_height) {
+                                        log::error!("Failed to initialize upscaler: {}", e);
+                                        ui.centered_and_justified(|ui| {
+                                            ui.heading("Upscaler initialization error");
+                                            ui.label(format!("Error: {}", e));
+                                        });
+                                        return;
+                                    }
+                                }
+                                
+                                // Perform upscaling on the captured frame
+                                match upscaler.upscale(&frame) {
+                                    Ok(upscaled) => {
+                                        // Successfully upscaled the frame
+                                        let size = [upscaled.width() as _, upscaled.height() as _];
+                                        let pixels = upscaled.as_raw();
+                                        
+                                        let texture = self.frame_texture.get_or_insert_with(|| {
+                                            ui.ctx().load_texture(
+                                                "upscaled_frame",
+                                                eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels),
+                                                eframe::egui::TextureOptions::LINEAR
+                                            )
+                                        });
+                                        
+                                        if texture.size() != size {
+                                            *texture = ui.ctx().load_texture(
+                                                "upscaled_frame",
+                                                eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels),
+                                                eframe::egui::TextureOptions::LINEAR
+                                            );
+                                        } else {
+                                            texture.set(eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels), eframe::egui::TextureOptions::LINEAR);
+                                        }
+                                        
+                                        // Display the texture stretched
+                                        ui.centered_and_justified(|ui| {
+                                            let aspect_ratio = size[0] as f32 / size[1] as f32;
+                                            let max_width = available_size.x;
+                                            let max_height = available_size.y;
+                                            let (width, height) = if aspect_ratio > max_width / max_height {
+                                                (max_width, max_width / aspect_ratio)
+                                            } else {
+                                                (max_height * aspect_ratio, max_height)
+                                            };
+                                            let rect = eframe::egui::Rect::from_min_size(
+                                                eframe::egui::pos2((max_width - width) * 0.5, (max_height - height) * 0.5),
+                                                eframe::egui::vec2(width, height)
+                                            );
+                                            ui.put(rect, eframe::egui::Image::new(texture, eframe::egui::vec2(width, height)));
+                                        });
+                                        self.frames_processed += 1;
+                                    },
+                                    Err(e) => {
+                                        // Error during upscaling
+                                        log::error!("Upscaling error: {}", e);
+                                        ui.centered_and_justified(|ui| {
+                                            ui.label(eframe::egui::RichText::new(format!("Upscaling Error: {}", e))
+                                                .size(18.0).color(eframe::egui::Color32::RED));
+                                        });
+                                    }
+                                }
+                            } else {
+                                // This case should ideally not happen if upscaling mode is active
+                                log::warn!("Upscaling mode active, but no upscaler found!");
+                                // Fallback to displaying raw frame
                                 let size = [frame.width() as _, frame.height() as _];
-                                let pixels = frame.as_raw(); // Use raw frame pixels
+                                let pixels = frame.as_raw();
                                 
                                 let texture = self.frame_texture.get_or_insert_with(|| {
                                     ui.ctx().load_texture(
-                                        "raw_frame_diagnostic", // Use a different name to avoid conflicts
+                                        "raw_frame",
                                         eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels),
                                         eframe::egui::TextureOptions::LINEAR
                                     )
@@ -1110,7 +1225,7 @@ impl AppState {
                                 
                                 if texture.size() != size {
                                     *texture = ui.ctx().load_texture(
-                                        "raw_frame_diagnostic",
+                                        "raw_frame",
                                         eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels),
                                         eframe::egui::TextureOptions::LINEAR
                                     );
@@ -1118,8 +1233,10 @@ impl AppState {
                                     texture.set(eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels), eframe::egui::TextureOptions::LINEAR);
                                 }
                                 
-                                // Display the texture stretched...
                                 ui.centered_and_justified(|ui| {
+                                    ui.label(eframe::egui::RichText::new("Warning: No upscaler available")
+                                        .size(18.0).color(eframe::egui::Color32::YELLOW));
+                                    
                                     let aspect_ratio = size[0] as f32 / size[1] as f32;
                                     let max_width = available_size.x;
                                     let max_height = available_size.y;
@@ -1134,12 +1251,6 @@ impl AppState {
                                     );
                                     ui.put(rect, eframe::egui::Image::new(texture, eframe::egui::vec2(width, height)));
                                 });
-                                self.frames_processed += 1; 
-                                // --- END TEMPORARY DIAGNOSTIC ---
-                            } else {
-                                // This case should ideally not happen if upscaling mode is active
-                                log::warn!("Upscaling mode active, but no upscaler found!");
-                                // ... (display raw frame logic remains the same, maybe add a warning overlay)
                             }
                         },
                         Ok(None) => {
@@ -1262,23 +1373,32 @@ impl AppState {
         // Set window to maximized/fullscreen state
         self.is_fullscreen = true;
         
+        // Log what we're doing
+        log::info!("Starting upscaling with source: {:?}, tech: {:?}, quality: {:?}, algorithm: {:?}",
+            target, tech, quality, algorithm);
+        
         // Use the frame parameter to maximize the window
         frame.set_maximized(true);
         frame.set_fullscreen(true); // Also set fullscreen mode
         log::info!("Requested window maximization and fullscreen");
         
         // Instead of launching a new window, use start_upscaling_mode to modify the current window
-        if let Err(e) = self.start_upscaling_mode(target, tech, quality, fps, algorithm) {
-            log::error!("Failed to start upscaling mode: {}", e);
-            self.status_message = format!("Failed to start upscaling: {}", e);
-            self.status_message_type = StatusMessageType::Error;
-            return;
+        match self.start_upscaling_mode(target, tech, quality, fps, algorithm) {
+            Ok(_) => {
+                log::info!("Upscaling mode started successfully");
+                self.status_message = "Upscaling started successfully".to_string();
+                self.status_message_type = StatusMessageType::Success;
+                
+                // Explicitly set the flag to enable upscaling mode
+                self.is_upscaling = true;
+            },
+            Err(e) => {
+                log::error!("Failed to start upscaling mode: {}", e);
+                self.status_message = format!("Failed to start upscaling: {}", e);
+                self.status_message_type = StatusMessageType::Error;
+                return;
+            }
         }
-        
-        // No need to call toggle_fullscreen_mode since we already set fullscreen above
-        
-        self.status_message = "Launched fullscreen mode in the current window.".to_string();
-        self.status_message_type = StatusMessageType::Success;
     }
 
     /// Start a scaling process in a separate application instance
