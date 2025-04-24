@@ -387,23 +387,31 @@ impl FullscreenUpscalerUi {
                         // Check if we need to create a new texture (dimensions changed or first frame)
                         if self.texture.is_none() {
                             log::info!("Creating new texture with size {}x{}", size[0], size[1]);
+                            
+                            // Try different formats and options to ensure visibility
                             self.texture = Some(ctx.load_texture(
                                 "frame_texture",
                                 color_image,
-                                TextureOptions::LINEAR
+                                TextureOptions::default()
                             ));
+                            
+                            // Log the new texture details
+                            if let Some(texture) = &self.texture {
+                                log::debug!("Created texture ID={:?}, size={}x{}", 
+                                          texture.id(), texture.size()[0], texture.size()[1]);
+                            }
                         } else if self.texture.as_ref().unwrap().size() != size {
                             log::info!("Texture size changed from {:?} to {}x{}, creating new texture", 
                                      self.texture.as_ref().unwrap().size(), size[0], size[1]);
                             self.texture = Some(ctx.load_texture(
                                 "frame_texture",
                                 color_image,
-                                TextureOptions::LINEAR
+                                TextureOptions::default()
                             ));
                         } else {
                             // Update the existing texture
                             log::debug!("Updating existing texture");
-                            self.texture.as_mut().unwrap().set(color_image, TextureOptions::LINEAR);
+                            self.texture.as_mut().unwrap().set(color_image, TextureOptions::default());
                         }
                         
                         // Update stats
@@ -724,9 +732,12 @@ impl eframe::App for FullscreenUpscalerUi {
             self.show_overlay = !self.show_overlay;
         }
         
+        // Force the window to be opaque black instead of transparent
+        ctx.set_visuals(egui::Visuals::dark());
+        
         // Use a dark background instead of transparent
         egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(egui::Color32::from_rgb(30, 30, 30)))
+            .frame(egui::Frame::none().fill(egui::Color32::from_rgb(10, 10, 10)))
             .show(ctx, |ui| {
                 if let Some(texture) = &self.texture {
                     // Get available size
@@ -756,8 +767,31 @@ impl eframe::App for FullscreenUpscalerUi {
                         )
                     };
                     
-                    // Draw the texture to cover the entire space
+                    // Try multiple approaches to render the texture
+                    
+                    // Approach 1: Use painter directly
+                    let painter = ui.painter();
+                    let uv = egui::Rect::from_min_max(
+                        egui::pos2(0.0, 0.0),
+                        egui::pos2(1.0, 1.0)
+                    );
+                    painter.image(texture.id(), rect, uv, egui::Color32::WHITE);
+                    
+                    // Approach 2: Add as a widget
                     ui.put(rect, egui::Image::new(texture.id(), texture_size));
+                    
+                    // Approach 3: Place as an absolute positioned element
+                    ui.allocate_ui_at_rect(rect, |ui| {
+                        ui.centered_and_justified(|ui| {
+                            ui.image(texture.id(), egui::Vec2::new(rect.width(), rect.height()));
+                        });
+                    });
+                    
+                    // Log texture details
+                    log::debug!("Rendering texture {}x{} into rect: {}x{} at ({},{})",
+                              texture_size.x, texture_size.y,
+                              rect.width(), rect.height(),
+                              rect.min.x, rect.min.y);
                     
                     // Draw performance overlay in the top-right corner only if enabled
                     if self.show_overlay {

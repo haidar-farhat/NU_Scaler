@@ -1084,6 +1084,9 @@ impl AppState {
             return;
         }
         
+        // Clear the entire screen and ensure we paint over everything with a solid background
+        ctx.set_visuals(eframe::egui::Visuals::dark());
+        
         // Create a full-screen frame with black background that stretches to fill the window
         eframe::egui::CentralPanel::default()
             .frame(eframe::egui::Frame::none()
@@ -1092,6 +1095,9 @@ impl AppState {
             .show(ctx, |ui| {
                 let available_size = ui.available_size();
                 log::debug!("Available UI size: {}x{}", available_size.x, available_size.y);
+                
+                // Force opaque painting
+                ui.set_clip_rect(ui.max_rect());
                 
                 if let Some(buffer) = &self.upscaling_buffer {
                     log::debug!("Upscaling buffer exists, trying to get latest frame");
@@ -1183,15 +1189,28 @@ impl AppState {
                                         let size = [upscaled.width() as _, upscaled.height() as _];
                                         let pixels = upscaled.as_raw();
                                         
+                                        // Check if all pixels are black
+                                        let all_black = pixels.chunks(4)
+                                            .take(100) // Sample first 100 pixels
+                                            .all(|pixel| pixel[0] == 0 && pixel[1] == 0 && pixel[2] == 0);
+                                            
+                                        if all_black {
+                                            log::warn!("Upscaled image contains only black pixels!");
+                                        }
+                                        
                                         log::debug!("Creating/updating texture with size {}x{}", size[0], size[1]);
                                         
                                         let texture = self.frame_texture.get_or_insert_with(|| {
                                             log::debug!("Creating new texture");
-                                            ui.ctx().load_texture(
+                                            let tex = ui.ctx().load_texture(
                                                 "upscaled_frame",
                                                 eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels),
-                                                eframe::egui::TextureOptions::LINEAR
-                                            )
+                                                eframe::egui::TextureOptions::default()
+                                            );
+                                            
+                                            log::debug!("Created texture ID={:?}, size={}x{}", 
+                                                     tex.id(), tex.size()[0], tex.size()[1]);
+                                            tex
                                         });
                                         
                                         if texture.size() != size {
@@ -1200,32 +1219,65 @@ impl AppState {
                                             *texture = ui.ctx().load_texture(
                                                 "upscaled_frame",
                                                 eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels),
-                                                eframe::egui::TextureOptions::LINEAR
+                                                eframe::egui::TextureOptions::default()
                                             );
                                         } else {
                                             log::debug!("Updating existing texture");
-                                            texture.set(eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels), eframe::egui::TextureOptions::LINEAR);
+                                            texture.set(eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels), eframe::egui::TextureOptions::default());
                                         }
                                         
-                                        // Display the texture stretched
-                                        log::debug!("Displaying texture");
-                                        ui.centered_and_justified(|ui| {
-                                            let aspect_ratio = size[0] as f32 / size[1] as f32;
-                                            let max_width = available_size.x;
-                                            let max_height = available_size.y;
-                                            let (width, height) = if aspect_ratio > max_width / max_height {
-                                                (max_width, max_width / aspect_ratio)
-                                            } else {
-                                                (max_height * aspect_ratio, max_height)
-                                            };
-                                            let rect = eframe::egui::Rect::from_min_size(
-                                                eframe::egui::pos2((max_width - width) * 0.5, (max_height - height) * 0.5),
-                                                eframe::egui::vec2(width, height)
-                                            );
-                                            log::debug!("Image rect: pos=({}, {}), size={}x{}", 
-                                                     rect.min.x, rect.min.y, rect.width(), rect.height());
-                                            ui.put(rect, eframe::egui::Image::new(texture, eframe::egui::vec2(width, height)));
+                                        // Calculate dimensions to fit the screen
+                                        let aspect_ratio = size[0] as f32 / size[1] as f32;
+                                        let max_width = available_size.x;
+                                        let max_height = available_size.y;
+                                        
+                                        let (width, height) = if aspect_ratio > max_width / max_height {
+                                            (max_width, max_width / aspect_ratio)
+                                        } else {
+                                            (max_height * aspect_ratio, max_height)
+                                        };
+                                        
+                                        // Create a centered rectangle
+                                        let rect = eframe::egui::Rect::from_min_size(
+                                            eframe::egui::pos2((max_width - width) * 0.5, (max_height - height) * 0.5),
+                                            eframe::egui::vec2(width, height)
+                                        );
+                                        
+                                        log::debug!("Drawing image at rect: pos=({}, {}), size={}x{}", 
+                                                 rect.min.x, rect.min.y, rect.width(), rect.height());
+                                        
+                                        // Approach 1: Direct rendering with painter
+                                        let painter = ui.painter();
+                                        painter.image(
+                                            texture.id(), 
+                                            rect, 
+                                            eframe::egui::Rect::from_min_max(
+                                                eframe::egui::pos2(0.0, 0.0),
+                                                eframe::egui::pos2(1.0, 1.0)
+                                            ),
+                                            eframe::egui::Color32::WHITE
+                                        );
+                                        
+                                        // Approach 2: Widget-based rendering
+                                        ui.allocate_ui_at_rect(rect, |ui| {
+                                            ui.centered_and_justified(|ui| {
+                                                ui.image(texture.id(), eframe::egui::vec2(width, height));
+                                                
+                                                // Display a frame counter in the corner
+                                                ui.put(
+                                                    eframe::egui::Rect::from_min_size(
+                                                        eframe::egui::pos2(10.0, 10.0),
+                                                        eframe::egui::vec2(100.0, 20.0)
+                                                    ),
+                                                    eframe::egui::Label::new(
+                                                        eframe::egui::RichText::new(format!("Frame: {}", self.frames_processed))
+                                                            .size(16.0)
+                                                            .color(eframe::egui::Color32::GREEN)
+                                                    )
+                                                );
+                                            });
                                         });
+                                        
                                         self.frames_processed += 1;
                                         log::debug!("Frames processed: {}", self.frames_processed);
                                     },
@@ -1250,7 +1302,7 @@ impl AppState {
                                     ui.ctx().load_texture(
                                         "raw_frame",
                                         eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels),
-                                        eframe::egui::TextureOptions::LINEAR
+                                        eframe::egui::TextureOptions::default()
                                     )
                                 });
                                 
@@ -1258,10 +1310,10 @@ impl AppState {
                                     *texture = ui.ctx().load_texture(
                                         "raw_frame",
                                         eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels),
-                                        eframe::egui::TextureOptions::LINEAR
+                                        eframe::egui::TextureOptions::default()
                                     );
                                 } else {
-                                    texture.set(eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels), eframe::egui::TextureOptions::LINEAR);
+                                    texture.set(eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels), eframe::egui::TextureOptions::default());
                                 }
                                 
                                 ui.centered_and_justified(|ui| {
