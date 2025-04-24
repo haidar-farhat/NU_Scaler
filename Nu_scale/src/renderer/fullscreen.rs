@@ -13,6 +13,7 @@ use crate::upscale::{Upscaler, UpscalingTechnology, UpscalingQuality};
 use crate::upscale::common::UpscalingAlgorithm;
 use crate::capture::CaptureTarget;
 use crate::capture::platform::WindowInfo;
+use crate::capture::ScreenCapture;
 
 // Define a constant for the lock file path
 const LOCK_FILE_PATH: &str = "nu_scaler_fullscreen.lock";
@@ -593,8 +594,9 @@ impl eframe::App for FullscreenUpscalerUi {
             self.show_overlay = !self.show_overlay;
         }
         
-        // Set transparent background
-        frame.set_transparent(true);
+        // The set_transparent method is not available, we'll use other approaches
+        // for transparency if needed. Our window is already configured as transparent
+        // in the NativeOptions
         
         // Show the upscaled frame on the entire window
         egui::CentralPanel::default()
@@ -765,7 +767,7 @@ pub fn run_fullscreen_upscaler(
     // Create our UI object
     let mut ui = FullscreenUpscalerUi::new_boxed(
         frame_buffer,
-        stop_signal,
+        stop_signal.clone(),
         upscaler,
         algorithm,
     );
@@ -779,7 +781,7 @@ pub fn run_fullscreen_upscaler(
         options,
         Box::new(move |cc| -> Box<dyn eframe::App> {
             // Initialize our UI with the creation context
-            let mut app = ui;
+            let app = ui;
             // Additional initialization if needed
             cc.egui_ctx.set_visuals(egui::Visuals::dark());
             app
