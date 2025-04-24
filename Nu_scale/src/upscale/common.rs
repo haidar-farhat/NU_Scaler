@@ -4,6 +4,7 @@ use image::{RgbaImage, Rgba, imageops};
 use serde::{Serialize, Deserialize};
 use anyhow::{Result, anyhow};
 use crate::upscale::{Upscaler, UpscalingQuality};
+use std::fmt;
 
 /// Pass-through upscaler that doesn't change the image
 pub struct PassThroughUpscaler {}
@@ -84,6 +85,23 @@ pub enum UpscalingAlgorithm {
     Area,
     /// Best algorithm based on the situation
     Balanced,
+}
+
+// Implement Display for UpscalingAlgorithm
+impl fmt::Display for UpscalingAlgorithm {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = match self {
+            UpscalingAlgorithm::NearestNeighbor => "Nearest Neighbor",
+            UpscalingAlgorithm::Bilinear => "Bilinear",
+            UpscalingAlgorithm::Bicubic => "Bicubic",
+            UpscalingAlgorithm::Lanczos2 => "Lanczos2",
+            UpscalingAlgorithm::Lanczos3 => "Lanczos3",
+            UpscalingAlgorithm::Mitchell => "Mitchell",
+            UpscalingAlgorithm::Area => "Area",
+            UpscalingAlgorithm::Balanced => "Balanced",
+        };
+        write!(f, "{}", name)
+    }
 }
 
 /// Basic upscaler using standard image upscaling techniques

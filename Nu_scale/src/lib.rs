@@ -6,6 +6,7 @@ pub mod capture;
 pub mod ui;
 pub mod upscale;
 pub mod renderer;
+pub mod render;
 pub mod logger;
 
 // Explicitly re-export top-level modules

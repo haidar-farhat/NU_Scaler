@@ -5,6 +5,7 @@ use std::path::Path;
 pub mod fsr;
 pub mod dlss;
 pub mod common;
+pub mod vulkan;
 
 use common::UpscalingAlgorithm;
 
@@ -26,6 +27,10 @@ pub enum UpscalingTechnology {
     FSR,
     // NVIDIA Deep Learning Super Sampling
     DLSS,
+    // CUDA-based upscaling
+    CUDA,
+    // Vulkan-based upscaling
+    Vulkan,
     // GPU (Future Vulkan implementation)
     GPU,
     // Fallback to simple bilinear/bicubic
@@ -45,8 +50,8 @@ pub trait Upscaler {
         // Default implementation just calls the standard upscale
         // Specific implementations might override this if they can change algorithms on the fly
         // or if they need to create a temporary upscaler with the new algorithm.
-        log::warn!("Upscaling with algorithm {} requested, but {} does not support dynamic algorithm change. Using default.", 
-                   algorithm.to_string(), self.name());
+        log::warn!("Upscaling with algorithm {:?} requested, but {} does not support dynamic algorithm change. Using default.", 
+                   algorithm, self.name());
         self.upscale(input)
     }
     
@@ -105,6 +110,59 @@ pub fn create_upscaler(
             let upscaler = dlss::DlssUpscaler::new(quality)?;
             Ok(Box::new(upscaler))
         },
+        UpscalingTechnology::CUDA => {
+            // Check if Vulkan is supported since CUDA support has been removed
+            log::info!("CUDA support has been removed, trying Vulkan instead");
+            if crate::render::VulkanRenderer::is_supported() {
+                return create_upscaler(UpscalingTechnology::Vulkan, quality, algorithm);
+            }
+            
+            // Try FSR next
+            if fsr::FsrUpscaler::is_supported() {
+                log::info!("Falling back to FSR");
+                let upscaler = fsr::FsrUpscaler::new(quality)?;
+                return Ok(Box::new(upscaler));
+            }
+            
+            // Try DLSS next
+            if dlss::DlssUpscaler::is_supported() {
+                log::info!("Falling back to DLSS");
+                let upscaler = dlss::DlssUpscaler::new(quality)?;
+                return Ok(Box::new(upscaler));
+            }
+            
+            log::info!("No GPU acceleration available, falling back to basic upscaling");
+            return create_basic_upscaler(quality, algorithm);
+        },
+        UpscalingTechnology::Vulkan => {
+            // Check if Vulkan is supported
+            if !crate::render::VulkanRenderer::is_supported() {
+                log::info!("Vulkan not supported, trying other technologies");
+                
+                // Try FSR next
+                if fsr::FsrUpscaler::is_supported() {
+                    log::info!("Falling back to FSR");
+                    let upscaler = fsr::FsrUpscaler::new(quality)?;
+                    return Ok(Box::new(upscaler));
+                }
+                
+                // Try DLSS next
+                if dlss::DlssUpscaler::is_supported() {
+                    log::info!("Falling back to DLSS");
+                    let upscaler = dlss::DlssUpscaler::new(quality)?;
+                    return Ok(Box::new(upscaler));
+                }
+                
+                log::info!("No GPU acceleration available, falling back to basic upscaling");
+                return create_basic_upscaler(quality, algorithm);
+            }
+            
+            // Create Vulkan upscaler using adapter pattern
+            log::info!("Creating Vulkan-based upscaler");
+            let alg = algorithm.unwrap_or_else(|| quality_to_algorithm(quality));
+            let upscaler = vulkan::VulkanUpscaler::new(quality, alg)?;
+            Ok(Box::new(upscaler))
+        },
         UpscalingTechnology::GPU => {
             // Placeholder for Vulkan implementation
             // For now, always fall back to checking other technologies
@@ -151,6 +209,16 @@ fn create_basic_upscaler(
         common::BasicUpscaler::new(quality)
     };
     Ok(Box::new(upscaler))
+}
+
+// Helper function to convert quality to algorithm
+fn quality_to_algorithm(quality: UpscalingQuality) -> UpscalingAlgorithm {
+    match quality {
+        UpscalingQuality::Ultra => UpscalingAlgorithm::Lanczos3,
+        UpscalingQuality::Quality => UpscalingAlgorithm::Bicubic,
+        UpscalingQuality::Balanced => UpscalingAlgorithm::Bicubic,
+        UpscalingQuality::Performance => UpscalingAlgorithm::Bilinear,
+    }
 }
 
 // Utility function to upscale an image file

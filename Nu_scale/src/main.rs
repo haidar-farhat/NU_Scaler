@@ -4,6 +4,7 @@ use nu_scaler::capture::CaptureTarget;
 use nu_scaler::upscale::{UpscalingTechnology, UpscalingQuality};
 use nu_scaler::UpscalingAlgorithm;
 use nu_scaler::{init, start_borderless_upscale};
+use nu_scaler::render::VulkanRenderer;
 use log::{debug, info, warn, error};
 
 fn main() -> Result<()> {
@@ -97,6 +98,7 @@ fn main() -> Result<()> {
             "fsr" => UpscalingTechnology::FSR,
             "dlss" => UpscalingTechnology::DLSS,
             "cuda" => UpscalingTechnology::CUDA,
+            "vulkan" => UpscalingTechnology::Vulkan,
             "fallback" | _ => UpscalingTechnology::Fallback,
         };
         
