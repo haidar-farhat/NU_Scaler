@@ -17,8 +17,11 @@ pub use crate::ui::region_dialog::RegionDialog;
 use anyhow::Result;
 use image::RgbaImage;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::time::Duration;
+use once_cell::sync::Lazy;
+use egui::{Context, TextureId};
 
 // Use crate:: paths for imports from lib scope
 use crate::capture::common::FrameBuffer;
@@ -99,4 +102,48 @@ pub fn string_to_algorithm(algorithm: &str) -> UpscalingAlgorithm {
         "balanced" => UpscalingAlgorithm::Balanced,
         _ => UpscalingAlgorithm::Lanczos3, // Default
     }
+}
+
+/// Type for an upscaling renderer callback
+pub type UpscalingRendererCallback = Box<dyn FnMut(&Context, Option<&str>) -> Option<TextureId> + Send>;
+
+/// Global state to track if upscaling is active in the main window
+static UPSCALING_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// Global upscaling renderer callback
+static UPSCALING_RENDERER: Lazy<Mutex<Option<UpscalingRendererCallback>>> = Lazy::new(|| {
+    Mutex::new(None)
+});
+
+/// Set whether upscaling is active in the main window
+pub fn set_upscaling_active(active: bool) {
+    UPSCALING_ACTIVE.store(active, Ordering::SeqCst);
+}
+
+/// Check if upscaling is active in the main window
+pub fn is_upscaling_active() -> bool {
+    UPSCALING_ACTIVE.load(Ordering::SeqCst)
+}
+
+/// Set the upscaling renderer callback
+pub fn set_upscaling_renderer(renderer: UpscalingRendererCallback) {
+    let mut lock = UPSCALING_RENDERER.lock().unwrap();
+    *lock = Some(renderer);
+}
+
+/// Get the upscaled texture for rendering in the main window
+pub fn get_upscaled_texture(ctx: &Context, content_id: Option<&str>) -> Option<TextureId> {
+    let mut lock = UPSCALING_RENDERER.lock().unwrap();
+    if let Some(renderer) = &mut *lock {
+        renderer(ctx, content_id)
+    } else {
+        None
+    }
+}
+
+/// Cleanup upscaling resources
+pub fn cleanup_upscaling() {
+    let mut lock = UPSCALING_RENDERER.lock().unwrap();
+    *lock = None;
+    set_upscaling_active(false);
 }

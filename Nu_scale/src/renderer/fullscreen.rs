@@ -161,7 +161,7 @@ pub struct FullscreenUpscalerUi {
     /// Stop signal for capture thread
     stop_signal: Arc<AtomicBool>,
     /// Upscaler implementation
-    upscaler: Box<dyn Upscaler>,
+    upscaler: Box<dyn Upscaler + Send + Sync>,
     /// Upscaling algorithm
     algorithm: Option<UpscalingAlgorithm>,
     /// Texture for displaying frames
@@ -200,7 +200,7 @@ impl FullscreenUpscalerUi {
         cc: &eframe::CreationContext<'_>,
         frame_buffer: Arc<FrameBuffer>,
         stop_signal: Arc<AtomicBool>,
-        upscaler: Box<dyn Upscaler>,
+        upscaler: Box<dyn Upscaler + Send + Sync>,
         algorithm: Option<UpscalingAlgorithm>,
     ) -> Self {
         // Enable vsync and fullscreen
@@ -336,14 +336,22 @@ impl FullscreenUpscalerUi {
                     }
                 }
                 
-                // Create or update the texture
+                // Create the color image
                 let color_image = ColorImage::from_rgba_unmultiplied(size, &color_data);
                 
-                self.texture = Some(ctx.load_texture(
-                    "frame_texture",
-                    color_image,
-                    TextureOptions::LINEAR
-                ));
+                // Check if we need to create a new texture (dimensions changed or first frame)
+                if self.texture.is_none() || 
+                   self.texture.as_ref().unwrap().size() != size {
+                    log::debug!("Creating new texture with size {}x{}", size[0], size[1]);
+                    self.texture = Some(ctx.load_texture(
+                        "frame_texture",
+                        color_image,
+                        TextureOptions::LINEAR
+                    ));
+                } else {
+                    // Update the existing texture
+                    self.texture.as_mut().unwrap().set(color_image, TextureOptions::LINEAR);
+                }
                 
                 // Update stats
                 self.frames_processed += 1;
@@ -655,8 +663,20 @@ impl eframe::App for FullscreenUpscalerUi {
                 }
             });
         
-        // Request continuous repaint to update the frame as soon as possible
-        ctx.request_repaint();
+        // Calculate target repaint interval based on upscaling performance
+        let target_fps = if self.fps_history.len() > 5 {
+            // Use recent average FPS to determine optimal repaint interval
+            let recent_fps: f32 = self.fps_history.iter().rev().take(5).sum::<f32>() / 5.0;
+            // Cap the FPS to a reasonable range
+            recent_fps.clamp(15.0, 144.0)
+        } else {
+            60.0 // Default target when we don't have enough history
+        };
+        
+        let target_frame_time = std::time::Duration::from_secs_f32(1.0 / target_fps);
+        
+        // Request a repaint after the calculated interval
+        ctx.request_repaint_after(target_frame_time);
         
         // Attempt to update window position if needed to track the source window
         self.update_source_window_position(frame);
@@ -668,7 +688,19 @@ fn create_upscaler(
     technology: UpscalingTechnology,
     quality: UpscalingQuality,
     algorithm: Option<UpscalingAlgorithm>,
-) -> Result<Box<dyn Upscaler>> {
+) -> Result<Box<dyn Upscaler + Send + Sync>> {
+    // Special case for FSR3 since it requires extra setup
+    if technology == UpscalingTechnology::FSR3 {
+        if crate::upscale::fsr3::Fsr3Upscaler::is_supported() {
+            log::info!("Using FSR3 with frame generation for upscaling");
+            return crate::upscale::fsr3::Fsr3Upscaler::new(quality, true)
+                .map(|upscaler| Box::new(upscaler) as Box<dyn Upscaler + Send + Sync>);
+        } else {
+            log::warn!("FSR3 not supported, falling back to alternative upscaler");
+            // Fall through to standard upscaler creation
+        }
+    }
+    
     crate::upscale::create_upscaler(technology, quality, algorithm)
 }
 
@@ -745,27 +777,8 @@ pub fn run_fullscreen_upscaler(
         };
     }
     
-    // Create eframe options for the overlay window
-    let options = eframe::NativeOptions {
-        maximized: false,
-        decorated: true,  // Add window decorations so it's visible and can be moved
-        transparent: false,  // Change to non-transparent for better visibility
-        initial_window_size: if let Some((_, _, w, h)) = window_info {
-            if w > 0 && h > 0 {
-                Some(Vec2::new(w as f32, h as f32))
-            } else {
-                // Fallback size if window is too small
-                Some(Vec2::new(1280.0, 720.0))
-            }
-        } else {
-            Some(Vec2::new(1280.0, 720.0))
-        },
-        // Always position the window in a visible area on the primary screen
-        initial_window_pos: Some(egui::pos2(100.0, 100.0)),
-        always_on_top: true,
-        vsync: true,
-        ..Default::default()
-    };
+    // Instead of creating a new window, we'll create a renderer that can be integrated into the main window
+    log::info!("Starting in-place upscaling with {} at {:?} quality", upscaler.name(), quality);
     
     // Create our UI object
     let mut ui = FullscreenUpscalerUi::new_boxed(
@@ -778,34 +791,102 @@ pub fn run_fullscreen_upscaler(
     // Set the capture target
     ui.set_capture_target(capture_target.clone());
     
-    // Run the application
-    let result = match eframe::run_native(
-        "NU Scale - Upscaled View (Press ESC to exit)",
-        options,
-        Box::new(move |cc| -> Box<dyn eframe::App> {
-            // Initialize our UI with the creation context
-            let app = ui;
-            // Additional initialization if needed
-            cc.egui_ctx.set_visuals(egui::Visuals::dark());
-            app
-        })
-    ) {
-        Ok(_) => {
-            log::info!("Fullscreen renderer completed successfully");
-            Ok(())
-        },
-        Err(e) => {
-            // Signal the capture thread to stop even if there was an error
-            stop_signal.store(true, Ordering::SeqCst);
-            log::error!("Fullscreen renderer failed: {}", e);
-            Err(format!("Fullscreen renderer failed: {}", e))
+    // Instead of running as a separate window, we'll return the UI component for integration
+    // into the main application window. 
+    // This is a placeholder - the actual implementation depends on how the main window is structured.
+    
+    // Create an integration point to the main application UI
+    // For now, we'll just create a simplified renderer that can be passed back to the main UI
+    
+    // Signal that upscaling is active in the main window
+    crate::ui::set_upscaling_active(true);
+    
+    // Set up a callback to apply upscaling to the main window's content
+    // This part would need to integrate with the main window's UI system
+    crate::ui::set_upscaling_renderer(Box::new(move |ctx, content| {
+        // Apply upscaling to the content and render it in the main window context
+        ui.update_texture(ctx);
+        
+        // If we have a texture, render it
+        if let Some(texture) = &ui.texture {
+            return Some(texture.id());
         }
-    };
+        
+        None
+    }));
     
-    // Clean up the lock file
-    remove_lock_file();
+    Ok(())
+}
+
+/// Integration method for the main window to use this upscaler
+impl FullscreenUpscalerUi {
+    // Method to render upscaled content in any UI context
+    pub fn render_upscaled_content(&self, ui: &mut egui::Ui) -> bool {
+        if let Some(texture) = &self.texture {
+            // Get available size
+            let available_size = ui.available_size();
+            let texture_size = texture.size_vec2();
+            
+            // Calculate the scaling to fit in the available space
+            // while maintaining aspect ratio
+            let aspect_ratio = texture_size.x / texture_size.y;
+            let width = available_size.x;
+            let height = width / aspect_ratio;
+            
+            // Center the image if it's smaller than the available space
+            let rect = if height <= available_size.y {
+                let y_offset = (available_size.y - height) / 2.0;
+                egui::Rect::from_min_size(
+                    egui::pos2(0.0, y_offset),
+                    Vec2::new(width, height)
+                )
+            } else {
+                let height = available_size.y;
+                let width = height * aspect_ratio;
+                let x_offset = (available_size.x - width) / 2.0;
+                egui::Rect::from_min_size(
+                    egui::pos2(x_offset, 0.0),
+                    Vec2::new(width, height)
+                )
+            };
+            
+            // Draw the texture to cover the entire space
+            ui.put(rect, egui::Image::new(texture.id(), texture_size));
+            
+            // Draw performance overlay in the top-right corner only if enabled
+            if self.show_overlay {
+                let overlay_width = 250.0;
+                let overlay_rect = egui::Rect::from_min_size(
+                    egui::pos2(ui.available_rect_before_wrap().right() - overlay_width - 10.0, 10.0),
+                    Vec2::new(overlay_width, 0.0) // Height will be determined by content
+                );
+                
+                ui.allocate_ui_at_rect(overlay_rect, |ui| {
+                    self.draw_performance_overlay(ui);
+                });
+            }
+            
+            true
+        } else {
+            // Show loading message if no texture is available
+            ui.centered_and_justified(|ui| {
+                ui.vertical_centered(|ui| {
+                    ui.heading("Waiting for frames...");
+                    ui.add_space(10.0);
+                    ui.label("If you don't see any content, please ensure the source window is visible and not minimized.");
+                    ui.add_space(5.0);
+                    ui.label("Press ESC to exit and try again.");
+                });
+            });
+            false
+        }
+    }
     
-    result
+    // Method to check and handle ESC key for exit
+    pub fn check_exit(&self, ctx: &egui::Context) -> bool {
+        // Check for ESC key to exit fullscreen mode
+        ctx.input(|i| i.key_pressed(egui::Key::Escape))
+    }
 }
 
 impl FullscreenUpscalerUi {
@@ -826,7 +907,7 @@ impl FullscreenUpscalerUi {
     fn new_boxed(
         frame_buffer: Arc<FrameBuffer>,
         stop_signal: Arc<AtomicBool>,
-        upscaler: Box<dyn Upscaler>,
+        upscaler: Box<dyn Upscaler + Send + Sync>,
         algorithm: Option<UpscalingAlgorithm>,
     ) -> Box<Self> {
         // We can't actually create the UI here because we need the CreationContext

@@ -174,49 +174,80 @@ impl Default for AppState {
 
 impl eframe::App for AppState {
     fn update(&mut self, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
-        // Configure fonts if needed
-        self.configure_fonts(ctx);
-        
-        // Check if we are in upscaling mode
-        if self.is_upscaling {
-            self.update_upscaling_mode(ctx);
-            return;
+        // Check if we need to exit when in upscaling mode
+        if crate::ui::is_upscaling_active() {
+            if ctx.input(|i| i.key_pressed(eframe::egui::Key::Escape)) {
+                // Exit upscaling mode
+                crate::ui::cleanup_upscaling();
+                
+                // If a scaling process is running, kill it
+                self.kill_scaling_process();
+                
+                log::info!("Exited upscaling mode via ESC key");
+            }
         }
-        
-        // Regular UI rendering for normal mode
-        egui::CentralPanel::default().show(ctx, |_ui| {
-            // Top panel with app name and main actions
-            egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
-                self.show_top_bar(ui);
-            });
-            
-            // Status bar at bottom
-            egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
-                self.show_status_bar(ui);
-            });
-            
-            // Left sidebar with tabs
-            egui::SidePanel::left("side_panel")
-                .default_width(200.0)
-                .width_range(180.0..=240.0)
-                .resizable(true)
-                .show(ctx, |ui| {
-                    self.show_sidebar(ui);
-                });
-            
-            // Central content area
-            egui::CentralPanel::default().show(ctx, |ui| {
-                match self.selected_tab {
-                    TabState::Capture => self.show_capture_tab(ui),
-                    TabState::Settings => self.show_settings_tab(ui),
-                    TabState::Advanced => self.show_advanced_tab(ui),
+
+        // Central panel is the main area of the application
+        egui::CentralPanel::default().show(ctx, |ui| {
+            // If upscaling is active, render the upscaled content in the main window
+            if crate::ui::is_upscaling_active() {
+                // Get the full available size for upscaled content
+                let available_rect = ui.available_rect_before_wrap();
+                let mut upscale_ui = ui.child_ui(available_rect, egui::Layout::default());
+                
+                // Try to get upscaled texture from the renderer
+                if let Some(texture_id) = crate::ui::get_upscaled_texture(ctx, None) {
+                    // Render the upscaled texture to fill the window
+                    let available_size = upscale_ui.available_size();
+                    upscale_ui.image(texture_id, available_size);
+                } else {
+                    // Show waiting message
+                    upscale_ui.centered_and_justified(|ui| {
+                        ui.heading("Waiting for upscaled content...");
+                        ui.label("If you don't see upscaled content, ensure the source window is visible.");
+                        ui.label("Press ESC to exit upscaling mode.");
+                    });
                 }
-            });
+            } else {
+                // Regular UI when not in upscaling mode
+                // Top panel with app name and main actions
+                egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
+                    self.show_top_bar(ui, frame);
+                });
+                
+                // Status bar at bottom
+                egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
+                    self.show_status_bar(ui);
+                });
+                
+                // Left sidebar with tabs
+                egui::SidePanel::left("side_panel")
+                    .default_width(200.0)
+                    .width_range(180.0..=240.0)
+                    .resizable(true)
+                    .show(ctx, |ui| {
+                        self.show_sidebar(ui);
+                    });
+                
+                // Central content area
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    match self.selected_tab {
+                        TabState::Capture => self.show_capture_tab(ui),
+                        TabState::Settings => self.show_settings_tab(ui),
+                        TabState::Advanced => self.show_advanced_tab(ui),
+                    }
+                });
+            }
         });
         
         // Region selection dialog
         if self.show_region_dialog {
             self.show_region_dialog(ctx);
+        }
+        
+        // Update upscaling mode if active
+        if self.is_upscaling {
+            self.update_upscaling_mode(ctx, frame);
         }
     }
 }
@@ -230,7 +261,7 @@ impl AppState {
     }
 
     /// Show the application top bar
-    fn show_top_bar(&mut self, ui: &mut Ui) {
+    fn show_top_bar(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
         ui.horizontal(|ui| {
             ui.add_space(8.0);
             ui.heading(RichText::new("NU Scale").size(22.0).color(ACCENT_COLOR));
@@ -265,7 +296,9 @@ impl AppState {
                         .fill(Color32::from_rgb(180, 100, 240)));
                 
                 if scale_button.clicked() {
-                    self.start_scaling_process();
+                    // Use launch_fullscreen_mode instead of start_scaling_process
+                    // This applies upscaling directly in the current window
+                    self.launch_fullscreen_mode(frame);
                 }
                 
                 ui.add_space(8.0);
@@ -276,7 +309,7 @@ impl AppState {
                         .fill(Color32::from_rgb(0, 120, 215)));
                 
                 if fullscreen_button.clicked() {
-                    self.launch_fullscreen_mode();
+                    self.launch_fullscreen_mode(frame);
                 }
                 
                 ui.add_space(8.0);
@@ -955,10 +988,12 @@ impl AppState {
     }
 
     /// Toggle fullscreen mode
-    pub fn toggle_fullscreen_mode(&mut self) -> Result<()> {
+    pub fn toggle_fullscreen_mode(&mut self, frame: &mut eframe::Frame) -> Result<()> {
         self.is_fullscreen = !self.is_fullscreen;
         
-        // For web builds this would use web_sys, but for native we'll use the window handling of eframe
+        // Use eframe's API to toggle fullscreen mode
+        frame.set_fullscreen(self.is_fullscreen);
+        
         #[cfg(target_arch = "wasm32")]
         {
             if let Some(window) = web_sys::window() {
@@ -974,6 +1009,7 @@ impl AppState {
             }
         }
         
+        log::info!("Toggled fullscreen mode: {}", self.is_fullscreen);
         Ok(())
     }
     
@@ -1026,14 +1062,14 @@ impl AppState {
     
     /// Update the application upscaling mode state
     /// Renders the captured frames with the upscaler
-    fn update_upscaling_mode(&mut self, ctx: &eframe::egui::Context) {
+    fn update_upscaling_mode(&mut self, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
         // Check for ESC key to exit fullscreen mode
         if ctx.input(|i| i.key_pressed(eframe::egui::Key::Escape)) {
             log::info!("ESC pressed, exiting fullscreen mode");
             
             // Exit fullscreen mode
             if self.is_fullscreen {
-                if let Err(e) = self.toggle_fullscreen_mode() {
+                if let Err(e) = self.toggle_fullscreen_mode(frame) {
                     log::error!("Failed to exit fullscreen mode: {}", e);
                 }
             }
@@ -1174,7 +1210,7 @@ impl AppState {
     }
     
     /// Launch the fullscreen upscaling mode with current profile settings
-    fn launch_fullscreen_mode(&mut self) {
+    fn launch_fullscreen_mode(&mut self, frame: &mut eframe::Frame) {
         // Get the capture target based on the profile configuration
         let target = match self.profile.capture_source {
             0 => CaptureTarget::FullScreen,
@@ -1213,7 +1249,7 @@ impl AppState {
                 0 => Some(UpscalingAlgorithm::Lanczos3),
                 1 => Some(UpscalingAlgorithm::NearestNeighbor),
                 2 => Some(UpscalingAlgorithm::Bilinear),
-                3 => Some(UpscalingAlgorithm::Bicubic), // Corrected Bicubic index if it was wrong before
+                3 => Some(UpscalingAlgorithm::Bicubic),
                 _ => Some(UpscalingAlgorithm::Lanczos3),
             }
         } else {
@@ -1223,6 +1259,14 @@ impl AppState {
         // Convert fps from f32 to u32
         let fps = self.profile.fps as u32;
         
+        // Set window to maximized/fullscreen state
+        self.is_fullscreen = true;
+        
+        // Use the frame parameter to maximize the window
+        frame.set_maximized(true);
+        frame.set_fullscreen(true); // Also set fullscreen mode
+        log::info!("Requested window maximization and fullscreen");
+        
         // Instead of launching a new window, use start_upscaling_mode to modify the current window
         if let Err(e) = self.start_upscaling_mode(target, tech, quality, fps, algorithm) {
             log::error!("Failed to start upscaling mode: {}", e);
@@ -1231,13 +1275,10 @@ impl AppState {
             return;
         }
         
-        // Toggle to fullscreen mode for the current window
-        if let Err(e) = self.toggle_fullscreen_mode() {
-            log::error!("Failed to toggle fullscreen mode: {}", e);
-        }
+        // No need to call toggle_fullscreen_mode since we already set fullscreen above
         
         self.status_message = "Launched fullscreen mode in the current window.".to_string();
-        self.status_message_type = StatusMessageType::Info;
+        self.status_message_type = StatusMessageType::Success;
     }
 
     /// Start a scaling process in a separate application instance

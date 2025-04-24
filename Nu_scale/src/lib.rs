@@ -61,10 +61,13 @@ pub fn app_version() -> &'static str {
     VERSION
 }
 
-/// Toggle fullscreen mode for the current window
+/// Toggle fullscreen mode for the current window - This is a placeholder function
+/// that can't be used directly in the application code since we need a frame reference
 #[cfg(not(feature = "disable_gui"))]
-pub fn toggle_fullscreen(app_state: &mut ui::AppState) -> Result<()> {
-    app_state.toggle_fullscreen_mode()
+pub fn toggle_fullscreen(_app_state: &mut ui::AppState) -> Result<()> {
+    // This function can't be used directly anymore since we need a frame reference
+    // The functionality should be accessed through AppState methods in UI code
+    Err(anyhow::anyhow!("toggle_fullscreen can't be used directly without a frame reference. Use AppState methods instead."))
 }
 
 #[cfg(feature = "disable_gui")]
