@@ -1063,6 +1063,8 @@ impl AppState {
     /// Update the application upscaling mode state
     /// Renders the captured frames with the upscaler
     fn update_upscaling_mode(&mut self, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
+        log::debug!("Entering update_upscaling_mode function");
+        
         // Check for ESC key to exit fullscreen mode
         if ctx.input(|i| i.key_pressed(eframe::egui::Key::Escape)) {
             log::info!("ESC pressed, exiting fullscreen mode");
@@ -1089,10 +1091,16 @@ impl AppState {
                 .stroke(eframe::egui::Stroke::NONE))
             .show(ctx, |ui| {
                 let available_size = ui.available_size();
+                log::debug!("Available UI size: {}x{}", available_size.x, available_size.y);
                 
                 if let Some(buffer) = &self.upscaling_buffer {
+                    log::debug!("Upscaling buffer exists, trying to get latest frame");
+                    
                     match buffer.get_latest_frame() {
                         Ok(Some(frame)) => {
+                            log::info!("Frame received: dimensions={}x{}, format=RGBA", 
+                                     frame.width(), frame.height());
+                            
                             // Check for valid frame dimensions before proceeding
                             if frame.width() == 0 || frame.height() == 0 {
                                 log::warn!("Received frame with invalid dimensions: {}x{}", frame.width(), frame.height());
@@ -1107,6 +1115,10 @@ impl AppState {
                             
                             // Frame received, proceed with upscaling
                             if let Some(upscaler) = &mut self.upscaler {
+                                log::debug!("Upscaler exists: name={}, initialized={}, input_dimensions={}x{}", 
+                                          upscaler.name(), !upscaler.needs_initialization(),
+                                          upscaler.input_width(), upscaler.input_height());
+                                
                                 // Check if upscaler needs initialization or re-initialization with correct dimensions
                                 if upscaler.needs_initialization() || 
                                    upscaler.input_width() != frame.width() || 
@@ -1114,7 +1126,6 @@ impl AppState {
                                     
                                     log::info!("Initializing upscaler with dimensions {}x{}", frame.width(), frame.height());
                                     
-                                    // Get the profile scaling factor and apply it to determine output dimensions
                                     // The profile has numeric indexes for upscaling tech and quality
                                     // Tech: 0 = auto, 1 = FSR, 2 = DLSS, 3 = basic
                                     // Quality: 0 = ultra, 1 = quality, 2 = balanced, 3 = performance
@@ -1140,6 +1151,9 @@ impl AppState {
                                         _ => self.profile.scale_factor // Use profile's scale factor for other tech
                                     };
                                     
+                                    log::info!("Using scale factor: {}, profile tech: {}, profile quality: {}", 
+                                             scale_factor, self.profile.upscaling_tech, self.profile.upscaling_quality);
+                                    
                                     let out_width = (frame.width() as f32 * scale_factor) as u32;
                                     let out_height = (frame.height() as f32 * scale_factor) as u32;
                                     
@@ -1154,16 +1168,25 @@ impl AppState {
                                         });
                                         return;
                                     }
+                                    
+                                    log::info!("Upscaler successfully initialized");
                                 }
                                 
                                 // Perform upscaling on the captured frame
+                                log::debug!("Performing upscaling on frame");
                                 match upscaler.upscale(&frame) {
                                     Ok(upscaled) => {
                                         // Successfully upscaled the frame
+                                        log::info!("Upscaling successful, output dimensions: {}x{}", 
+                                                 upscaled.width(), upscaled.height());
+                                        
                                         let size = [upscaled.width() as _, upscaled.height() as _];
                                         let pixels = upscaled.as_raw();
                                         
+                                        log::debug!("Creating/updating texture with size {}x{}", size[0], size[1]);
+                                        
                                         let texture = self.frame_texture.get_or_insert_with(|| {
+                                            log::debug!("Creating new texture");
                                             ui.ctx().load_texture(
                                                 "upscaled_frame",
                                                 eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels),
@@ -1172,16 +1195,20 @@ impl AppState {
                                         });
                                         
                                         if texture.size() != size {
+                                            log::debug!("Texture size mismatch: texture={}x{}, frame={}x{}, creating new texture", 
+                                                     texture.size()[0], texture.size()[1], size[0], size[1]);
                                             *texture = ui.ctx().load_texture(
                                                 "upscaled_frame",
                                                 eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels),
                                                 eframe::egui::TextureOptions::LINEAR
                                             );
                                         } else {
+                                            log::debug!("Updating existing texture");
                                             texture.set(eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels), eframe::egui::TextureOptions::LINEAR);
                                         }
                                         
                                         // Display the texture stretched
+                                        log::debug!("Displaying texture");
                                         ui.centered_and_justified(|ui| {
                                             let aspect_ratio = size[0] as f32 / size[1] as f32;
                                             let max_width = available_size.x;
@@ -1195,9 +1222,12 @@ impl AppState {
                                                 eframe::egui::pos2((max_width - width) * 0.5, (max_height - height) * 0.5),
                                                 eframe::egui::vec2(width, height)
                                             );
+                                            log::debug!("Image rect: pos=({}, {}), size={}x{}", 
+                                                     rect.min.x, rect.min.y, rect.width(), rect.height());
                                             ui.put(rect, eframe::egui::Image::new(texture, eframe::egui::vec2(width, height)));
                                         });
                                         self.frames_processed += 1;
+                                        log::debug!("Frames processed: {}", self.frames_processed);
                                     },
                                     Err(e) => {
                                         // Error during upscaling
@@ -1212,6 +1242,7 @@ impl AppState {
                                 // This case should ideally not happen if upscaling mode is active
                                 log::warn!("Upscaling mode active, but no upscaler found!");
                                 // Fallback to displaying raw frame
+                                log::info!("Fallback: displaying raw frame directly");
                                 let size = [frame.width() as _, frame.height() as _];
                                 let pixels = frame.as_raw();
                                 
@@ -1254,149 +1285,178 @@ impl AppState {
                             }
                         },
                         Ok(None) => {
-                            // No new frame available yet
-                            log::trace!("No new frame available from buffer.");
-                            // Keep showing the last texture or a waiting message
-                            if let Some(texture) = &self.frame_texture {
-                                // Re-use the existing drawing logic to display the last known frame
-                                ui.centered_and_justified(|ui| {
-                                    let tex_size = texture.size_vec2();
-                                    let aspect_ratio = tex_size.x / tex_size.y;
-                                    let max_width = available_size.x;
-                                    let max_height = available_size.y;
-                                    let (width, height) = if aspect_ratio > max_width / max_height {
-                                        (max_width, max_width / aspect_ratio)
-                                    } else {
-                                        (max_height * aspect_ratio, max_height)
-                                    };
-                                    let rect = eframe::egui::Rect::from_min_size(
-                                        eframe::egui::pos2((max_width - width) * 0.5, (max_height - height) * 0.5),
-                                        eframe::egui::vec2(width, height)
-                                    );
-                                    ui.put(rect, eframe::egui::Image::new(texture, eframe::egui::vec2(width, height)));
-                                });
-                            } else {
-                                ui.centered_and_justified(|ui| {
-                                    ui.label(eframe::egui::RichText::new("Waiting for first frame...").size(24.0).color(eframe::egui::Color32::WHITE));
-                                });
-                            }
+                            log::warn!("No frame available in buffer");
+                            ui.centered_and_justified(|ui| {
+                                ui.heading("Waiting for frames...");
+                                ui.label("No frames available in buffer. Please ensure the source window is visible and not minimized.");
+                            });
+                            // Request a repaint for continuous checking
+                            ctx.request_repaint();
                         },
                         Err(e) => {
-                            // Error getting frame from buffer
-                            log::error!("Frame buffer error: {}", e);
+                            log::error!("Error getting frame from buffer: {}", e);
                             ui.centered_and_justified(|ui| {
-                                ui.label(eframe::egui::RichText::new(format!("Frame Buffer Error: {}", e))
-                                    .size(18.0).color(eframe::egui::Color32::RED));
+                                ui.heading("Error getting frame");
+                                ui.label(format!("Error: {}", e));
                             });
+                            // Repaint to try again
+                            ctx.request_repaint();
                         }
                     }
                 } else {
-                    // No frame buffer available (shouldn't happen in upscaling mode)
-                    log::error!("Upscaling mode active, but no frame buffer found!");
+                    log::warn!("No upscaling buffer available");
                     ui.centered_and_justified(|ui| {
-                        ui.label(eframe::egui::RichText::new("Frame Buffer Error").size(24.0).color(eframe::egui::Color32::RED));
+                        ui.heading("No upscaling buffer");
+                        ui.label("Upscaling mode is active but no frame buffer is available.");
+                        ui.label("This is likely a bug in the application.");
                     });
+                    
+                    // Request a repaint to check again
+                    ctx.request_repaint();
                 }
             });
-        
-        let mut should_stop = false;
-        if let Some(stop_signal_atomic) = &self.upscaling_stop_signal {
-            // Load the AtomicBool directly
-            should_stop = stop_signal_atomic.load(Ordering::Relaxed);
-             // Optionally use Ordering::SeqCst for stronger guarantees
-        } // No lock needed
-
-        if should_stop {
-            self.is_upscaling = false;
-            self.upscaling_buffer = None;
-            self.upscaling_stop_signal = None;
-            self.upscaler = None;
-            self.status_message = "Upscaling stopped.".to_string();
-            self.status_message_type = StatusMessageType::Info;
-            return;
-        }
-        
-        // Request continuous repainting
+            
+        // Always request a continuous repaint while in upscaling mode
         ctx.request_repaint();
     }
     
     /// Launch the fullscreen upscaling mode with current profile settings
     fn launch_fullscreen_mode(&mut self, frame: &mut eframe::Frame) {
-        // Get the capture target based on the profile configuration
-        let target = match self.profile.capture_source {
-            0 => CaptureTarget::FullScreen,
-            1 => CaptureTarget::WindowByTitle(self.profile.window_title.clone()),
-            2 => CaptureTarget::Region {
-                x: self.profile.region_x,
-                y: self.profile.region_y,
-                width: self.profile.region_width,
-                height: self.profile.region_height,
+        log::info!("=== LAUNCHING FULLSCREEN MODE ===");
+        log::debug!("Current profile details: tech={}, quality={}, scale_factor={}",
+                  self.profile.upscaling_tech, self.profile.upscaling_quality, self.profile.scale_factor);
+        
+        // Prepare the upscaling target
+        let capture_target = match self.profile.capture_source {
+            0 => { // Fullscreen
+                log::debug!("Using FULLSCREEN capture target");
+                CaptureTarget::FullScreen 
             },
-            _ => CaptureTarget::FullScreen, // Default fallback
-        };
-        
-        // Map technology and quality
-        let tech = match self.profile.upscaling_tech {
-            0 => UpscalingTechnology::FSR,       // Auto defaults to FSR
-            1 => UpscalingTechnology::FSR,       // FSR
-            2 => UpscalingTechnology::DLSS,      // DLSS
-            3 => UpscalingTechnology::GPU,       // Changed from CUDA
-            4 => UpscalingTechnology::Fallback,  // Fallback
-            _ => UpscalingTechnology::Fallback,  // Default
-        };
-        
-        let quality = match self.profile.upscaling_quality {
-            0 => UpscalingQuality::Ultra,
-            1 => UpscalingQuality::Quality,
-            2 => UpscalingQuality::Balanced,
-            3 => UpscalingQuality::Performance,
-            _ => UpscalingQuality::Balanced,
-        };
-        
-        // Determine algorithm based on technology
-        // Only provide algorithm if Fallback or GPU is selected
-        let algorithm = if tech == UpscalingTechnology::Fallback || tech == UpscalingTechnology::GPU {
-            match self.profile.upscaling_algorithm {
-                0 => Some(UpscalingAlgorithm::Lanczos3),
-                1 => Some(UpscalingAlgorithm::NearestNeighbor),
-                2 => Some(UpscalingAlgorithm::Bilinear),
-                3 => Some(UpscalingAlgorithm::Bicubic),
-                _ => Some(UpscalingAlgorithm::Lanczos3),
+            1 => { // Window
+                let window_title = &self.profile.window_title;
+                log::debug!("Using WINDOW capture target: '{}'", window_title);
+                CaptureTarget::WindowByTitle(window_title.clone())
+            },
+            2 => { // Region
+                log::debug!("Using REGION capture target: {}x{} at ({},{})", 
+                          self.profile.region_width, self.profile.region_height,
+                          self.profile.region_x, self.profile.region_y);
+                CaptureTarget::Region {
+                    x: self.profile.region_x,
+                    y: self.profile.region_y,
+                    width: self.profile.region_width,
+                    height: self.profile.region_height,
+                }
+            },
+            _ => {
+                log::warn!("Unknown capture source {}, fallback to fullscreen", 
+                         self.profile.capture_source);
+                CaptureTarget::FullScreen
             }
-        } else {
-            None
         };
         
-        // Convert fps from f32 to u32
+        // Map the upscaling technology from profile index to proper enum
+        let upscaling_tech = match self.profile.upscaling_tech {
+            1 => { 
+                log::debug!("Using FSR upscaling technology");
+                UpscalingTechnology::FSR 
+            },
+            2 => { 
+                log::debug!("Using DLSS upscaling technology");
+                UpscalingTechnology::DLSS 
+            },
+            3 => { 
+                log::debug!("Using Fallback upscaling technology");
+                UpscalingTechnology::Fallback 
+            },
+            _ => {
+                log::warn!("Unknown upscaling tech {}, fallback to auto-detect",
+                         self.profile.upscaling_tech);
+                UpscalingTechnology::Fallback // Default to fallback if not recognized
+            }
+        };
+        
+        // Map the upscaling quality from profile index to proper enum
+        let upscaling_quality = match self.profile.upscaling_quality {
+            0 => { 
+                log::debug!("Using ULTRA quality");
+                UpscalingQuality::Ultra 
+            },
+            1 => { 
+                log::debug!("Using QUALITY mode");
+                UpscalingQuality::Quality 
+            },
+            2 => { 
+                log::debug!("Using BALANCED mode");
+                UpscalingQuality::Balanced 
+            },
+            3 => { 
+                log::debug!("Using PERFORMANCE mode");
+                UpscalingQuality::Performance 
+            },
+            _ => { 
+                log::warn!("Unknown quality {}, fallback to balanced",
+                         self.profile.upscaling_quality);
+                UpscalingQuality::Balanced  // Default to balanced if not recognized
+            }
+        };
+        
+        // Map the algorithm from profile index
+        let upscaling_algorithm = match self.profile.upscaling_algorithm {
+            0 => {
+                log::debug!("Using Lanczos3 algorithm");
+                Some(UpscalingAlgorithm::Lanczos3)
+            },
+            1 => {
+                log::debug!("Using Bicubic algorithm");
+                Some(UpscalingAlgorithm::Bicubic)
+            },
+            2 => {
+                log::debug!("Using Bilinear algorithm");
+                Some(UpscalingAlgorithm::Bilinear)
+            },
+            3 => {
+                log::debug!("Using Nearest algorithm");
+                Some(UpscalingAlgorithm::Nearest)
+            },
+            _ => None
+        };
+        
+        // Get target FPS
         let fps = self.profile.fps as u32;
+        log::debug!("Using target FPS: {}", fps);
         
-        // Set window to maximized/fullscreen state
-        self.is_fullscreen = true;
+        // Update UI
+        self.status_message = "Starting upscaling...".to_string();
+        self.status_message_type = StatusMessageType::Info;
         
-        // Log what we're doing
-        log::info!("Starting upscaling with source: {:?}, tech: {:?}, quality: {:?}, algorithm: {:?}",
-            target, tech, quality, algorithm);
-        
-        // Use the frame parameter to maximize the window
-        frame.set_maximized(true);
-        frame.set_fullscreen(true); // Also set fullscreen mode
-        log::info!("Requested window maximization and fullscreen");
-        
-        // Instead of launching a new window, use start_upscaling_mode to modify the current window
-        match self.start_upscaling_mode(target, tech, quality, fps, algorithm) {
-            Ok(_) => {
-                log::info!("Upscaling mode started successfully");
-                self.status_message = "Upscaling started successfully".to_string();
-                self.status_message_type = StatusMessageType::Success;
-                
-                // Explicitly set the flag to enable upscaling mode
-                self.is_upscaling = true;
+        // Start upscaling
+        log::info!("Starting upscaling with tech={:?}, quality={:?}, algorithm={:?}", 
+                 upscaling_tech, upscaling_quality, upscaling_algorithm);
+        match self.start_upscaling_mode(
+            capture_target,
+            upscaling_tech,
+            upscaling_quality,
+            fps,
+            upscaling_algorithm,
+        ) {
+            Ok(()) => {
+                // Make the UI fullscreen
+                log::debug!("Setting application to fullscreen mode");
+                if let Err(e) = self.toggle_fullscreen_mode(frame) {
+                    log::error!("Failed to enter fullscreen mode: {}", e);
+                    self.status_message = format!("Failed to enter fullscreen mode: {}", e);
+                    self.status_message_type = StatusMessageType::Error;
+                } else {
+                    log::info!("Successfully entered fullscreen upscaling mode");
+                    self.status_message = "Upscaling in fullscreen mode".to_string();
+                    self.status_message_type = StatusMessageType::Success;
+                }
             },
             Err(e) => {
-                log::error!("Failed to start upscaling mode: {}", e);
+                log::error!("Failed to start upscaling: {}", e);
                 self.status_message = format!("Failed to start upscaling: {}", e);
                 self.status_message_type = StatusMessageType::Error;
-                return;
             }
         }
     }

@@ -299,107 +299,176 @@ impl FullscreenUpscalerUi {
     
     /// Update the texture with the latest frame
     fn update_texture(&mut self, ctx: &egui::Context) {
+        log::debug!("Entering update_texture in fullscreen renderer");
+        
         // Get the latest frame from the buffer
-        if let Ok(Some(frame)) = self.frame_buffer.get_latest_frame() {
-            // Check for valid frame dimensions
-            if frame.width() == 0 || frame.height() == 0 {
-                log::warn!("Received frame with invalid dimensions: {}x{}", frame.width(), frame.height());
-                return;
-            }
-            
-            // Store input size
-            self.input_size = (frame.width(), frame.height());
-            
-            // Measure upscaling time
-            let upscale_start = std::time::Instant::now();
-            
-            // Upscale the frame
-            match self.upscale_frame(&frame) {
-                Ok(upscaled) => {
-                    // Measure upscaling time
-                    let upscale_time = upscale_start.elapsed().as_secs_f32() * 1000.0;
-                    self.last_upscale_time = upscale_time;
-                    
-                    // Keep history of upscale times (max 120 frames)
-                    self.upscale_time_history.push(upscale_time);
-                    if self.upscale_time_history.len() > 120 {
-                        self.upscale_time_history.remove(0);
-                    }
-                    
-                    // Store output size
-                    self.output_size = (upscaled.width(), upscaled.height());
-                    
-                    // Convert to egui::ColorImage
-                    let size = [upscaled.width() as usize, upscaled.height() as usize];
-                    let mut color_data = Vec::with_capacity(size[0] * size[1] * 4);
-                    
-                    for y in 0..upscaled.height() {
-                        for x in 0..upscaled.width() {
-                            let pixel = upscaled.get_pixel(x, y);
-                            color_data.push(pixel[0]);
-                            color_data.push(pixel[1]);
-                            color_data.push(pixel[2]);
-                            color_data.push(pixel[3]);
-                        }
-                    }
-                    
-                    // Create the color image
-                    let color_image = ColorImage::from_rgba_unmultiplied(size, &color_data);
-                    
-                    // Check if we need to create a new texture (dimensions changed or first frame)
-                    if self.texture.is_none() || 
-                       self.texture.as_ref().unwrap().size() != size {
-                        log::debug!("Creating new texture with size {}x{}", size[0], size[1]);
-                        self.texture = Some(ctx.load_texture(
-                            "frame_texture",
-                            color_image,
-                            TextureOptions::LINEAR
-                        ));
-                    } else {
-                        // Update the existing texture
-                        self.texture.as_mut().unwrap().set(color_image, TextureOptions::LINEAR);
-                    }
-                    
-                    // Update stats
-                    self.frames_processed += 1;
-                    let elapsed = self.last_frame_time.elapsed();
-                    self.fps = 1.0 / elapsed.as_secs_f32();
-                    self.last_frame_time = std::time::Instant::now();
-                    
-                    // Keep history of fps (max 120 frames)
-                    self.fps_history.push(self.fps);
-                    if self.fps_history.len() > 120 {
-                        self.fps_history.remove(0);
-                    }
-                    
-                    // Log performance metrics occasionally
-                    if self.frames_processed % 100 == 0 {
-                        let avg_fps = self.fps_history.iter().sum::<f32>() / self.fps_history.len() as f32;
-                        let avg_upscale_time = self.upscale_time_history.iter().sum::<f32>() / self.upscale_time_history.len() as f32;
-                        
-                        log::info!("Performance: Avg FPS: {:.1}, Avg upscale time: {:.2}ms, Input: {}x{}, Output: {}x{}", 
-                                  avg_fps, avg_upscale_time, 
-                                  self.input_size.0, self.input_size.1,
-                                  self.output_size.0, self.output_size.1);
-                    }
-                },
-                Err(e) => {
-                    log::error!("Failed to upscale frame: {}", e);
+        match self.frame_buffer.get_latest_frame() {
+            Ok(Some(frame)) => {
+                log::info!("Got frame from buffer: dimensions={}x{}, pixel_count={}", 
+                         frame.width(), frame.height(), frame.as_raw().len() / 4);
+                
+                // Check for valid frame dimensions
+                if frame.width() == 0 || frame.height() == 0 {
+                    log::warn!("Received frame with invalid dimensions: {}x{}", frame.width(), frame.height());
+                    return;
                 }
-            }
-        } else {
-            // Log if we're having trouble getting frames 
-            if self.frames_processed % 60 == 0 {
-                log::debug!("No frame available from buffer");
+                
+                // Sample some pixel data for debugging
+                if log::log_enabled!(log::Level::Trace) && frame.width() > 0 && frame.height() > 0 {
+                    let sample_x = frame.width() / 2;
+                    let sample_y = frame.height() / 2;
+                    let pixel = frame.get_pixel(sample_x, sample_y);
+                    log::trace!("Center pixel at ({},{}) - RGBA: [{}, {}, {}, {}]", 
+                              sample_x, sample_y, pixel[0], pixel[1], pixel[2], pixel[3]);
+                }
+                
+                // Store input size
+                self.input_size = (frame.width(), frame.height());
+                
+                // Measure upscaling time
+                let upscale_start = std::time::Instant::now();
+                
+                // Upscale the frame
+                match self.upscale_frame(&frame) {
+                    Ok(upscaled) => {
+                        // Measure upscaling time
+                        let upscale_time = upscale_start.elapsed().as_secs_f32() * 1000.0;
+                        self.last_upscale_time = upscale_time;
+                        
+                        log::info!("Upscaled frame: {}x{} -> {}x{} in {:.2}ms",
+                                 frame.width(), frame.height(), 
+                                 upscaled.width(), upscaled.height(),
+                                 upscale_time);
+                        
+                        // Sample upscaled pixel data for debugging
+                        if log::log_enabled!(log::Level::Trace) && upscaled.width() > 0 && upscaled.height() > 0 {
+                            let sample_x = upscaled.width() / 2;
+                            let sample_y = upscaled.height() / 2;
+                            let pixel = upscaled.get_pixel(sample_x, sample_y);
+                            log::trace!("Center upscaled pixel at ({},{}) - RGBA: [{}, {}, {}, {}]", 
+                                      sample_x, sample_y, pixel[0], pixel[1], pixel[2], pixel[3]);
+                        }
+                        
+                        // Keep history of upscale times (max 120 frames)
+                        self.upscale_time_history.push(upscale_time);
+                        if self.upscale_time_history.len() > 120 {
+                            self.upscale_time_history.remove(0);
+                        }
+                        
+                        // Store output size
+                        self.output_size = (upscaled.width(), upscaled.height());
+                        
+                        // Convert to egui::ColorImage
+                        let size = [upscaled.width() as usize, upscaled.height() as usize];
+                        let mut color_data = Vec::with_capacity(size[0] * size[1] * 4);
+                        
+                        log::debug!("Converting upscaled image to ColorImage format");
+                        for y in 0..upscaled.height() {
+                            for x in 0..upscaled.width() {
+                                let pixel = upscaled.get_pixel(x, y);
+                                color_data.push(pixel[0]);
+                                color_data.push(pixel[1]);
+                                color_data.push(pixel[2]);
+                                color_data.push(pixel[3]);
+                            }
+                        }
+                        
+                        // Check if color data contains black pixels only
+                        let all_black = color_data.chunks(4)
+                            .all(|pixel| pixel[0] == 0 && pixel[1] == 0 && pixel[2] == 0);
+                        
+                        if all_black {
+                            log::warn!("Upscaled image contains only black pixels!");
+                        }
+                        
+                        // Create the color image
+                        let color_image = ColorImage::from_rgba_unmultiplied(size, &color_data);
+                        
+                        // Check if we need to create a new texture (dimensions changed or first frame)
+                        if self.texture.is_none() {
+                            log::info!("Creating new texture with size {}x{}", size[0], size[1]);
+                            self.texture = Some(ctx.load_texture(
+                                "frame_texture",
+                                color_image,
+                                TextureOptions::LINEAR
+                            ));
+                        } else if self.texture.as_ref().unwrap().size() != size {
+                            log::info!("Texture size changed from {:?} to {}x{}, creating new texture", 
+                                     self.texture.as_ref().unwrap().size(), size[0], size[1]);
+                            self.texture = Some(ctx.load_texture(
+                                "frame_texture",
+                                color_image,
+                                TextureOptions::LINEAR
+                            ));
+                        } else {
+                            // Update the existing texture
+                            log::debug!("Updating existing texture");
+                            self.texture.as_mut().unwrap().set(color_image, TextureOptions::LINEAR);
+                        }
+                        
+                        // Update stats
+                        self.frames_processed += 1;
+                        let elapsed = self.last_frame_time.elapsed();
+                        self.fps = 1.0 / elapsed.as_secs_f32();
+                        self.last_frame_time = std::time::Instant::now();
+                        
+                        // Keep history of fps (max 120 frames)
+                        self.fps_history.push(self.fps);
+                        if self.fps_history.len() > 120 {
+                            self.fps_history.remove(0);
+                        }
+                        
+                        // Log performance metrics occasionally
+                        if self.frames_processed % 100 == 0 {
+                            let avg_fps = self.fps_history.iter().sum::<f32>() / self.fps_history.len() as f32;
+                            let avg_upscale_time = self.upscale_time_history.iter().sum::<f32>() / self.upscale_time_history.len() as f32;
+                            
+                            log::info!("Performance: Avg FPS: {:.1}, Avg upscale time: {:.2}ms, Input: {}x{}, Output: {}x{}", 
+                                      avg_fps, avg_upscale_time, 
+                                      self.input_size.0, self.input_size.1,
+                                      self.output_size.0, self.output_size.1);
+                        }
+                    },
+                    Err(e) => {
+                        log::error!("Failed to upscale frame: {}", e);
+                    }
+                }
+            },
+            Ok(None) => {
+                // Log if we're having trouble getting frames 
+                if self.frames_processed % 60 == 0 {
+                    log::debug!("No frame available from buffer");
+                }
+            },
+            Err(e) => {
+                log::error!("Error getting frame from buffer: {}", e);
             }
         }
     }
     
     /// Upscale a frame using the configured upscaler
     fn upscale_frame(&mut self, frame: &RgbaImage) -> Result<RgbaImage> {
+        log::debug!("Entering upscale_frame with frame: {}x{}", frame.width(), frame.height());
+        
         // Check for valid frame dimensions
         if frame.width() == 0 || frame.height() == 0 {
             return Err(anyhow::anyhow!("Invalid frame dimensions: {}x{}", frame.width(), frame.height()));
+        }
+        
+        // Log some basic statistics about the frame
+        let bytes_per_pixel = 4; // RGBA
+        let total_pixels = frame.width() as usize * frame.height() as usize;
+        log::debug!("Frame stats: dimensions={}x{}, total_pixels={}, data_size={}KB", 
+                  frame.width(), frame.height(), total_pixels, 
+                  (total_pixels * bytes_per_pixel) / 1024);
+        
+        // Check for all black pixels in input
+        let all_black = frame.as_raw().chunks(4)
+            .take(100)  // Sample only a few pixels to avoid performance hit
+            .all(|pixel| pixel[0] == 0 && pixel[1] == 0 && pixel[2] == 0);
+        
+        if all_black {
+            log::warn!("Input frame appears to be all black (based on sampling)!");
         }
         
         // Check if upscaler needs initialization
@@ -412,19 +481,50 @@ impl FullscreenUpscalerUi {
                       (frame.height() as f32 * 1.5) as u32);
             
             // Initialize with 1.5x scale factor by default
-            let _ = self.upscaler.initialize(
+            let upscaler_result = self.upscaler.initialize(
                 frame.width(), 
                 frame.height(), 
                 (frame.width() as f32 * 1.5) as u32, 
                 (frame.height() as f32 * 1.5) as u32
-            )?; // Return error if initialization fails
+            );
+            
+            if let Err(e) = upscaler_result {
+                log::error!("Failed to initialize upscaler: {}", e);
+                return Err(anyhow::anyhow!("Upscaler initialization failed: {}", e));
+            }
+            
+            log::info!("Upscaler initialized successfully: name={}, input={}x{}, output={}x{}", 
+                     self.upscaler.name(),
+                     self.upscaler.input_width(), self.upscaler.input_height(),
+                     self.upscaler.output_width(), self.upscaler.output_height());
         }
         
         // Use the configured upscaler to process the frame with the algorithm
-        match self.algorithm {
-            Some(alg) => self.upscaler.upscale_with_algorithm(frame, alg),
-            None => self.upscaler.upscale(frame)
+        log::debug!("Upscaling frame using algorithm: {:?}", self.algorithm);
+        let result = match self.algorithm {
+            Some(alg) => {
+                log::debug!("Using specific algorithm: {:?}", alg);
+                self.upscaler.upscale_with_algorithm(frame, alg)
+            },
+            None => {
+                log::debug!("Using default upscaler algorithm");
+                self.upscaler.upscale(frame)
+            }
+        };
+        
+        // Log the result
+        match &result {
+            Ok(upscaled) => {
+                log::debug!("Upscaling successful: {}x{} -> {}x{}", 
+                          frame.width(), frame.height(),
+                          upscaled.width(), upscaled.height());
+            },
+            Err(e) => {
+                log::error!("Upscaling failed: {}", e);
+            }
         }
+        
+        result
     }
     
     /// Draw the performance overlay

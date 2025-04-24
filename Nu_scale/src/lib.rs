@@ -38,13 +38,17 @@ pub fn init() -> Result<()> {
         .map(|dir| dir.join("NU_Scaler").join("logs").to_string_lossy().to_string())
         .unwrap_or_else(|| "logs".to_string());
     
-    // Initialize logger with logs directory
+    // Initialize logger with TRACE level for comprehensive debugging
     if let Err(e) = logger::init_logger(Some(&logs_dir), true) {
         eprintln!("Warning: Failed to initialize logger: {}", e);
     }
     
+    // Set the minimum log level to TRACE for maximum detail
+    log::set_max_level(log::LevelFilter::Trace);
+    
     // Log application startup
-    log::info!("NU_Scaler v{} starting up", VERSION);
+    log::info!("NU_Scaler v{} starting up with TRACE logging enabled", VERSION);
+    log::info!("Using high-detail logging to diagnose black screen issue");
     
     // Initialize other app components here
     
