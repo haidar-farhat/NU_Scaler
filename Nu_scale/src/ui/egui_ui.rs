@@ -993,7 +993,7 @@ impl AppState {
         
         // Use crate:: path
         let _capture_handle = crate::capture::common::start_live_capture_thread(
-            source,
+            source.clone(),
             fps,
             buffer.clone(),
             stop_signal.clone(),
