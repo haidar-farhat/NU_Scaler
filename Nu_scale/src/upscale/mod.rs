@@ -5,7 +5,6 @@ use std::path::Path;
 pub mod fsr;
 pub mod dlss;
 pub mod common;
-pub mod cuda;
 
 use common::UpscalingAlgorithm;
 
@@ -27,31 +26,31 @@ pub enum UpscalingTechnology {
     FSR,
     // NVIDIA Deep Learning Super Sampling
     DLSS,
-    // CUDA-accelerated
-    CUDA,
+    // GPU (Future Vulkan implementation)
+    GPU,
     // Fallback to simple bilinear/bicubic
     Fallback,
 }
 
-/// The main trait for all upscalers
-pub trait Upscaler: Send + Sync {
+/// Defines the interface for different upscaling technologies
+pub trait Upscaler {
     // Initialize the upscaler
     fn initialize(&mut self, input_width: u32, input_height: u32, output_width: u32, output_height: u32) -> Result<()>;
     
     // Upscale a single image
     fn upscale(&self, input: &RgbaImage) -> Result<RgbaImage>;
     
-    // Upscale a single image with a specific algorithm
-    // This is primarily used for the basic upscaler that can switch algorithms
+    // Upscale a single image with a specific algorithm (optional, defaults to calling upscale)
     fn upscale_with_algorithm(&self, input: &RgbaImage, algorithm: UpscalingAlgorithm) -> Result<RgbaImage> {
-        // Default implementation just calls upscale() and ignores algorithm
+        // Default implementation just calls the standard upscale
+        // Specific implementations might override this if they can change algorithms on the fly
+        // or if they need to create a temporary upscaler with the new algorithm.
+        log::warn!("Upscaling with algorithm {} requested, but {} does not support dynamic algorithm change. Using default.", 
+                   algorithm.to_string(), self.name());
         self.upscale(input)
     }
     
-    // Cleanup resources
-    fn cleanup(&mut self) -> Result<()>;
-    
-    // Check if this upscaler is supported on the current hardware
+    // Check if the technology is supported on the current system
     fn is_supported() -> bool where Self: Sized;
     
     // Get the name of this upscaler
@@ -63,29 +62,17 @@ pub trait Upscaler: Send + Sync {
     // Set the quality level
     fn set_quality(&mut self, quality: UpscalingQuality) -> Result<()>;
     
-    /// Check if the upscaler needs initialization
-    /// Returns true if the upscaler has not been initialized or if it needs re-initialization
-    fn needs_initialization(&self) -> bool {
-        // Default implementation returns false
-        // Can be overridden by implementations that track initialization state
-        false
-    }
-    
-    /// Get the current input width
-    /// Returns the width of input images this upscaler is configured for
-    fn input_width(&self) -> u32 {
-        // Default implementation returns 0
-        // Must be overridden by implementations that need to track input dimensions
-        0
-    }
-    
-    /// Get the current input height
-    /// Returns the height of input images this upscaler is configured for
-    fn input_height(&self) -> u32 {
-        // Default implementation returns 0
-        // Must be overridden by implementations that need to track input dimensions
-        0
-    }
+    // Cleanup resources
+    fn cleanup(&mut self) -> Result<()>;
+
+    // Check if the upscaler needs initialization
+    fn needs_initialization(&self) -> bool;
+
+    // Get current input width
+    fn input_width(&self) -> u32;
+
+    // Get current input height
+    fn input_height(&self) -> u32;
 }
 
 // Factory function to create an upscaler based on the technology
@@ -94,8 +81,6 @@ pub fn create_upscaler(
     quality: UpscalingQuality,
     algorithm: Option<UpscalingAlgorithm>,
 ) -> Result<Box<dyn Upscaler>> {
-    // First check if technology is supported to avoid initialization attempts
-    // that would eventually fail and cause multiple fallbacks
     match technology {
         UpscalingTechnology::FSR => {
             if !fsr::FsrUpscaler::is_supported() {
@@ -120,33 +105,28 @@ pub fn create_upscaler(
             let upscaler = dlss::DlssUpscaler::new(quality)?;
             Ok(Box::new(upscaler))
         },
-        UpscalingTechnology::CUDA => {
-            if !cuda::CudaUpscaler::is_supported() {
-                log::info!("CUDA not supported, checking other technologies");
-                
-                // Try FSR next
-                if fsr::FsrUpscaler::is_supported() {
-                    log::info!("Falling back to FSR");
-                    let upscaler = fsr::FsrUpscaler::new(quality)?;
-                    return Ok(Box::new(upscaler));
-                }
-                
-                // Try DLSS next
-                if dlss::DlssUpscaler::is_supported() {
-                    log::info!("Falling back to DLSS");
-                    let upscaler = dlss::DlssUpscaler::new(quality)?;
-                    return Ok(Box::new(upscaler));
-                }
-                
-                // Finally fall back to basic
-                log::info!("No GPU acceleration available, falling back to basic upscaling");
-                return create_basic_upscaler(quality, algorithm);
+        UpscalingTechnology::GPU => {
+            // Placeholder for Vulkan implementation
+            // For now, always fall back to checking other technologies
+            log::info!("GPU (Vulkan) upscaler not yet implemented, checking other technologies");
+
+            // Try FSR next
+            if fsr::FsrUpscaler::is_supported() {
+                log::info!("Falling back to FSR");
+                let upscaler = fsr::FsrUpscaler::new(quality)?;
+                return Ok(Box::new(upscaler));
             }
             
-            // Create CUDA upscaler with the specified algorithm
-            let alg = algorithm.unwrap_or(UpscalingAlgorithm::Lanczos3);
-            let upscaler = cuda::CudaUpscaler::new(quality, alg)?;
-            Ok(Box::new(upscaler))
+            // Try DLSS next
+            if dlss::DlssUpscaler::is_supported() {
+                log::info!("Falling back to DLSS");
+                let upscaler = dlss::DlssUpscaler::new(quality)?;
+                return Ok(Box::new(upscaler));
+            }
+            
+            // Finally fall back to basic
+            log::info!("No GPU acceleration available, falling back to basic upscaling");
+            return create_basic_upscaler(quality, algorithm);
         },
         UpscalingTechnology::None => {
             // No upscaling, just return a pass-through upscaler
