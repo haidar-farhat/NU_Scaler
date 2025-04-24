@@ -594,13 +594,9 @@ impl eframe::App for FullscreenUpscalerUi {
             self.show_overlay = !self.show_overlay;
         }
         
-        // The set_transparent method is not available, we'll use other approaches
-        // for transparency if needed. Our window is already configured as transparent
-        // in the NativeOptions
-        
-        // Show the upscaled frame on the entire window
+        // Use a dark background instead of transparent
         egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(egui::Color32::TRANSPARENT))
+            .frame(egui::Frame::none().fill(egui::Color32::from_rgb(30, 30, 30)))
             .show(ctx, |ui| {
                 if let Some(texture) = &self.texture {
                     // Get available size
@@ -648,11 +644,17 @@ impl eframe::App for FullscreenUpscalerUi {
                 } else {
                     // Show loading message if no texture is available
                     ui.centered_and_justified(|ui| {
-                        ui.heading("Waiting for frames...");
+                        ui.vertical_centered(|ui| {
+                            ui.heading("Waiting for frames...");
+                            ui.add_space(10.0);
+                            ui.label("If you don't see any content, please ensure the source window is visible and not minimized.");
+                            ui.add_space(5.0);
+                            ui.label("Press ESC to exit and try again.");
+                        });
                     });
                 }
             });
-            
+        
         // Request continuous repaint to update the frame as soon as possible
         ctx.request_repaint();
         
@@ -746,19 +748,20 @@ pub fn run_fullscreen_upscaler(
     // Create eframe options for the overlay window
     let options = eframe::NativeOptions {
         maximized: false,
-        decorated: false,
-        transparent: true,
+        decorated: true,  // Add window decorations so it's visible and can be moved
+        transparent: false,  // Change to non-transparent for better visibility
         initial_window_size: if let Some((_, _, w, h)) = window_info {
-            Some(Vec2::new(w as f32, h as f32))
+            if w > 0 && h > 0 {
+                Some(Vec2::new(w as f32, h as f32))
+            } else {
+                // Fallback size if window is too small
+                Some(Vec2::new(1280.0, 720.0))
+            }
         } else {
             Some(Vec2::new(1280.0, 720.0))
         },
-        // Set the window position to overlay the source window
-        initial_window_pos: if let Some((x, y, _, _)) = window_info {
-            Some(egui::pos2(x as f32, y as f32))
-        } else {
-            None
-        },
+        // Always position the window in a visible area on the primary screen
+        initial_window_pos: Some(egui::pos2(100.0, 100.0)),
         always_on_top: true,
         vsync: true,
         ..Default::default()
@@ -777,7 +780,7 @@ pub fn run_fullscreen_upscaler(
     
     // Run the application
     let result = match eframe::run_native(
-        "NU Scale - Overlay Mode",
+        "NU Scale - Upscaled View (Press ESC to exit)",
         options,
         Box::new(move |cc| -> Box<dyn eframe::App> {
             // Initialize our UI with the creation context
