@@ -23,7 +23,7 @@ use windows::{
 
 // Use crate:: for lib modules
 use crate::capture::{CaptureError, CaptureTarget, ScreenCapture};
-use crate::capture::common::FrameBuffer;
+use crate::capture::common::{FrameBuffer, run_capture_thread};
 use crate::upscale::{
     create_upscaler, Upscaler, UpscalingQuality, UpscalingTechnology,
     common::UpscalingAlgorithm,
@@ -1380,169 +1380,154 @@ impl AppState {
     
     /// Launch the fullscreen upscaling mode with current profile settings
     fn launch_fullscreen_mode(&mut self, frame: &mut eframe::Frame) {
+        // Log the launch of fullscreen mode
         log::info!("=== LAUNCHING FULLSCREEN MODE ===");
-        log::debug!("Current profile details: tech={}, quality={}, scale_factor={}",
-                  self.profile.upscaling_tech, self.profile.upscaling_quality, self.profile.scale_factor);
         
-        // Prepare the upscaling target
-        let capture_target = match self.profile.capture_source {
-            0 => { // Fullscreen
-                log::debug!("Using FULLSCREEN capture target");
-                CaptureTarget::FullScreen 
-            },
-            1 => { // Window
-                let window_title = &self.profile.window_title;
-                log::debug!("Using WINDOW capture target: '{}'", window_title);
-                CaptureTarget::WindowByTitle(window_title.clone())
-            },
-            2 => { // Region
-                log::debug!("Using REGION capture target: {}x{} at ({},{})", 
-                          self.profile.region_width, self.profile.region_height,
-                          self.profile.region_x, self.profile.region_y);
-                CaptureTarget::Region {
-                    x: self.profile.region_x,
-                    y: self.profile.region_y,
-                    width: self.profile.region_width,
-                    height: self.profile.region_height,
+        // Map profile upscaling tech to crate::upscale::UpscalingTechnology
+        let upscaling_tech = match self.profile.upscaling_tech {
+            0 => {
+                // Auto-detect the best available upscaling technology
+                log::info!("Auto-detecting best upscaling tech...");
+                if crate::upscale::fsr3::Fsr3Upscaler::is_supported() {
+                    log::info!("Auto-detected FSR3 support");
+                    crate::upscale::UpscalingTechnology::FSR3
+                } else if crate::upscale::fsr::FsrUpscaler::is_supported() {
+                    log::info!("Auto-detected FSR support");
+                    crate::upscale::UpscalingTechnology::FSR
+                } else {
+                    log::info!("Falling back to basic upscaler");
+                    crate::upscale::UpscalingTechnology::Fallback
                 }
             },
+            1 => crate::upscale::UpscalingTechnology::FSR,
+            2 => crate::upscale::UpscalingTechnology::DLSS,
+            3 => crate::upscale::UpscalingTechnology::Fallback,
             _ => {
-                log::warn!("Unknown capture source {}, fallback to fullscreen", 
-                         self.profile.capture_source);
-                CaptureTarget::FullScreen
+                log::warn!("Unknown upscaling tech {}, fallback to auto-detect", 
+                          self.profile.upscaling_tech);
+                // Auto-detect
+                if crate::upscale::fsr3::Fsr3Upscaler::is_supported() {
+                    crate::upscale::UpscalingTechnology::FSR3
+                } else {
+                    crate::upscale::UpscalingTechnology::Fallback
+                }
             }
         };
         
-        // Map the upscaling technology from profile index to proper enum
-        let upscaling_tech = match self.profile.upscaling_tech {
-            1 => { 
-                log::debug!("Using FSR upscaling technology");
-                UpscalingTechnology::FSR 
-            },
-            2 => { 
-                log::debug!("Using DLSS upscaling technology");
-                UpscalingTechnology::DLSS 
-            },
-            3 => { 
-                log::debug!("Using Fallback upscaling technology");
-                UpscalingTechnology::Fallback 
-            },
-            _ => {
-                log::warn!("Unknown upscaling tech {}, fallback to auto-detect",
-                         self.profile.upscaling_tech);
-                UpscalingTechnology::Fallback // Default to fallback if not recognized
-            }
-        };
-        
-        // Map the upscaling quality from profile index to proper enum
+        // Map profile quality to crate::upscale::UpscalingQuality
         let upscaling_quality = match self.profile.upscaling_quality {
-            0 => { 
-                log::debug!("Using ULTRA quality");
-                UpscalingQuality::Ultra 
-            },
-            1 => { 
-                log::debug!("Using QUALITY mode");
-                UpscalingQuality::Quality 
-            },
-            2 => { 
-                log::debug!("Using BALANCED mode");
-                UpscalingQuality::Balanced 
-            },
-            3 => { 
-                log::debug!("Using PERFORMANCE mode");
-                UpscalingQuality::Performance 
-            },
-            _ => { 
-                log::warn!("Unknown quality {}, fallback to balanced",
-                         self.profile.upscaling_quality);
-                UpscalingQuality::Balanced  // Default to balanced if not recognized
+            0 => crate::upscale::UpscalingQuality::Ultra,
+            1 => crate::upscale::UpscalingQuality::Quality,
+            2 => crate::upscale::UpscalingQuality::Balanced,
+            3 => crate::upscale::UpscalingQuality::Performance,
+            _ => {
+                log::warn!("Unknown upscaling quality {}, fallback to balanced", 
+                          self.profile.upscaling_quality);
+                crate::upscale::UpscalingQuality::Balanced
             }
         };
         
-        // Map the algorithm from profile index
+        // Map profile algorithm to crate::upscale::common::UpscalingAlgorithm
         let upscaling_algorithm = match self.profile.upscaling_algorithm {
-            0 => {
-                log::debug!("Using Lanczos3 algorithm");
-                Some(UpscalingAlgorithm::Lanczos3)
-            },
-            1 => {
-                log::debug!("Using Bicubic algorithm");
-                Some(UpscalingAlgorithm::Bicubic)
-            },
-            2 => {
-                log::debug!("Using Bilinear algorithm");
-                Some(UpscalingAlgorithm::Bilinear)
-            },
-            3 => {
-                log::debug!("Using Nearest Neighbor algorithm");
-                Some(UpscalingAlgorithm::NearestNeighbor)
-            },
+            0 => Some(crate::upscale::common::UpscalingAlgorithm::Lanczos3),
+            1 => Some(crate::upscale::common::UpscalingAlgorithm::Bicubic),
+            2 => Some(crate::upscale::common::UpscalingAlgorithm::Bilinear),
+            3 => Some(crate::upscale::common::UpscalingAlgorithm::NearestNeighbor),
             _ => None
         };
         
-        // Maximize the window for fullscreen display
-        if let Err(err) = self.toggle_fullscreen_mode(frame) {
-            log::error!("Failed to enter fullscreen mode: {}", err);
-            self.status_message = format!("Failed to enter fullscreen mode: {}", err);
+        // Toggle fullscreen mode (maximizes window)
+        self.is_fullscreen = true;
+        self.is_upscaling = true;
+        log::info!("Toggled fullscreen mode: {}", self.is_fullscreen);
+        
+        // Maximize the window
+        frame.set_maximized(true);
+        
+        // Set window title to indicate upscaling mode
+        frame.set_window_title(&format!(
+            "NU_Scaler - Upscaling with {:?} at {:?} quality", 
+            upscaling_tech, upscaling_quality
+        ));
+        
+        // Choose the capture target based on profile
+        let capture_target = match self.profile.capture_source {
+            0 => {
+                // Fullscreen capture
+                crate::capture::CaptureTarget::FullScreen
+            },
+            1 => {
+                // Window capture by title
+                let window_title = &self.profile.window_title;
+                crate::capture::CaptureTarget::WindowByTitle(window_title.clone())
+            },
+            2 => {
+                // Region capture
+                crate::capture::CaptureTarget::Region { 
+                    x: self.profile.region_x, 
+                    y: self.profile.region_y, 
+                    width: self.profile.region_width, 
+                    height: self.profile.region_height 
+                }
+            },
+            _ => {
+                // Default to fullscreen if not recognized
+                log::warn!("Unknown capture source {}, fallback to fullscreen", 
+                          self.profile.capture_source);
+                crate::capture::CaptureTarget::FullScreen
+            }
+        };
+        
+        // Create a new frame buffer and stop signal for this upscaling session
+        let frame_buffer = Arc::new(crate::capture::common::FrameBuffer::new(30)); // buffer 30 frames
+        let stop_signal = Arc::new(AtomicBool::new(false));
+        
+        // Store them for later stopping
+        self.upscaling_buffer = Some(frame_buffer.clone());
+        self.upscaling_stop_signal = Some(stop_signal.clone());
+        
+        // Set the status message
+        self.status_message = format!("Upscaling with {:?}", upscaling_tech);
+        self.status_message_type = StatusMessageType::Info;
+        
+        // Create a temp status for the capture thread
+        let temp_status = Arc::new(Mutex::new(None::<(String, std::time::SystemTime)>));
+        
+        // Start the capture thread
+        if let Err(e) = crate::capture::common::run_capture_thread(
+            capture_target.clone(),
+            frame_buffer.clone(),
+            stop_signal.clone(),
+            self.capture_status.clone(),
+            temp_status
+        ) {
+            // Failed to start capture thread
+            log::error!("Failed to start capture thread: {}", e);
+            self.status_message = format!("Failed to start capture: {}", e);
             self.status_message_type = StatusMessageType::Error;
             return;
         }
         
-        // Create capture thread and start upscaling
-        let frame_buffer = Arc::clone(&self.frame_buffer);
-        let stop_signal = Arc::clone(&self.stop_signal);
-        
-        // Reset the stop signal before starting
-        self.stop_signal.store(false, std::sync::atomic::Ordering::SeqCst);
-        
-        // Ensure we clear any existing frame buffer
-        if let Ok(mut buffer) = frame_buffer.frames.lock() {
-            buffer.clear();
-        }
-        
-        // Set upscaling flag
-        self.is_upscaling = true;
-        crate::ui::set_upscaling_active(true);
-        
-        // Start the capture in a background thread
-        let capture_status = Arc::clone(&self.capture_status);
-        let temp_status = Arc::clone(&self.temp_status_message);
-        let target_clone = capture_target.clone();
-        
-        // Spawn the capture thread
-        let capture_thread = std::thread::spawn(move || {
-            log::info!("Starting capture thread for target: {:?}", target_clone);
-            if let Err(e) = crate::capture::run_capture_thread(
-                target_clone,
-                frame_buffer,
-                stop_signal.clone(),
-                capture_status,
-                temp_status,
-            ) {
-                log::error!("Capture thread error: {}", e);
-            }
-        });
-        
-        // Set status message
-        self.status_message = "Starting upscaling...".to_string();
-        self.status_message_type = StatusMessageType::Info;
-        
-        // Store thread handle if we want to join it later
-        self.scaling_process = Some(capture_thread);
-        
-        // Store upscaling stop signal
-        self.upscaling_stop_signal = Some(stop_signal);
-        
-        // Create the upscaler
-        match crate::upscale::create_upscaler(upscaling_tech, upscaling_quality, upscaling_algorithm) {
-            Ok(upscaler) => {
-                self.upscaler = Some(upscaler);
-                log::info!("Created upscaler: {}", self.upscaler.as_ref().unwrap().name());
+        // Actually start upscaling now - use the parameters we retrieved
+        match self.start_upscaling_mode(
+            capture_target,
+            upscaling_tech,
+            upscaling_quality,
+            self.profile.fps as u32, // Convert from f32 to u32
+            upscaling_algorithm
+        ) {
+            Ok(_) => {
+                log::info!("Started upscaling mode successfully");
             },
             Err(e) => {
-                log::error!("Failed to create upscaler: {}", e);
-                self.status_message = format!("Failed to create upscaler: {}", e);
+                log::error!("Failed to start upscaling mode: {}", e);
+                self.status_message = format!("Failed to start upscaling: {}", e);
                 self.status_message_type = StatusMessageType::Error;
+                
+                // Stop the capture thread if upscaling failed
+                if let Some(stop_signal) = &self.upscaling_stop_signal {
+                    stop_signal.store(true, Ordering::SeqCst);
+                }
             }
         }
     }
@@ -1708,7 +1693,7 @@ impl AppState {
                 
                 if let Some((x, y)) = cursor_pos {
                     // Find the window at the cursor position
-                    for window in windows {
+                    for window in &windows {
                         let geom = window.geometry;
                         if x >= geom.x && 
                            y >= geom.y && 
@@ -1716,7 +1701,7 @@ impl AppState {
                            y < geom.y + geom.height as i32 {
                             // Found the window under cursor
                             log::info!("Found window under cursor: {}", window.title);
-                            return Some(window.title);
+                            return Some(window.title.clone());
                         }
                     }
                 }
@@ -1727,11 +1712,11 @@ impl AppState {
                     use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
                     
                     let hwnd = unsafe { GetForegroundWindow() };
-                    for window in windows {
+                    for window in &windows {
                         if let crate::capture::platform::WindowId::Windows(id) = window.id {
                             if id == hwnd.0 as usize {
                                 log::info!("Found active window: {}", window.title);
-                                return Some(window.title);
+                                return Some(window.title.clone());
                             }
                         }
                     }
@@ -1747,6 +1732,9 @@ impl AppState {
         
         // Get the window under cursor
         if let Some(window_title) = self.get_window_under_cursor() {
+            // Fix: Clone window_title before pushing it to avoid move
+            let window_title_clone = window_title.clone();
+            
             // Update the profile to use this window
             self.profile.capture_source = 1; // Window mode
             self.profile.window_title = window_title.clone();
@@ -1761,7 +1749,7 @@ impl AppState {
             
             // If not found, add it to the list
             if !self.available_windows.contains(&window_title) {
-                self.available_windows.push(window_title);
+                self.available_windows.push(window_title_clone);
                 self.selected_window_index = self.available_windows.len() - 1;
             }
             
