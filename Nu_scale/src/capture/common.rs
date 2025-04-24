@@ -6,6 +6,7 @@ use std::thread;
 use super::{CaptureTarget, ScreenCapture};
 use crate::ui::profile::{UpscalingTechnology, UpscalingQuality};
 use std::sync::atomic::{AtomicBool, Ordering};
+use log;
 
 /// Type aliases for upscaling functionality to avoid import issues
 #[allow(dead_code)]
@@ -254,6 +255,8 @@ pub fn start_live_capture_thread(
     let stop_signal_clone = stop_signal.clone();
     
     let handle = thread::spawn(move || -> Result<()> {
+        log::info!("Capture thread started. Target: {:?}, FPS: {}, Buffer capacity: {}", 
+                  target, fps, buffer_clone.max_size);
         let mut capturer = super::create_capturer()?;
         let frame_duration = std::time::Duration::from_secs_f64(1.0 / fps as f64);
         let mut next_frame_time = std::time::Instant::now();
@@ -261,22 +264,29 @@ pub fn start_live_capture_thread(
         loop {
             // Check stop signal using load()
             if stop_signal_clone.load(Ordering::SeqCst) {
-                println!("Capture thread received stop signal.");
+                log::info!("Capture thread received stop signal. Exiting loop.");
                 break;
             }
 
             let frame_start_time = std::time::Instant::now();
+            log::trace!("Attempting frame capture...");
             match capturer.capture_frame(&target) {
                 Ok(frame) => {
+                    let frame_dims = (frame.width(), frame.height());
+                    log::trace!("Frame captured successfully ({}x{}). Attempting to add to buffer.", frame_dims.0, frame_dims.1);
                     if let Err(e) = buffer_clone.add_frame(frame) {
-                        eprintln!("Error adding frame to buffer: {}", e);
+                        log::error!("Error adding frame to buffer: {}", e);
                         // Decide if error is fatal or recoverable
                         // break; // Optionally stop on buffer error
+                    } else {
+                        log::trace!("Frame added to buffer successfully.");
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error capturing frame: {}", e);
+                    log::error!("Error capturing frame: {}", e);
                     // Consider if specific errors should stop the loop
+                    // Maybe sleep for a short duration before retrying?
+                    std::thread::sleep(std::time::Duration::from_millis(50)); 
                     // break;
                 }
             }
@@ -288,14 +298,18 @@ pub fn start_live_capture_thread(
 
             if next_frame_time > now {
                 let sleep_duration = next_frame_time.duration_since(now);
+                log::trace!("Sleeping for {:.2?}ms until next frame.", sleep_duration.as_millis());
                 std::thread::sleep(sleep_duration);
             } else {
                 // We're behind, find next valid frame time slot
                 let behind = now.duration_since(next_frame_time);
                 let frames_behind = (behind.as_secs_f64() / frame_duration.as_secs_f64()).ceil() as u32;
+                log::warn!("Capture loop is behind by {:.2?}ms ({} frames). Adjusting next frame time.", 
+                          behind.as_millis(), frames_behind);
                 next_frame_time += frame_duration * frames_behind;
             }
         }
+        log::info!("Capture thread finished.");
         Ok(())
     });
 

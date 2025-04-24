@@ -999,6 +999,8 @@ impl AppState {
             stop_signal.clone(),
         )?;
         
+        log::info!("Capture thread started for source: {:?}", source);
+        
         // First check if CUDA is supported for GPU acceleration
         let use_cuda_acceleration = crate::upscale::cuda::CudaUpscaler::is_supported();
         
