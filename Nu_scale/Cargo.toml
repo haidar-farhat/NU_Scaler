@@ -24,6 +24,7 @@ chrono = "0.4"
 vulkano = "0.34"
 vulkano-shaders = "0.34"
 bytemuck = "1.15"
+ash = "0.37"
 
 # CUDA dependencies removed
 # rustacuda = { version = "0.1", optional = true }
