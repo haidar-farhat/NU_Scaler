@@ -1116,124 +1116,47 @@ impl AppState {
                         Ok(Some(frame)) => {
                             // Frame received, proceed with upscaling
                             if let Some(upscaler) = &mut self.upscaler {
-                                let start_time = std::time::Instant::now();
+                                // --- TEMPORARY DIAGNOSTIC: Bypass Upscaler ---
+                                log::debug!("DIAGNOSTIC: Bypassing upscaler, displaying raw frame.");
+                                let size = [frame.width() as _, frame.height() as _];
+                                let pixels = frame.as_raw(); // Use raw frame pixels
                                 
-                                // Initialize if needed
-                                if upscaler.needs_initialization() {
-                                    let input_width = frame.width();
-                                    let input_height = frame.height();
-                                    
-                                    // Calculate output size to match window aspect ratio
-                                    let window_aspect_ratio = available_size.x / available_size.y;
-                                    let frame_aspect_ratio = input_width as f32 / input_height as f32;
-                                    
-                                    let (output_width, output_height) = if frame_aspect_ratio > window_aspect_ratio {
-                                        // Frame is wider than window - fit width and calculate height
-                                        let out_width = (available_size.x as f32 * 1.0) as u32;
-                                        let out_height = (out_width as f32 / frame_aspect_ratio) as u32;
-                                        (out_width, out_height)
+                                let texture = self.frame_texture.get_or_insert_with(|| {
+                                    ui.ctx().load_texture(
+                                        "raw_frame_diagnostic", // Use a different name to avoid conflicts
+                                        eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels),
+                                        eframe::egui::TextureOptions::LINEAR
+                                    )
+                                });
+                                
+                                if texture.size() != size {
+                                    *texture = ui.ctx().load_texture(
+                                        "raw_frame_diagnostic",
+                                        eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels),
+                                        eframe::egui::TextureOptions::LINEAR
+                                    );
+                                } else {
+                                    texture.set(eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels), eframe::egui::TextureOptions::LINEAR);
+                                }
+                                
+                                // Display the texture stretched...
+                                ui.centered_and_justified(|ui| {
+                                    let aspect_ratio = size[0] as f32 / size[1] as f32;
+                                    let max_width = available_size.x;
+                                    let max_height = available_size.y;
+                                    let (width, height) = if aspect_ratio > max_width / max_height {
+                                        (max_width, max_width / aspect_ratio)
                                     } else {
-                                        // Frame is taller than window - fit height and calculate width
-                                        let out_height = (available_size.y as f32 * 1.0) as u32;
-                                        let out_width = (out_height as f32 * frame_aspect_ratio) as u32;
-                                        (out_width, out_height)
+                                        (max_height * aspect_ratio, max_height)
                                     };
-                                    
-                                    log::info!("Initializing upscaler with dimensions {}x{} -> {}x{}", 
-                                              input_width, input_height, output_width, output_height);
-                                    
-                                    if let Err(e) = upscaler.initialize(
-                                        input_width, input_height, output_width, output_height
-                                    ) {
-                                        log::error!("Failed to initialize upscaler: {}", e);
-                                    }
-                                }
-                                
-                                // Log before upscaling
-                                log::debug!("Attempting to upscale frame {}x{}", frame.width(), frame.height());
-                                
-                                match upscaler.upscale(&frame) {
-                                    Ok(upscaled_frame) => {
-                                        let processing_time = start_time.elapsed().as_secs_f32() * 1000.0;
-                                        log::trace!("Frame upscaled successfully in {:.2}ms", processing_time);
-                                        
-                                        // Display the upscaled frame
-                                        let size = [upscaled_frame.width() as _, upscaled_frame.height() as _];
-                                        let pixels = upscaled_frame.as_raw();
-                                        
-                                        // Create or update texture
-                                        let texture = self.frame_texture.get_or_insert_with(|| {
-                                            ui.ctx().load_texture(
-                                                "upscaled_frame",
-                                                eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels),
-                                                eframe::egui::TextureOptions::LINEAR
-                                            )
-                                        });
-                                        
-                                        // Update existing texture if we already had one
-                                        if texture.size() != size {
-                                            *texture = ui.ctx().load_texture(
-                                                "upscaled_frame",
-                                                eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels),
-                                                eframe::egui::TextureOptions::LINEAR
-                                            );
-                                        } else {
-                                            texture.set(eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels), eframe::egui::TextureOptions::LINEAR);
-                                        }
-                                        
-                                        // Display the texture stretched to fill the window
-                                        ui.centered_and_justified(|ui| {
-                                            // Calculate image aspect ratio
-                                            let aspect_ratio = size[0] as f32 / size[1] as f32;
-                                            
-                                            // Calculate size to fit screen while preserving aspect ratio
-                                            let max_width = available_size.x;
-                                            let max_height = available_size.y;
-                                            
-                                            let (width, height) = if aspect_ratio > max_width / max_height {
-                                                // Image is wider than screen
-                                                (max_width, max_width / aspect_ratio)
-                                            } else {
-                                                // Image is taller than screen
-                                                (max_height * aspect_ratio, max_height)
-                                            };
-                                            
-                                            // Create a rect that will fill the screen
-                                            let rect = eframe::egui::Rect::from_min_size(
-                                                eframe::egui::pos2(
-                                                    (max_width - width) * 0.5,
-                                                    (max_height - height) * 0.5
-                                                ),
-                                                eframe::egui::vec2(width, height)
-                                            );
-                                            
-                                            // Draw the image at calculated size
-                                            ui.put(rect, eframe::egui::Image::new(texture, eframe::egui::vec2(width, height)));
-                                        });
-                                        
-                                        // Update overlay text
-                                        ui.painter().text(
-                                            eframe::egui::pos2(10.0, 10.0),
-                                            eframe::egui::Align2::LEFT_TOP,
-                                            format!("Upscaler: {} | Processing: {:.2}ms | GPU: {}", 
-                                                   upscaler.name(), processing_time,
-                                                   if crate::upscale::cuda::CudaUpscaler::is_supported() { "CUDA" } else { "CPU" }),
-                                            eframe::egui::FontId::proportional(14.0),
-                                            eframe::egui::Color32::WHITE
-                                        );
-                                        
-                                        // Log performance occasionally
-                                        self.frames_processed += 1;
-                                    },
-                                    Err(e) => {
-                                        // Log the upscaling error
-                                        log::error!("Upscale error: {}", e);
-                                        ui.centered_and_justified(|ui| {
-                                            ui.label(eframe::egui::RichText::new(format!("Upscaling Error: {}", e))
-                                                .size(18.0).color(eframe::egui::Color32::RED));
-                                        });
-                                    }
-                                }
+                                    let rect = eframe::egui::Rect::from_min_size(
+                                        eframe::egui::pos2((max_width - width) * 0.5, (max_height - height) * 0.5),
+                                        eframe::egui::vec2(width, height)
+                                    );
+                                    ui.put(rect, eframe::egui::Image::new(texture, eframe::egui::vec2(width, height)));
+                                });
+                                self.frames_processed += 1; 
+                                // --- END TEMPORARY DIAGNOSTIC ---
                             } else {
                                 // This case should ideally not happen if upscaling mode is active
                                 log::warn!("Upscaling mode active, but no upscaler found!");
