@@ -1211,7 +1211,7 @@ impl AppState {
                                         );
                                         
                                         // Draw the image at calculated size
-                                        ui.put(rect, eframe::egui::Image::new(texture).fit_to_rect());
+                                        ui.put(rect, eframe::egui::Image::new(texture, eframe::egui::vec2(width, height)));
                                     });
                                     
                                     // Show overlay with performance metrics
@@ -1297,7 +1297,7 @@ impl AppState {
                                 );
                                 
                                 // Draw the image at calculated size
-                                ui.put(rect, eframe::egui::Image::new(texture).fit_to_rect());
+                                ui.put(rect, eframe::egui::Image::new(texture, eframe::egui::vec2(width, height)));
                             });
                         }
                     } else {
