@@ -1,0 +1,135 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+// Input/output buffers
+layout(set = 0, binding = 0) buffer InputBuffer {
+    uint data[];
+} inputBuffer;
+
+layout(set = 0, binding = 1) buffer OutputBuffer {
+    uint data[];
+} outputBuffer;
+
+// Push constants for dimensions
+layout(push_constant) uniform PushConstants {
+    uint inputWidth;
+    uint inputHeight;
+    uint outputWidth;
+    uint outputHeight;
+} constants;
+
+// Helper function to get RGB values from buffer
+vec3 getRGB(uint index) {
+    uint value = inputBuffer.data[index / 4];
+    uint offset = (index % 4) * 8;
+    
+    uint r = (value >> offset) & 0xFF;
+    uint g = (value >> (offset + 8)) & 0xFF;
+    uint b = (value >> (offset + 16)) & 0xFF;
+    
+    return vec3(float(r) / 255.0, float(g) / 255.0, float(b) / 255.0);
+}
+
+// Helper function to set RGB values in buffer
+void setRGB(uint index, vec3 color) {
+    uint r = uint(clamp(color.r * 255.0, 0.0, 255.0));
+    uint g = uint(clamp(color.g * 255.0, 0.0, 255.0));
+    uint b = uint(clamp(color.b * 255.0, 0.0, 255.0));
+    
+    uint value = (r) | (g << 8) | (b << 16);
+    outputBuffer.data[index / 4] = value;
+}
+
+// Cubic interpolation function
+float cubicInterpolate(float p[4], float x) {
+    return p[1] + 0.5 * x * (p[2] - p[0] + x * (2.0 * p[0] - 5.0 * p[1] + 4.0 * p[2] - p[3] + x * (3.0 * (p[1] - p[2]) + p[3] - p[0])));
+}
+
+// Bicubic interpolation function
+vec3 bicubicInterpolate(float x, float y) {
+    uint ix = uint(floor(x));
+    uint iy = uint(floor(y));
+    
+    // Fractional parts
+    float fx = x - float(ix);
+    float fy = y - float(iy);
+    
+    // Sample 16 points around the pixel
+    vec3 points[4][4];
+    
+    for (int j = -1; j <= 2; ++j) {
+        for (int i = -1; i <= 2; ++i) {
+            uint px = clamp(int(ix) + i, 0, int(constants.inputWidth - 1));
+            uint py = clamp(int(iy) + j, 0, int(constants.inputHeight - 1));
+            
+            points[j+1][i+1] = getRGB((py * constants.inputWidth + px) * 3);
+        }
+    }
+    
+    // Interpolate along x for each row
+    float p[4];
+    vec3 results[4];
+    
+    for (int j = 0; j < 4; ++j) {
+        p[0] = points[j][0].r;
+        p[1] = points[j][1].r;
+        p[2] = points[j][2].r;
+        p[3] = points[j][3].r;
+        results[j].r = cubicInterpolate(p, fx);
+        
+        p[0] = points[j][0].g;
+        p[1] = points[j][1].g;
+        p[2] = points[j][2].g;
+        p[3] = points[j][3].g;
+        results[j].g = cubicInterpolate(p, fx);
+        
+        p[0] = points[j][0].b;
+        p[1] = points[j][1].b;
+        p[2] = points[j][2].b;
+        p[3] = points[j][3].b;
+        results[j].b = cubicInterpolate(p, fx);
+    }
+    
+    // Interpolate along y
+    p[0] = results[0].r;
+    p[1] = results[1].r;
+    p[2] = results[2].r;
+    p[3] = results[3].r;
+    float r = cubicInterpolate(p, fy);
+    
+    p[0] = results[0].g;
+    p[1] = results[1].g;
+    p[2] = results[2].g;
+    p[3] = results[3].g;
+    float g = cubicInterpolate(p, fy);
+    
+    p[0] = results[0].b;
+    p[1] = results[1].b;
+    p[2] = results[2].b;
+    p[3] = results[3].b;
+    float b = cubicInterpolate(p, fy);
+    
+    return vec3(r, g, b);
+}
+
+void main() {
+    // Get global position
+    uvec2 gPos = gl_GlobalInvocationID.xy;
+    
+    // Check if within output dimensions
+    if (gPos.x >= constants.outputWidth || gPos.y >= constants.outputHeight) {
+        return;
+    }
+    
+    // Calculate corresponding position in input image
+    float x = float(gPos.x) * float(constants.inputWidth) / float(constants.outputWidth);
+    float y = float(gPos.y) * float(constants.inputHeight) / float(constants.outputHeight);
+    
+    // Get interpolated color
+    vec3 color = bicubicInterpolate(x, y);
+    
+    // Write to output buffer
+    uint outputIndex = (gPos.y * constants.outputWidth + gPos.x) * 3;
+    setRGB(outputIndex, color);
+} 
