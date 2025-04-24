@@ -206,40 +206,25 @@ impl PlatformScreenCapture {
         // Select bitmap into DC
         let old_bitmap = unsafe { SelectObject(compatible_dc, bitmap) };
         
-        // Try PrintWindow first for better compatibility with DWM and layered windows
-        log::debug!("Attempting to capture using PrintWindow");
-        let print_result = unsafe { 
-            PrintWindow(
-                hwnd,
+        // Copy window content to bitmap using BitBlt
+        log::debug!("Attempting to capture using BitBlt");
+        if !unsafe { 
+            BitBlt(
                 compatible_dc,
-                PW_CLIENTONLY,
+                0, 0,
+                width as i32, height as i32,
+                window_dc,
+                0, 0,
+                SRCCOPY,
             )
-        }.as_bool();
-        
-        let mut capture_method = "PrintWindow";
-        
-        // If PrintWindow failed, fallback to BitBlt
-        if !print_result {
-            log::warn!("PrintWindow failed, falling back to BitBlt");
-            capture_method = "BitBlt";
-            if !unsafe { 
-                BitBlt(
-                    compatible_dc,
-                    0, 0,
-                    width as i32, height as i32,
-                    window_dc,
-                    0, 0,
-                    SRCCOPY,
-                )
-            }.as_bool() {
-                unsafe { SelectObject(compatible_dc, old_bitmap) };
-                unsafe { DeleteObject(bitmap) };
-                unsafe { DeleteDC(compatible_dc) };
-                unsafe { ReleaseDC(hwnd, window_dc) };
-                unsafe { ReleaseDC(HWND(0), desktop_dc) };
-                log::error!("BitBlt fallback also failed");
-                return Err(anyhow!(CaptureError::CaptureFailed("Window capture failed (BitBlt)".into())));
-            }
+        }.as_bool() {
+            unsafe { SelectObject(compatible_dc, old_bitmap) };
+            unsafe { DeleteObject(bitmap) };
+            unsafe { DeleteDC(compatible_dc) };
+            unsafe { ReleaseDC(hwnd, window_dc) };
+            unsafe { ReleaseDC(HWND(0), desktop_dc) };
+            log::error!("BitBlt failed");
+            return Err(anyhow!(CaptureError::CaptureFailed("Window capture failed (BitBlt)".into())));
         }
         
         // Get bitmap data
@@ -289,9 +274,6 @@ impl PlatformScreenCapture {
         unsafe { ReleaseDC(hwnd, window_dc) };
         unsafe { ReleaseDC(HWND(0), desktop_dc) };
         
-        // Convert BGRA buffer to RGBA for image crate
-        let mut image = RgbaImage::new(width, height);
-        
         // Check if the buffer is all black
         let sample_count = 1000.min(buffer.len() / 4);
         let all_black = buffer.chunks(4)
@@ -299,7 +281,7 @@ impl PlatformScreenCapture {
             .all(|pixel| pixel[0] == 0 && pixel[1] == 0 && pixel[2] == 0);
         
         if all_black {
-            log::warn!("Captured image appears to be all black (from {} samples). Capture method: {}", sample_count, capture_method);
+            log::warn!("Captured image appears to be all black (from {} samples)", sample_count);
             
             // Log some diagnostic information
             let foreground_hwnd = unsafe { GetForegroundWindow() };
@@ -309,64 +291,10 @@ impl PlatformScreenCapture {
             let style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) };
             let is_layered = (style & (WS_EX_LAYERED.0 as i32)) != 0;
             log::debug!("Window has layered style: {}", is_layered);
-            
-            // If using BitBlt failed with a black image, try one more time with PrintWindow 
-            // and different flags if we didn't try it already
-            if capture_method == "BitBlt" {
-                log::debug!("Attempting one more capture with PrintWindow (PW_RENDERFULLCONTENT)");
-                
-                // Clean up and retry
-                let window_dc = unsafe { GetDC(hwnd) };
-                let compatible_dc = unsafe { CreateCompatibleDC(window_dc) };
-                let bitmap = unsafe { CreateCompatibleBitmap(desktop_dc, width as i32, height as i32) };
-                let old_bitmap = unsafe { SelectObject(compatible_dc, bitmap) };
-                
-                // Try with full content flag
-                let print_result = unsafe { 
-                    PrintWindow(
-                        hwnd,
-                        compatible_dc,
-                        PW_RENDERFULLCONTENT,
-                    )
-                }.as_bool();
-                
-                if print_result {
-                    // If successful, get the bitmap data again
-                    unsafe {
-                        GetDIBits(
-                            compatible_dc,
-                            bitmap,
-                            0,
-                            height,
-                            Some(buffer.as_mut_ptr() as *mut std::ffi::c_void),
-                            &mut BITMAPINFO {
-                                bmiHeader: bitmap_info,
-                                bmiColors: [RGBQUAD::default()],
-                            },
-                            DIB_RGB_COLORS,
-                        )
-                    };
-                    
-                    // Clean up
-                    unsafe { SelectObject(compatible_dc, old_bitmap) };
-                    unsafe { DeleteObject(bitmap) };
-                    unsafe { DeleteDC(compatible_dc) };
-                    unsafe { ReleaseDC(hwnd, window_dc) };
-                    
-                    log::debug!("Retry with PrintWindow (PW_RENDERFULLCONTENT) completed");
-                } else {
-                    log::warn!("Retry with PrintWindow also failed");
-                    
-                    // Clean up
-                    unsafe { SelectObject(compatible_dc, old_bitmap) };
-                    unsafe { DeleteObject(bitmap) };
-                    unsafe { DeleteDC(compatible_dc) };
-                    unsafe { ReleaseDC(hwnd, window_dc) };
-                }
-            }
         }
         
         // Convert the buffer to an image
+        let mut image = RgbaImage::new(width, height);
         for y in 0..height {
             for x in 0..width {
                 let idx = ((y * width + x) * 4) as usize;

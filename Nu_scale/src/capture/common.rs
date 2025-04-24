@@ -369,4 +369,133 @@ where
     });
     
     Ok(handle)
+}
+
+/// Run a capture thread with the provided parameters
+pub fn run_capture_thread(
+    target: CaptureTarget,
+    buffer: Arc<FrameBuffer>,
+    stop_signal: Arc<AtomicBool>,
+    status: Arc<Mutex<String>>,
+    temp_status: Arc<Mutex<Option<(String, std::time::SystemTime)>>>,
+) -> Result<()> {
+    log::info!("Starting capture thread for target: {:?}", target);
+    
+    // Try to create a capturer
+    let mut capturer = super::create_capturer()?;
+    
+    // Set up timing variables
+    let target_fps = 60;
+    let frame_duration = std::time::Duration::from_secs_f64(1.0 / target_fps as f64);
+    let mut next_frame_time = std::time::Instant::now();
+    let mut frames_captured = 0;
+    let mut last_fps_log = std::time::Instant::now();
+    let mut consecutive_errors = 0;
+    
+    // Update status
+    {
+        let mut status_guard = status.lock().map_err(|_| anyhow::anyhow!("Mutex lock failed"))?;
+        *status_guard = format!("Capturing from {:?}", target);
+    }
+    
+    log::info!("Capture thread started, target FPS: {}", target_fps);
+    
+    // Main capture loop
+    while !stop_signal.load(std::sync::atomic::Ordering::SeqCst) {
+        let frame_start_time = std::time::Instant::now();
+        
+        // Try to capture a frame
+        match capturer.capture_frame(&target) {
+            Ok(frame) => {
+                // Reset error counter on success
+                consecutive_errors = 0;
+                
+                // Log frame dimensions occasionally
+                if frames_captured % 100 == 0 {
+                    log::info!("Captured frame {}x{}", frame.width(), frame.height());
+                }
+                
+                // Add frame to buffer
+                if let Err(e) = buffer.add_frame(frame) {
+                    log::warn!("Failed to add frame to buffer: {}", e);
+                    
+                    // Update temp status
+                    let _ = temp_status.lock().map(|mut s| {
+                        *s = Some((format!("Buffer error: {}", e), std::time::SystemTime::now()));
+                    });
+                }
+                
+                // Increment frame counter
+                frames_captured += 1;
+                
+                // Log FPS every second
+                if last_fps_log.elapsed().as_secs() >= 1 {
+                    let fps = frames_captured as f32 / last_fps_log.elapsed().as_secs_f32();
+                    
+                    // Update status with FPS
+                    let _ = status.lock().map(|mut s| {
+                        *s = format!("Capturing: {:.1} FPS", fps);
+                    });
+                    
+                    log::debug!("Capture performance: {:.1} FPS", fps);
+                    frames_captured = 0;
+                    last_fps_log = std::time::Instant::now();
+                }
+            },
+            Err(e) => {
+                // Increment error counter
+                consecutive_errors += 1;
+                
+                log::warn!("Failed to capture frame: {} (error {} in a row)", e, consecutive_errors);
+                
+                // Update temp status
+                let _ = temp_status.lock().map(|mut s| {
+                    *s = Some((format!("Capture error: {}", e), std::time::SystemTime::now()));
+                });
+                
+                // If too many consecutive errors, break out
+                if consecutive_errors > 10 {
+                    log::error!("Too many consecutive capture errors, stopping capture thread");
+                    
+                    // Update status
+                    let _ = status.lock().map(|mut s| {
+                        *s = "Capture failed: too many errors".to_string();
+                    });
+                    
+                    break;
+                }
+                
+                // Sleep a bit before retrying
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
+        
+        // Calculate time until next frame
+        next_frame_time += frame_duration;
+        let now = std::time::Instant::now();
+        
+        // Sleep if we're ahead of schedule
+        if next_frame_time > now {
+            std::thread::sleep(next_frame_time.duration_since(now));
+        } else {
+            // We're behind schedule, adjust next frame time
+            let behind_ms = now.duration_since(next_frame_time).as_millis();
+            
+            if behind_ms > 100 {
+                log::debug!("Capture thread falling behind by {}ms", behind_ms);
+            }
+            
+            // Adjust next frame time to be current time + one frame
+            next_frame_time = now + frame_duration;
+        }
+    }
+    
+    // Update status when exiting
+    {
+        let mut status_guard = status.lock().map_err(|_| anyhow::anyhow!("Mutex lock failed"))?;
+        *status_guard = "Capture stopped".to_string();
+    }
+    
+    log::info!("Capture thread stopped");
+    Ok(())
 } 
