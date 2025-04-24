@@ -105,6 +105,9 @@ pub fn start_borderless_upscale(
     let frame_buffer = Arc::new(capture::common::FrameBuffer::new(5));
     let frame_buffer_clone = frame_buffer.clone();
     
+    // Clone the source for passing to the capture thread
+    let source_for_thread = source.clone();
+    
     info!("Starting capture thread");
     
     // Start a capture thread
@@ -120,7 +123,7 @@ pub fn start_borderless_upscale(
             let start_time = std::time::Instant::now();
             
             // Capture frame
-            match capturer.capture_frame(&source) {
+            match capturer.capture_frame(&source_for_thread) {
                 Ok(frame) => {
                     // Log dimensions occasionally
                     if frames_captured % 100 == 0 {
@@ -140,7 +143,7 @@ pub fn start_borderless_upscale(
                     
                     // Use our logger utility
                     logger::log_capture_event(
-                        &format!("{:?}", source),
+                        &format!("{:?}", source_for_thread),
                         frame.width(),
                         frame.height()
                     );
@@ -187,6 +190,7 @@ pub fn start_borderless_upscale(
         technology,
         quality,
         algorithm,
+        source.clone(),
     ) {
         Ok(_) => {
             info!("Fullscreen renderer completed successfully");

@@ -6,10 +6,13 @@ use anyhow::Result;
 use eframe::{self, egui};
 use egui::{Vec2, ColorImage, TextureOptions, TextureId};
 use image::RgbaImage;
+use std::path::Path;
 
 use crate::capture::common::FrameBuffer;
 use crate::upscale::{Upscaler, UpscalingTechnology, UpscalingQuality};
 use crate::upscale::common::UpscalingAlgorithm;
+use crate::capture::CaptureTarget;
+use crate::capture::platform::WindowInfo;
 
 // Define a constant for the lock file path
 const LOCK_FILE_PATH: &str = "nu_scaler_fullscreen.lock";
@@ -184,6 +187,10 @@ pub struct FullscreenUpscalerUi {
     input_size: (u32, u32),
     /// Output size 
     output_size: (u32, u32),
+    /// Source window position (x, y, width, height)
+    source_window_info: Option<(i32, i32, u32, u32)>,
+    /// Capture target used for this upscaling session
+    capture_target: Option<CaptureTarget>,
 }
 
 impl FullscreenUpscalerUi {
@@ -226,6 +233,66 @@ impl FullscreenUpscalerUi {
             last_upscale_time: 0.0,
             input_size: (0, 0),
             output_size: (0, 0),
+            source_window_info: None,
+            capture_target: None,
+        }
+    }
+    
+    /// Set the capture target used for this upscaling session
+    pub fn set_capture_target(&mut self, target: CaptureTarget) {
+        self.capture_target = Some(target.clone());
+        
+        // Try to get window position from target
+        if let CaptureTarget::WindowByTitle(title) = &target {
+            // Get window information by title
+            if let Ok(capturer) = crate::capture::create_capturer() {
+                if let Ok(windows) = capturer.list_windows() {
+                    // Find window with matching title
+                    if let Some(window) = windows.iter().find(|w| w.title.contains(title)) {
+                        // Store window position and size
+                        self.source_window_info = Some((
+                            window.geometry.x,
+                            window.geometry.y,
+                            window.geometry.width,
+                            window.geometry.height,
+                        ));
+                        log::info!("Found source window position: {:?}", self.source_window_info);
+                    }
+                }
+            }
+        }
+    }
+    
+    /// Update source window position (for tracking moving windows)
+    fn update_source_window_position(&mut self, frame: &mut eframe::Frame) {
+        if let Some(CaptureTarget::WindowByTitle(title)) = &self.capture_target {
+            // Get window information by title
+            if let Ok(capturer) = crate::capture::create_capturer() {
+                if let Ok(windows) = capturer.list_windows() {
+                    // Find window with matching title
+                    if let Some(window) = windows.iter().find(|w| w.title.contains(title)) {
+                        // Check if position changed
+                        let new_pos = (
+                            window.geometry.x,
+                            window.geometry.y,
+                            window.geometry.width,
+                            window.geometry.height,
+                        );
+                        
+                        if self.source_window_info != Some(new_pos) {
+                            log::debug!("Window position changed from {:?} to {:?}", 
+                                       self.source_window_info, new_pos);
+                                       
+                            // Update stored position
+                            self.source_window_info = Some(new_pos);
+                            
+                            // Update overlay window position
+                            frame.set_window_pos(egui::pos2(new_pos.0 as f32, new_pos.1 as f32));
+                            frame.set_window_size(egui::vec2(new_pos.2 as f32, new_pos.3 as f32));
+                        }
+                    }
+                }
+            }
         }
     }
     
@@ -526,9 +593,12 @@ impl eframe::App for FullscreenUpscalerUi {
             self.show_overlay = !self.show_overlay;
         }
         
+        // Set transparent background
+        frame.set_transparent(true);
+        
         // Show the upscaled frame on the entire window
         egui::CentralPanel::default()
-            .frame(egui::Frame::none())
+            .frame(egui::Frame::none().fill(egui::Color32::TRANSPARENT))
             .show(ctx, |ui| {
                 if let Some(texture) = &self.texture {
                     // Get available size
@@ -558,19 +628,21 @@ impl eframe::App for FullscreenUpscalerUi {
                         )
                     };
                     
-                    // Draw the texture
+                    // Draw the texture to cover the entire space
                     ui.put(rect, egui::Image::new(texture.id(), texture_size));
                     
-                    // Draw performance overlay in the top-right corner
-                    let overlay_width = 250.0;
-                    let overlay_rect = egui::Rect::from_min_size(
-                        egui::pos2(ui.available_rect_before_wrap().right() - overlay_width - 10.0, 10.0),
-                        Vec2::new(overlay_width, 0.0) // Height will be determined by content
-                    );
-                    
-                    ui.allocate_ui_at_rect(overlay_rect, |ui| {
-                        self.draw_performance_overlay(ui);
-                    });
+                    // Draw performance overlay in the top-right corner only if enabled
+                    if self.show_overlay {
+                        let overlay_width = 250.0;
+                        let overlay_rect = egui::Rect::from_min_size(
+                            egui::pos2(ui.available_rect_before_wrap().right() - overlay_width - 10.0, 10.0),
+                            Vec2::new(overlay_width, 0.0) // Height will be determined by content
+                        );
+                        
+                        ui.allocate_ui_at_rect(overlay_rect, |ui| {
+                            self.draw_performance_overlay(ui);
+                        });
+                    }
                 } else {
                     // Show loading message if no texture is available
                     ui.centered_and_justified(|ui| {
@@ -581,6 +653,9 @@ impl eframe::App for FullscreenUpscalerUi {
             
         // Request continuous repaint to update the frame as soon as possible
         ctx.request_repaint();
+        
+        // Attempt to update window position if needed to track the source window
+        self.update_source_window_position(frame);
     }
 }
 
@@ -600,6 +675,7 @@ pub fn run_fullscreen_upscaler(
     technology: UpscalingTechnology,
     quality: UpscalingQuality,
     algorithm: Option<UpscalingAlgorithm>,
+    capture_target: CaptureTarget,
 ) -> Result<(), String> {
     // Try to create a lock file to ensure only one instance runs
     let lock_file_result = create_lock_file();
@@ -628,36 +704,100 @@ pub fn run_fullscreen_upscaler(
     // Log the upscaler we're actually using
     log::info!("Using upscaler: {} with quality: {:?}", upscaler.name(), upscaler.quality());
     
-    // Create eframe options for fullscreen
+    // Get the window info from the capture target
+    let mut window_info = None;
+    
+    if let CaptureTarget::WindowByTitle(title) = &capture_target {
+        if let Ok(capturer) = crate::capture::create_capturer() {
+            if let Ok(windows) = capturer.list_windows() {
+                // Find window with matching title
+                if let Some(window) = windows.iter().find(|w| w.title.contains(title)) {
+                    // Store window position and size
+                    window_info = Some((
+                        window.geometry.x,
+                        window.geometry.y,
+                        window.geometry.width,
+                        window.geometry.height,
+                    ));
+                    log::info!("Found source window: {} at position {:?}", title, window_info);
+                }
+            }
+        }
+    }
+    
+    // If we couldn't get window info from the capture target, try getting it from a frame
+    if window_info.is_none() {
+        window_info = match frame_buffer.get_latest_frame() {
+            Ok(Some(frame)) => {
+                // Since we don't have position info, just use the dimensions
+                log::info!("Using frame dimensions: {}x{}", frame.width(), frame.height());
+                Some((0, 0, frame.width(), frame.height()))
+            },
+            _ => {
+                // If we can't get a frame yet, use default dimensions
+                log::warn!("Could not get frame dimensions, using default 1280x720");
+                Some((0, 0, 1280, 720))
+            }
+        };
+    }
+    
+    // Create eframe options for the overlay window
     let options = eframe::NativeOptions {
-        maximized: true,
+        maximized: false,
         decorated: false,
-        transparent: false,
+        transparent: true,
+        initial_window_size: if let Some((_, _, w, h)) = window_info {
+            Some(Vec2::new(w as f32, h as f32))
+        } else {
+            Some(Vec2::new(1280.0, 720.0))
+        },
+        // Set the window position to overlay the source window
+        initial_window_pos: if let Some((x, y, _, _)) = window_info {
+            Some(egui::pos2(x as f32, y as f32))
+        } else {
+            None
+        },
+        always_on_top: true,
         vsync: true,
-        initial_window_size: Some(Vec2::new(1920.0, 1080.0)),
         ..Default::default()
     };
     
-    // Create the UI and wrap it in a Box so we can move it into the eframe run function
-    let ui = FullscreenUpscalerUi::new_boxed(
+    // Create our UI object
+    let mut ui = FullscreenUpscalerUi::new_boxed(
         frame_buffer,
         stop_signal,
         upscaler,
         algorithm,
     );
     
-    // Run the application
-    let result = eframe::run_native(
-        "NU Scale - Fullscreen Mode",
-        options,
-        Box::new(move |cc| {
-            // Configure the UI with the creation context
-            FullscreenUpscalerUi::configure(cc);
-            ui
-        })
-    ).map_err(|e| format!("Failed to run fullscreen upscaler: {}", e));
+    // Set the capture target
+    ui.set_capture_target(capture_target.clone());
     
-    // Release the lock file when done
+    // Run the application
+    let result = match eframe::run_native(
+        "NU Scale - Overlay Mode",
+        options,
+        Box::new(move |cc| -> Box<dyn eframe::App> {
+            // Initialize our UI with the creation context
+            let mut app = ui;
+            // Additional initialization if needed
+            cc.egui_ctx.set_visuals(egui::Visuals::dark());
+            app
+        })
+    ) {
+        Ok(_) => {
+            log::info!("Fullscreen renderer completed successfully");
+            Ok(())
+        },
+        Err(e) => {
+            // Signal the capture thread to stop even if there was an error
+            stop_signal.store(true, Ordering::SeqCst);
+            log::error!("Fullscreen renderer failed: {}", e);
+            Err(format!("Fullscreen renderer failed: {}", e))
+        }
+    };
+    
+    // Clean up the lock file
     remove_lock_file();
     
     result
@@ -684,7 +824,8 @@ impl FullscreenUpscalerUi {
         upscaler: Box<dyn Upscaler>,
         algorithm: Option<UpscalingAlgorithm>,
     ) -> Box<Self> {
-        // Get upscaler information
+        // We can't actually create the UI here because we need the CreationContext
+        // from eframe, so this is just a placeholder that creates the resources
         let upscaler_name = upscaler.name().to_string();
         let upscaler_quality = upscaler.quality();
         
@@ -705,6 +846,8 @@ impl FullscreenUpscalerUi {
             last_upscale_time: 0.0,
             input_size: (0, 0),
             output_size: (0, 0),
+            source_window_info: None,
+            capture_target: None,
         })
     }
 } 
