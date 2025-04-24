@@ -1044,7 +1044,7 @@ impl AppState {
                 // Check if we have a buffer
                 if let Some(buffer) = &self.upscaling_buffer {
                     // Get latest frame if available
-                    if let Ok(frame) = buffer.get_latest_frame() {
+                    if let Ok(Some(frame)) = buffer.get_latest_frame() {
                         // Get upscaler reference
                         if let Some(upscaler) = &mut self.upscaler {
                             // Track processing time
@@ -1237,8 +1237,11 @@ impl AppState {
             None
         };
         
+        // Convert fps from f32 to u32
+        let fps = self.profile.fps as u32;
+        
         // Instead of launching a new window, use start_upscaling_mode to modify the current window
-        if let Err(e) = self.start_upscaling_mode(target, tech, quality, self.profile.fps, algorithm) {
+        if let Err(e) = self.start_upscaling_mode(target, tech, quality, fps, algorithm) {
             log::error!("Failed to start upscaling mode: {}", e);
             self.status_message = format!("Failed to start upscaling: {}", e);
             self.status_message_type = StatusMessageType::Error;
