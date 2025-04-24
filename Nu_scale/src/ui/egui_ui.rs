@@ -722,7 +722,8 @@ impl AppState {
                          0 => "Auto", // Assuming 0 is Auto/None
                          1 => "AMD FSR",
                          2 => "NVIDIA DLSS",
-                         3 => "Fallback/Basic",
+                         3 => "CUDA GPU",  // Add this option
+                         4 => "Fallback/Basic",
                          _ => "Unknown",
                     };
                     
@@ -734,7 +735,8 @@ impl AppState {
                             ui.selectable_value(&mut self.profile.upscaling_tech, 0, "Auto");
                             ui.selectable_value(&mut self.profile.upscaling_tech, 1, "AMD FSR");
                             ui.selectable_value(&mut self.profile.upscaling_tech, 2, "NVIDIA DLSS");
-                            ui.selectable_value(&mut self.profile.upscaling_tech, 3, "Fallback/Basic");
+                            ui.selectable_value(&mut self.profile.upscaling_tech, 3, "CUDA GPU");  // Add this option
+                            ui.selectable_value(&mut self.profile.upscaling_tech, 4, "Fallback/Basic");
                             // Removed Custom as it wasn't in the Profile struct definition
                         });
                 });
@@ -1099,11 +1101,12 @@ impl AppState {
         
         // Map technology and quality
         let tech = match self.profile.upscaling_tech {
-            0 => UpscalingTechnology::FSR,
-            1 => UpscalingTechnology::DLSS,
-            2 => UpscalingTechnology::Fallback,
-            3 => UpscalingTechnology::Fallback,
-            _ => UpscalingTechnology::Fallback,
+            0 => UpscalingTechnology::FSR,       // Auto defaults to FSR
+            1 => UpscalingTechnology::FSR,       // FSR
+            2 => UpscalingTechnology::DLSS,      // DLSS
+            3 => UpscalingTechnology::CUDA,      // CUDA
+            4 => UpscalingTechnology::Fallback,  // Fallback
+            _ => UpscalingTechnology::Fallback,  // Default
         };
         
         let quality = match self.profile.upscaling_quality {
@@ -1176,10 +1179,11 @@ impl AppState {
 
         // Map tech to string
         let tech_str = match self.profile.upscaling_tech {
-            0 => "fsr",
-            1 => "dlss",
-            2 => "fallback",
-            3 => "fallback",
+            0 => "fsr",        // Auto defaults to FSR
+            1 => "fsr",        // FSR
+            2 => "dlss",       // DLSS
+            3 => "cuda",       // CUDA
+            4 => "fallback",   // Fallback
             _ => "fallback",
         };
 

@@ -5,6 +5,7 @@ use std::path::Path;
 pub mod fsr;
 pub mod dlss;
 pub mod common;
+pub mod cuda;
 
 use common::UpscalingAlgorithm;
 
@@ -26,6 +27,8 @@ pub enum UpscalingTechnology {
     FSR,
     // NVIDIA Deep Learning Super Sampling
     DLSS,
+    // CUDA-accelerated
+    CUDA,
     // Fallback to simple bilinear/bicubic
     Fallback,
 }
@@ -115,6 +118,34 @@ pub fn create_upscaler(
                 }
             }
             let upscaler = dlss::DlssUpscaler::new(quality)?;
+            Ok(Box::new(upscaler))
+        },
+        UpscalingTechnology::CUDA => {
+            if !cuda::CudaUpscaler::is_supported() {
+                log::info!("CUDA not supported, checking other technologies");
+                
+                // Try FSR next
+                if fsr::FsrUpscaler::is_supported() {
+                    log::info!("Falling back to FSR");
+                    let upscaler = fsr::FsrUpscaler::new(quality)?;
+                    return Ok(Box::new(upscaler));
+                }
+                
+                // Try DLSS next
+                if dlss::DlssUpscaler::is_supported() {
+                    log::info!("Falling back to DLSS");
+                    let upscaler = dlss::DlssUpscaler::new(quality)?;
+                    return Ok(Box::new(upscaler));
+                }
+                
+                // Finally fall back to basic
+                log::info!("No GPU acceleration available, falling back to basic upscaling");
+                return create_basic_upscaler(quality, algorithm);
+            }
+            
+            // Create CUDA upscaler with the specified algorithm
+            let alg = algorithm.unwrap_or(UpscalingAlgorithm::Lanczos3);
+            let upscaler = cuda::CudaUpscaler::new(quality, alg)?;
             Ok(Box::new(upscaler))
         },
         UpscalingTechnology::None => {

@@ -96,6 +96,7 @@ fn main() -> Result<()> {
         let tech = match tech_str {
             "fsr" => UpscalingTechnology::FSR,
             "dlss" => UpscalingTechnology::DLSS,
+            "cuda" => UpscalingTechnology::CUDA,
             "fallback" | _ => UpscalingTechnology::Fallback,
         };
         
