@@ -721,7 +721,7 @@ impl AppState {
                          0 => "Auto", // Assuming 0 is Auto/None
                          1 => "AMD FSR",
                          2 => "NVIDIA DLSS",
-                         3 => "CUDA GPU",  // Add this option
+                         3 => "GPU (Vulkan)",  // Changed from CUDA
                          4 => "Fallback/Basic",
                          _ => "Unknown",
                     };
@@ -734,9 +734,8 @@ impl AppState {
                             ui.selectable_value(&mut self.profile.upscaling_tech, 0, "Auto");
                             ui.selectable_value(&mut self.profile.upscaling_tech, 1, "AMD FSR");
                             ui.selectable_value(&mut self.profile.upscaling_tech, 2, "NVIDIA DLSS");
-                            ui.selectable_value(&mut self.profile.upscaling_tech, 3, "CUDA GPU");  // Add this option
+                            ui.selectable_value(&mut self.profile.upscaling_tech, 3, "GPU (Vulkan)");  // Changed from CUDA
                             ui.selectable_value(&mut self.profile.upscaling_tech, 4, "Fallback/Basic");
-                            // Removed Custom as it wasn't in the Profile struct definition
                         });
                 });
                 
@@ -768,8 +767,8 @@ impl AppState {
                         });
                 });
                 
-                // Only show algorithm selection for Traditional/Fallback upscaling (index 3)
-                if self.profile.upscaling_tech == 3 {
+                // Only show algorithm selection for GPU or Fallback upscaling (index 3 or 4)
+                if self.profile.upscaling_tech == 3 || self.profile.upscaling_tech == 4 {
                     ui.add_space(8.0);
                     
                     // Upscaling algorithm is usize
@@ -1001,68 +1000,10 @@ impl AppState {
         
         log::info!("Capture thread started for source: {:?}", source);
         
-        // First check if CUDA is supported for GPU acceleration
-        let use_cuda_acceleration = crate::upscale::cuda::CudaUpscaler::is_supported();
-        
-        log::info!("CUDA GPU acceleration available: {}", use_cuda_acceleration);
-        
-        // Create the appropriate upscaler based on technology with CUDA acceleration if available
-        let upscaler = match technology {
-            UpscalingTechnology::DLSS => {
-                if crate::upscale::dlss::DlssUpscaler::is_supported() {
-                    let mut dlss = crate::upscale::dlss::DlssUpscaler::new(quality)?;
-                    // Enable GPU acceleration if CUDA is available
-                    if use_cuda_acceleration {
-                        log::info!("Using CUDA to accelerate DLSS processing");
-                        // In a real implementation, this would configure DLSS to use CUDA
-                        // For now, we just log the intent
-                    }
-                    Box::new(dlss) as Box<dyn Upscaler>
-                } else if use_cuda_acceleration {
-                    log::info!("DLSS not supported, falling back to CUDA upscaling");
-                    let alg = algorithm.unwrap_or(UpscalingAlgorithm::Lanczos3);
-                    Box::new(crate::upscale::cuda::CudaUpscaler::new(quality, alg)?) as Box<dyn Upscaler>
-                } else {
-                    log::info!("DLSS and CUDA not supported, falling back to basic upscaling");
-                    let alg = algorithm.unwrap_or(UpscalingAlgorithm::Lanczos3);
-                    Box::new(crate::upscale::common::BasicUpscaler::with_algorithm(quality, alg)) as Box<dyn Upscaler>
-                }
-            },
-            UpscalingTechnology::FSR => {
-                if crate::upscale::fsr::FsrUpscaler::is_supported() {
-                    let mut fsr = crate::upscale::fsr::FsrUpscaler::new(quality)?;
-                    // Enable GPU acceleration if CUDA is available
-                    if use_cuda_acceleration {
-                        log::info!("Using CUDA to accelerate FSR processing");
-                        // In a real implementation, this would configure FSR to use CUDA
-                        // For now, we just log the intent
-                    }
-                    Box::new(fsr) as Box<dyn Upscaler>
-                } else if use_cuda_acceleration {
-                    log::info!("FSR not supported, falling back to CUDA upscaling");
-                    let alg = algorithm.unwrap_or(UpscalingAlgorithm::Lanczos3);
-                    Box::new(crate::upscale::cuda::CudaUpscaler::new(quality, alg)?) as Box<dyn Upscaler>
-                } else {
-                    log::info!("FSR and CUDA not supported, falling back to basic upscaling");
-                    let alg = algorithm.unwrap_or(UpscalingAlgorithm::Lanczos3);
-                    Box::new(crate::upscale::common::BasicUpscaler::with_algorithm(quality, alg)) as Box<dyn Upscaler>
-                }
-            },
-            UpscalingTechnology::CUDA => {
-                if use_cuda_acceleration {
-                    let alg = algorithm.unwrap_or(UpscalingAlgorithm::Lanczos3);
-                    Box::new(crate::upscale::cuda::CudaUpscaler::new(quality, alg)?) as Box<dyn Upscaler>
-                } else {
-                    log::info!("CUDA not supported, falling back to basic upscaling");
-                    let alg = algorithm.unwrap_or(UpscalingAlgorithm::Lanczos3);
-                    Box::new(crate::upscale::common::BasicUpscaler::with_algorithm(quality, alg)) as Box<dyn Upscaler>
-                }
-            },
-            UpscalingTechnology::Fallback | UpscalingTechnology::None => {
-                let alg = algorithm.unwrap_or(UpscalingAlgorithm::Lanczos3);
-                Box::new(crate::upscale::common::BasicUpscaler::with_algorithm(quality, alg)) as Box<dyn Upscaler>
-            }
-        };
+        // Create the upscaler using the factory function
+        // No need for separate CUDA checks here anymore
+        let upscaler = create_upscaler(technology, quality, algorithm)?;
+        log::info!("Upscaler created: {}", upscaler.name());
         
         // Store references for cleanup and use
         self.upscaling_buffer = Some(buffer);
@@ -1252,7 +1193,7 @@ impl AppState {
             0 => UpscalingTechnology::FSR,       // Auto defaults to FSR
             1 => UpscalingTechnology::FSR,       // FSR
             2 => UpscalingTechnology::DLSS,      // DLSS
-            3 => UpscalingTechnology::CUDA,      // CUDA
+            3 => UpscalingTechnology::GPU,       // Changed from CUDA
             4 => UpscalingTechnology::Fallback,  // Fallback
             _ => UpscalingTechnology::Fallback,  // Default
         };
@@ -1266,12 +1207,13 @@ impl AppState {
         };
         
         // Determine algorithm based on technology
-        let algorithm = if tech == UpscalingTechnology::Fallback {
+        // Only provide algorithm if Fallback or GPU is selected
+        let algorithm = if tech == UpscalingTechnology::Fallback || tech == UpscalingTechnology::GPU {
             match self.profile.upscaling_algorithm {
                 0 => Some(UpscalingAlgorithm::Lanczos3),
                 1 => Some(UpscalingAlgorithm::NearestNeighbor),
                 2 => Some(UpscalingAlgorithm::Bilinear),
-                4 => Some(UpscalingAlgorithm::Bicubic),
+                3 => Some(UpscalingAlgorithm::Bicubic), // Corrected Bicubic index if it was wrong before
                 _ => Some(UpscalingAlgorithm::Lanczos3),
             }
         } else {
@@ -1321,7 +1263,7 @@ impl AppState {
             0 => "fsr",        // Auto defaults to FSR
             1 => "fsr",        // FSR
             2 => "dlss",       // DLSS
-            3 => "cuda",       // CUDA
+            3 => "gpu",        // Changed from cuda
             4 => "fallback",   // Fallback
             _ => "fallback",
         };
@@ -1336,8 +1278,9 @@ impl AppState {
         };
 
         // Get algorithm string if needed
+        // Only add if Fallback or GPU is selected (index 3 or 4)
         let mut alg_arg = Vec::new();
-        if self.profile.upscaling_tech == 3 { // Fallback mode uses algorithm
+        if self.profile.upscaling_tech == 3 || self.profile.upscaling_tech == 4 {
             let alg_str = match self.profile.upscaling_algorithm {
                 0 => "lanczos3",
                 1 => "nearest",
