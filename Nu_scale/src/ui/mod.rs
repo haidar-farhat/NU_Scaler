@@ -61,6 +61,7 @@ pub fn run_fullscreen_upscaler(
     upscaler: UpscalingTechnology,
     quality: UpscalingQuality,
     algorithm: Option<UpscalingAlgorithm>,
+    capture_target: crate::capture::CaptureTarget,
 ) -> Result<(), String> {
     crate::renderer::fullscreen::run_fullscreen_upscaler(
         Arc::new(frame_buffer),
@@ -68,6 +69,7 @@ pub fn run_fullscreen_upscaler(
         upscaler,
         quality,
         algorithm,
+        capture_target,
     )
 }
 
