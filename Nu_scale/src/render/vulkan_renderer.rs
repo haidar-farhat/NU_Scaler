@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::mem::MaybeUninit;
 use ash::{vk, Entry, Instance, Device};
 use log::{debug, error, info};
 use crate::upscale::common::UpscalingAlgorithm;
@@ -29,18 +30,35 @@ impl VulkanRenderer {
         // For now, just create a stub implementation
         info!("Initialized Vulkan renderer stub");
         
+        // Use null handles for things that will be initialized later
+        let null_physical_device = vk::PhysicalDevice::null();
+        let null_queue = vk::Queue::null();
+        let null_command_pool = vk::CommandPool::null();
+        let null_command_buffer = vk::CommandBuffer::null();
+        let null_pipeline = vk::Pipeline::null();
+        let null_pipeline_layout = vk::PipelineLayout::null();
+        let null_descriptor_set_layout = vk::DescriptorSetLayout::null();
+        let null_descriptor_pool = vk::DescriptorPool::null();
+        
+        // Create uninitialized Instance and Device
+        let mut instance_uninit = MaybeUninit::<Instance>::uninit();
+        let mut device_uninit = MaybeUninit::<Device>::uninit();
+        
+        // We'll properly initialize them later in init(), for now we just need to
+        // create the struct with placeholders
+        
         Ok(Self {
             entry,
-            instance: unsafe { std::mem::zeroed() }, // These will be properly initialized later
-            physical_device: unsafe { std::mem::zeroed() },
-            device: unsafe { std::mem::zeroed() },
-            queue: unsafe { std::mem::zeroed() },
-            command_pool: unsafe { std::mem::zeroed() },
-            command_buffer: unsafe { std::mem::zeroed() },
-            pipeline: unsafe { std::mem::zeroed() },
-            pipeline_layout: unsafe { std::mem::zeroed() },
-            descriptor_set_layout: unsafe { std::mem::zeroed() },
-            descriptor_pool: unsafe { std::mem::zeroed() },
+            instance: unsafe { instance_uninit.assume_init() },
+            physical_device: null_physical_device,
+            device: unsafe { device_uninit.assume_init() },
+            queue: null_queue,
+            command_pool: null_command_pool,
+            command_buffer: null_command_buffer,
+            pipeline: null_pipeline,
+            pipeline_layout: null_pipeline_layout,
+            descriptor_set_layout: null_descriptor_set_layout,
+            descriptor_pool: null_descriptor_pool,
             descriptor_sets: Vec::new(),
             initialized: false,
         })
