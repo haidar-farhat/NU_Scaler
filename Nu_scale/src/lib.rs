@@ -7,6 +7,7 @@ pub mod ui;
 pub mod upscale;
 pub mod renderer;
 pub mod render;
+pub mod gpu;
 pub mod logger;
 
 // Explicitly re-export top-level modules

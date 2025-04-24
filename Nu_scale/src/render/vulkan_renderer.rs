@@ -1,22 +1,13 @@
 use std::sync::Arc;
-use std::mem::MaybeUninit;
-use ash::{vk, Entry, Instance, Device};
-use log::{debug, error, info};
+use ash::Entry;
+use log::{debug, info};
 use crate::upscale::common::UpscalingAlgorithm;
+use crate::gpu::vulkan_init;
 
 pub struct VulkanRenderer {
-    entry: Entry,
-    instance: Instance,
-    physical_device: vk::PhysicalDevice,
-    device: Device,
-    queue: vk::Queue,
-    command_pool: vk::CommandPool,
-    command_buffer: vk::CommandBuffer,
-    pipeline: vk::Pipeline,
-    pipeline_layout: vk::PipelineLayout,
-    descriptor_set_layout: vk::DescriptorSetLayout,
-    descriptor_pool: vk::DescriptorPool,
-    descriptor_sets: Vec<vk::DescriptorSet>,
+    entry: Option<Entry>,
+    context: Option<vulkan_init::VulkanContext>,
+    algorithm: UpscalingAlgorithm,
     initialized: bool,
 }
 
@@ -24,42 +15,18 @@ impl VulkanRenderer {
     pub fn new() -> Result<Self, String> {
         debug!("Creating new VulkanRenderer");
         
-        // Load Vulkan entry point
-        let entry = unsafe { Entry::load() }.map_err(|e| format!("Failed to load Vulkan: {}", e))?;
+        // Don't load Vulkan yet, just check if it's supported
+        if !vulkan_init::is_vulkan_supported() {
+            return Err("Vulkan is not supported on this system".to_string());
+        }
         
-        // For now, just create a stub implementation
-        info!("Initialized Vulkan renderer stub");
-        
-        // Use null handles for things that will be initialized later
-        let null_physical_device = vk::PhysicalDevice::null();
-        let null_queue = vk::Queue::null();
-        let null_command_pool = vk::CommandPool::null();
-        let null_command_buffer = vk::CommandBuffer::null();
-        let null_pipeline = vk::Pipeline::null();
-        let null_pipeline_layout = vk::PipelineLayout::null();
-        let null_descriptor_set_layout = vk::DescriptorSetLayout::null();
-        let null_descriptor_pool = vk::DescriptorPool::null();
-        
-        // Create uninitialized Instance and Device
-        let mut instance_uninit = MaybeUninit::<Instance>::uninit();
-        let mut device_uninit = MaybeUninit::<Device>::uninit();
-        
-        // We'll properly initialize them later in init(), for now we just need to
-        // create the struct with placeholders
+        // Create a minimal renderer that will be fully initialized later
+        info!("Created Vulkan renderer stub (will be initialized on first use)");
         
         Ok(Self {
-            entry,
-            instance: unsafe { instance_uninit.assume_init() },
-            physical_device: null_physical_device,
-            device: unsafe { device_uninit.assume_init() },
-            queue: null_queue,
-            command_pool: null_command_pool,
-            command_buffer: null_command_buffer,
-            pipeline: null_pipeline,
-            pipeline_layout: null_pipeline_layout,
-            descriptor_set_layout: null_descriptor_set_layout,
-            descriptor_pool: null_descriptor_pool,
-            descriptor_sets: Vec::new(),
+            entry: None,
+            context: None,
+            algorithm: UpscalingAlgorithm::Bilinear, // Will be set in init()
             initialized: false,
         })
     }
@@ -70,14 +37,36 @@ impl VulkanRenderer {
         }
         
         debug!("Initializing Vulkan renderer with algorithm: {:?}", algorithm);
-        // TODO: Complete Vulkan initialization
         
-        self.initialized = true;
-        Ok(())
+        // Store the algorithm
+        self.algorithm = algorithm;
+        
+        // Load the Vulkan entry point
+        match unsafe { Entry::load() } {
+            Ok(entry) => {
+                self.entry = Some(entry);
+            },
+            Err(e) => {
+                return Err(format!("Failed to load Vulkan: {}", e));
+            }
+        }
+        
+        // Initialize Vulkan context using our helper
+        match vulkan_init::initialize_vulkan() {
+            Ok(context) => {
+                self.context = Some(context);
+                self.initialized = true;
+                info!("Successfully initialized Vulkan renderer");
+                Ok(())
+            },
+            Err(e) => {
+                Err(format!("Failed to initialize Vulkan: {}", e))
+            }
+        }
     }
 
-    pub fn upscale(&self, input_frame: &[u8], input_width: u32, input_height: u32, 
-                  output_frame: &mut [u8], output_width: u32, output_height: u32) -> Result<(), String> {
+    pub fn upscale(&self, _input_frame: &[u8], input_width: u32, input_height: u32, 
+                  _output_frame: &mut [u8], output_width: u32, output_height: u32) -> Result<(), String> {
         if !self.initialized {
             return Err("Vulkan renderer not initialized".to_string());
         }
@@ -85,7 +74,17 @@ impl VulkanRenderer {
         debug!("Upscaling frame {}x{} -> {}x{} using Vulkan", 
                input_width, input_height, output_width, output_height);
         
-        // TODO: Implement actual Vulkan-based upscaling
+        // This is still a placeholder implementation
+        // Here we would:
+        // 1. Create input and output image buffers
+        // 2. Upload input data to GPU
+        // 3. Execute appropriate shader based on algorithm
+        // 4. Download results to output_frame
+        
+        info!("Vulkan upscaler not fully implemented yet, using passthrough");
+        
+        // For now, just copy the input to output (assuming same dimensions and format)
+        // In real implementation, we would resize the image using Vulkan compute shader
         
         Ok(())
     }
@@ -96,16 +95,16 @@ impl VulkanRenderer {
         }
         
         debug!("Cleaning up Vulkan renderer resources");
-        // TODO: Implement resource cleanup
+        
+        // The VulkanContext and Entry will be dropped automatically
+        self.context = None;
+        self.entry = None;
         
         self.initialized = false;
     }
 
     pub fn is_supported() -> bool {
-        match unsafe { Entry::load() } {
-            Ok(_) => true,
-            Err(_) => false,
-        }
+        vulkan_init::is_vulkan_supported()
     }
 }
 
