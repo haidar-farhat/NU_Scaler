@@ -477,6 +477,78 @@ impl FullscreenUpscalerUi {
         
         if all_black {
             log::warn!("Input frame appears to be all black (based on sampling)!");
+            
+            // Enhanced logging to debug the capture issue
+            log::debug!("First 10 pixels of the frame:");
+            for (i, pixel) in frame.as_raw().chunks(4).take(10).enumerate() {
+                log::debug!("Pixel {}: R={}, G={}, B={}, A={}", i, pixel[0], pixel[1], pixel[2], pixel[3]);
+            }
+            
+            // Try to diagnose the capture issue
+            let source_info = if let Some(info) = &self.source_window_info {
+                format!("Source window: pos=({}, {}), size={}x{}", info.0, info.1, info.2, info.3)
+            } else if let Some(target) = &self.capture_target {
+                format!("Capture target: {:?}", target)
+            } else {
+                "Unknown source".to_string()
+            };
+            
+            log::warn!("{}", source_info);
+            
+            // Return a test pattern instead of the black frame for debugging
+            // This will help verify if the rendering pipeline is working
+            let mut test_image = RgbaImage::new(frame.width(), frame.height());
+            for y in 0..frame.height() {
+                for x in 0..frame.width() {
+                    // Create a colorful test pattern
+                    let r = ((x as f32 / frame.width() as f32) * 255.0) as u8;
+                    let g = ((y as f32 / frame.height() as f32) * 255.0) as u8;
+                    let b = (((x + y) as f32 / (frame.width() + frame.height()) as f32) * 255.0) as u8;
+                    test_image.put_pixel(x, y, image::Rgba([r, g, b, 255]));
+                }
+            }
+            
+            log::info!("Generated test pattern image as replacement for black frame");
+            // Continue processing with the test pattern
+            // This will help diagnose if the issue is with the capture or the rendering
+            let test_frame = test_image;
+            
+            // Check if upscaler needs initialization
+            if self.upscaler.needs_initialization() || 
+               test_frame.width() != self.upscaler.input_width() || 
+               test_frame.height() != self.upscaler.input_height() {
+                
+                log::info!("Initializing upscaler with dimensions {}x{} -> {}x{}", 
+                          test_frame.width(), test_frame.height(), 
+                          (test_frame.width() as f32 * 1.5) as u32, 
+                          (test_frame.height() as f32 * 1.5) as u32);
+                
+                // Initialize with 1.5x scale factor by default
+                let upscaler_result = self.upscaler.initialize(
+                    test_frame.width(), 
+                    test_frame.height(), 
+                    (test_frame.width() as f32 * 1.5) as u32, 
+                    (test_frame.height() as f32 * 1.5) as u32
+                );
+                
+                if let Err(e) = upscaler_result {
+                    log::error!("Failed to initialize upscaler: {}", e);
+                    return Err(anyhow::anyhow!("Upscaler initialization failed: {}", e));
+                }
+            }
+            
+            // Use the configured upscaler to process the test frame
+            log::debug!("Upscaling test pattern using algorithm: {:?}", self.algorithm);
+            match match self.algorithm {
+                Some(alg) => self.upscaler.upscale_with_algorithm(&test_frame, alg),
+                None => self.upscaler.upscale(&test_frame)
+            } {
+                Ok(upscaled) => return Ok(upscaled),
+                Err(e) => {
+                    log::error!("Upscaling test pattern failed: {}", e);
+                    return Err(anyhow::anyhow!("Upscaling test pattern failed: {}", e));
+                }
+            }
         }
         
         // Check if upscaler needs initialization

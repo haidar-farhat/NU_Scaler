@@ -132,56 +132,114 @@ impl PlatformScreenCapture {
     
     /// Captures a window by HWND
     unsafe fn capture_window(&self, hwnd: HWND) -> Result<RgbaImage> {
+        log::debug!("Capturing window with HWND: {:?}", hwnd.0);
+        
+        // Check if window is valid and visible
+        if !unsafe { IsWindow(hwnd) }.as_bool() {
+            return Err(anyhow!(CaptureError::WindowNotFound));
+        }
+        
+        // Check if the window is minimized, as we can't capture minimized windows
+        let mut placement = WINDOWPLACEMENT {
+            length: size_of::<WINDOWPLACEMENT>() as u32,
+            ..Default::default()
+        };
+        unsafe { GetWindowPlacement(hwnd, &mut placement) };
+        
+        if placement.showCmd.0 == SW_SHOWMINIMIZED.0 {
+            log::warn!("Window is minimized, can't capture content");
+            return Err(anyhow!(CaptureError::CaptureFailed("Window is minimized".into())));
+        }
+        
+        // Get window dimensions - try both client rect and window rect
+        let mut client_rect = RECT::default();
+        let mut window_rect = RECT::default();
+        unsafe { GetClientRect(hwnd, &mut client_rect) };
+        unsafe { GetWindowRect(hwnd, &mut window_rect) };
+        
+        let client_width = client_rect.right as u32;
+        let client_height = client_rect.bottom as u32;
+        let window_width = (window_rect.right - window_rect.left) as u32;
+        let window_height = (window_rect.bottom - window_rect.top) as u32;
+        
+        // Use the larger of the two to ensure we capture everything
+        let width = client_width.max(window_width);
+        let height = client_height.max(window_height);
+        
+        log::debug!("Window dimensions: client={}x{}, window={}x{}, using={}x{}", 
+                  client_width, client_height, window_width, window_height, width, height);
+        
+        if width == 0 || height == 0 {
+            log::warn!("Window has zero size: {}x{}", width, height);
+            return Err(anyhow!(CaptureError::CaptureFailed("Window has zero size".into())));
+        }
+        
         // Get window DC
         let window_dc = unsafe { GetDC(hwnd) };
         if window_dc.is_invalid() {
+            log::error!("Failed to get window DC");
             return Err(anyhow!(CaptureError::CaptureFailed("Failed to get window DC".into())));
         }
         
-        // Get window dimensions
-        let mut rect = RECT::default();
-        unsafe { GetClientRect(hwnd, &mut rect) };
-        let width = rect.right as u32;
-        let height = rect.bottom as u32;
-        
-        if width == 0 || height == 0 {
-            unsafe { ReleaseDC(hwnd, window_dc) };
-            return Err(anyhow!(CaptureError::CaptureFailed("Window has zero size".into())));
-        }
+        // Get desktop DC as backup
+        let desktop_dc = unsafe { GetDC(HWND(0)) };
         
         // Create compatible DC and bitmap
         let compatible_dc = unsafe { CreateCompatibleDC(window_dc) };
         if compatible_dc.is_invalid() {
             unsafe { ReleaseDC(hwnd, window_dc) };
+            unsafe { ReleaseDC(HWND(0), desktop_dc) };
+            log::error!("Failed to create compatible DC");
             return Err(anyhow!(CaptureError::CaptureFailed("Failed to create compatible DC".into())));
         }
         
-        let bitmap = unsafe { CreateCompatibleBitmap(window_dc, width as i32, height as i32) };
+        // Create bitmap compatible with desktop to ensure proper color depth
+        let bitmap = unsafe { CreateCompatibleBitmap(desktop_dc, width as i32, height as i32) };
         if bitmap.is_invalid() {
             unsafe { DeleteDC(compatible_dc) };
             unsafe { ReleaseDC(hwnd, window_dc) };
+            unsafe { ReleaseDC(HWND(0), desktop_dc) };
+            log::error!("Failed to create compatible bitmap");
             return Err(anyhow!(CaptureError::CaptureFailed("Failed to create compatible bitmap".into())));
         }
         
         // Select bitmap into DC
         let old_bitmap = unsafe { SelectObject(compatible_dc, bitmap) };
         
-        // Copy window content to bitmap
-        if !unsafe { 
-            BitBlt(
+        // Try PrintWindow first for better compatibility with DWM and layered windows
+        log::debug!("Attempting to capture using PrintWindow");
+        let print_result = unsafe { 
+            PrintWindow(
+                hwnd,
                 compatible_dc,
-                0, 0,
-                width as i32, height as i32,
-                window_dc,
-                0, 0,
-                SRCCOPY,
+                PW_CLIENTONLY,
             )
-        }.as_bool() {
-            unsafe { SelectObject(compatible_dc, old_bitmap) };
-            unsafe { DeleteObject(bitmap) };
-            unsafe { DeleteDC(compatible_dc) };
-            unsafe { ReleaseDC(hwnd, window_dc) };
-            return Err(anyhow!(CaptureError::CaptureFailed("BitBlt failed".into())));
+        }.as_bool();
+        
+        let mut capture_method = "PrintWindow";
+        
+        // If PrintWindow failed, fallback to BitBlt
+        if !print_result {
+            log::warn!("PrintWindow failed, falling back to BitBlt");
+            capture_method = "BitBlt";
+            if !unsafe { 
+                BitBlt(
+                    compatible_dc,
+                    0, 0,
+                    width as i32, height as i32,
+                    window_dc,
+                    0, 0,
+                    SRCCOPY,
+                )
+            }.as_bool() {
+                unsafe { SelectObject(compatible_dc, old_bitmap) };
+                unsafe { DeleteObject(bitmap) };
+                unsafe { DeleteDC(compatible_dc) };
+                unsafe { ReleaseDC(hwnd, window_dc) };
+                unsafe { ReleaseDC(HWND(0), desktop_dc) };
+                log::error!("BitBlt fallback also failed");
+                return Err(anyhow!(CaptureError::CaptureFailed("Window capture failed (BitBlt)".into())));
+            }
         }
         
         // Get bitmap data
@@ -199,7 +257,7 @@ impl PlatformScreenCapture {
         let mut buffer = vec![0u8; (width * height * 4) as usize];
         
         // Get bitmap bits
-        if unsafe {
+        let dibit_result = unsafe {
             GetDIBits(
                 compatible_dc,
                 bitmap,
@@ -212,34 +270,118 @@ impl PlatformScreenCapture {
                 },
                 DIB_RGB_COLORS,
             )
-        } == 0 {
+        };
+        
+        if dibit_result == 0 {
             unsafe { SelectObject(compatible_dc, old_bitmap) };
             unsafe { DeleteObject(bitmap) };
             unsafe { DeleteDC(compatible_dc) };
             unsafe { ReleaseDC(hwnd, window_dc) };
+            unsafe { ReleaseDC(HWND(0), desktop_dc) };
+            log::error!("GetDIBits failed");
             return Err(anyhow!(CaptureError::CaptureFailed("GetDIBits failed".into())));
         }
         
-        // Clean up
+        // Clean up GDI objects
         unsafe { SelectObject(compatible_dc, old_bitmap) };
         unsafe { DeleteObject(bitmap) };
         unsafe { DeleteDC(compatible_dc) };
         unsafe { ReleaseDC(hwnd, window_dc) };
+        unsafe { ReleaseDC(HWND(0), desktop_dc) };
         
-        // Convert to image::RgbaImage (BGRA -> RGBA)
+        // Convert BGRA buffer to RGBA for image crate
         let mut image = RgbaImage::new(width, height);
-        for y in 0..height {
-            for x in 0..width {
-                let idx = ((y * width + x) * 4) as usize;
-                let blue = buffer[idx];
-                let green = buffer[idx + 1];
-                let red = buffer[idx + 2];
-                let alpha = buffer[idx + 3];
+        
+        // Check if the buffer is all black
+        let sample_count = 1000.min(buffer.len() / 4);
+        let all_black = buffer.chunks(4)
+            .take(sample_count)
+            .all(|pixel| pixel[0] == 0 && pixel[1] == 0 && pixel[2] == 0);
+        
+        if all_black {
+            log::warn!("Captured image appears to be all black (from {} samples). Capture method: {}", sample_count, capture_method);
+            
+            // Log some diagnostic information
+            let foreground_hwnd = unsafe { GetForegroundWindow() };
+            log::debug!("Current foreground window: {:?}, target window: {:?}", foreground_hwnd.0, hwnd.0);
+            
+            // Check if this is a layered window
+            let style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) };
+            let is_layered = (style & (WS_EX_LAYERED.0 as i32)) != 0;
+            log::debug!("Window has layered style: {}", is_layered);
+            
+            // If using BitBlt failed with a black image, try one more time with PrintWindow 
+            // and different flags if we didn't try it already
+            if capture_method == "BitBlt" {
+                log::debug!("Attempting one more capture with PrintWindow (PW_RENDERFULLCONTENT)");
                 
-                image.put_pixel(x, y, Rgba([red, green, blue, alpha]));
+                // Clean up and retry
+                let window_dc = unsafe { GetDC(hwnd) };
+                let compatible_dc = unsafe { CreateCompatibleDC(window_dc) };
+                let bitmap = unsafe { CreateCompatibleBitmap(desktop_dc, width as i32, height as i32) };
+                let old_bitmap = unsafe { SelectObject(compatible_dc, bitmap) };
+                
+                // Try with full content flag
+                let print_result = unsafe { 
+                    PrintWindow(
+                        hwnd,
+                        compatible_dc,
+                        PW_RENDERFULLCONTENT,
+                    )
+                }.as_bool();
+                
+                if print_result {
+                    // If successful, get the bitmap data again
+                    unsafe {
+                        GetDIBits(
+                            compatible_dc,
+                            bitmap,
+                            0,
+                            height,
+                            Some(buffer.as_mut_ptr() as *mut std::ffi::c_void),
+                            &mut BITMAPINFO {
+                                bmiHeader: bitmap_info,
+                                bmiColors: [RGBQUAD::default()],
+                            },
+                            DIB_RGB_COLORS,
+                        )
+                    };
+                    
+                    // Clean up
+                    unsafe { SelectObject(compatible_dc, old_bitmap) };
+                    unsafe { DeleteObject(bitmap) };
+                    unsafe { DeleteDC(compatible_dc) };
+                    unsafe { ReleaseDC(hwnd, window_dc) };
+                    
+                    log::debug!("Retry with PrintWindow (PW_RENDERFULLCONTENT) completed");
+                } else {
+                    log::warn!("Retry with PrintWindow also failed");
+                    
+                    // Clean up
+                    unsafe { SelectObject(compatible_dc, old_bitmap) };
+                    unsafe { DeleteObject(bitmap) };
+                    unsafe { DeleteDC(compatible_dc) };
+                    unsafe { ReleaseDC(hwnd, window_dc) };
+                }
             }
         }
         
+        // Convert the buffer to an image
+        for y in 0..height {
+            for x in 0..width {
+                let idx = ((y * width + x) * 4) as usize;
+                if idx + 3 < buffer.len() {
+                    let blue = buffer[idx];
+                    let green = buffer[idx + 1];
+                    let red = buffer[idx + 2];
+                    let alpha = buffer[idx + 3];
+                    
+                    image.put_pixel(x, y, Rgba([red, green, blue, alpha]));
+                }
+            }
+        }
+        
+        log::debug!("Window capture completed successfully: {}x{}", width, height);
         Ok(image)
     }
     

@@ -174,6 +174,12 @@ impl Default for AppState {
 
 impl eframe::App for AppState {
     fn update(&mut self, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
+        // Check for Alt+S to upscale window under cursor
+        if ctx.input(|i| i.modifiers.alt && i.key_pressed(eframe::egui::Key::S)) {
+            self.upscale_window_under_cursor(frame);
+            return;
+        }
+        
         // Check if we need to exit when in upscaling mode
         if crate::ui::is_upscaling_active() {
             if ctx.input(|i| i.key_pressed(eframe::egui::Key::Escape)) {
@@ -1474,40 +1480,68 @@ impl AppState {
             _ => None
         };
         
-        // Get target FPS
-        let fps = self.profile.fps as u32;
-        log::debug!("Using target FPS: {}", fps);
+        // Maximize the window for fullscreen display
+        if let Err(err) = self.toggle_fullscreen_mode(frame) {
+            log::error!("Failed to enter fullscreen mode: {}", err);
+            self.status_message = format!("Failed to enter fullscreen mode: {}", err);
+            self.status_message_type = StatusMessageType::Error;
+            return;
+        }
         
-        // Update UI
+        // Create capture thread and start upscaling
+        let frame_buffer = Arc::clone(&self.frame_buffer);
+        let stop_signal = Arc::clone(&self.stop_signal);
+        
+        // Reset the stop signal before starting
+        self.stop_signal.store(false, std::sync::atomic::Ordering::SeqCst);
+        
+        // Ensure we clear any existing frame buffer
+        if let Ok(mut buffer) = frame_buffer.frames.lock() {
+            buffer.clear();
+        }
+        
+        // Set upscaling flag
+        self.is_upscaling = true;
+        crate::ui::set_upscaling_active(true);
+        
+        // Start the capture in a background thread
+        let capture_status = Arc::clone(&self.capture_status);
+        let temp_status = Arc::clone(&self.temp_status_message);
+        let target_clone = capture_target.clone();
+        
+        // Spawn the capture thread
+        let capture_thread = std::thread::spawn(move || {
+            log::info!("Starting capture thread for target: {:?}", target_clone);
+            if let Err(e) = crate::capture::run_capture_thread(
+                target_clone,
+                frame_buffer,
+                stop_signal.clone(),
+                capture_status,
+                temp_status,
+            ) {
+                log::error!("Capture thread error: {}", e);
+            }
+        });
+        
+        // Set status message
         self.status_message = "Starting upscaling...".to_string();
         self.status_message_type = StatusMessageType::Info;
         
-        // Start upscaling
-        log::info!("Starting upscaling with tech={:?}, quality={:?}, algorithm={:?}", 
-                 upscaling_tech, upscaling_quality, upscaling_algorithm);
-        match self.start_upscaling_mode(
-            capture_target,
-            upscaling_tech,
-            upscaling_quality,
-            fps,
-            upscaling_algorithm,
-        ) {
-            Ok(()) => {
-                // Make the UI fullscreen
-                log::debug!("Setting application to fullscreen mode");
-                if let Err(e) = self.toggle_fullscreen_mode(frame) {
-                    log::error!("Failed to enter fullscreen mode: {}", e);
-                    self.status_message = format!("Failed to enter fullscreen mode: {}", e);
-                    self.status_message_type = StatusMessageType::Error;
-                } else {
-                    log::info!("Successfully entered fullscreen upscaling mode");
-                    self.status_message = "Upscaling in fullscreen mode".to_string();
-                    self.status_message_type = StatusMessageType::Success;
-                }
+        // Store thread handle if we want to join it later
+        self.scaling_process = Some(capture_thread);
+        
+        // Store upscaling stop signal
+        self.upscaling_stop_signal = Some(stop_signal);
+        
+        // Create the upscaler
+        match crate::upscale::create_upscaler(upscaling_tech, upscaling_quality, upscaling_algorithm) {
+            Ok(upscaler) => {
+                self.upscaler = Some(upscaler);
+                log::info!("Created upscaler: {}", self.upscaler.as_ref().unwrap().name());
             },
             Err(e) => {
-                log::error!("Failed to start upscaling: {}", e);
-                self.status_message = format!("Failed to start upscaling: {}", e);
+                log::error!("Failed to create upscaler: {}", e);
+                self.status_message = format!("Failed to create upscaler: {}", e);
                 self.status_message_type = StatusMessageType::Error;
             }
         }
@@ -1648,6 +1682,96 @@ impl AppState {
             ProfileUpscalingQuality::Quality => UpscalingQuality::Quality,
             ProfileUpscalingQuality::Balanced => UpscalingQuality::Balanced,
             ProfileUpscalingQuality::Performance => UpscalingQuality::Performance,
+        }
+    }
+
+    /// Get the window under the cursor
+    fn get_window_under_cursor(&self) -> Option<String> {
+        if let Ok(capturer) = crate::capture::create_capturer() {
+            if let Ok(windows) = capturer.list_windows() {
+                // Get the current cursor position
+                #[cfg(target_os = "windows")]
+                let cursor_pos = unsafe {
+                    use windows::Win32::Foundation::POINT;
+                    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+                    
+                    let mut point = POINT::default();
+                    if GetCursorPos(&mut point).as_bool() {
+                        Some((point.x, point.y))
+                    } else {
+                        None
+                    }
+                };
+                
+                #[cfg(not(target_os = "windows"))]
+                let cursor_pos = None;
+                
+                if let Some((x, y)) = cursor_pos {
+                    // Find the window at the cursor position
+                    for window in windows {
+                        let geom = window.geometry;
+                        if x >= geom.x && 
+                           y >= geom.y && 
+                           x < geom.x + geom.width as i32 && 
+                           y < geom.y + geom.height as i32 {
+                            // Found the window under cursor
+                            log::info!("Found window under cursor: {}", window.title);
+                            return Some(window.title);
+                        }
+                    }
+                }
+                
+                // If we couldn't find by position, try to get the foreground window
+                #[cfg(target_os = "windows")]
+                {
+                    use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+                    
+                    let hwnd = unsafe { GetForegroundWindow() };
+                    for window in windows {
+                        if let crate::capture::platform::WindowId::Windows(id) = window.id {
+                            if id == hwnd.0 as usize {
+                                log::info!("Found active window: {}", window.title);
+                                return Some(window.title);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+    
+    /// Launch upscaling for the window under cursor (triggered by shortcut)
+    fn upscale_window_under_cursor(&mut self, frame: &mut eframe::Frame) {
+        log::info!("Upscaling window under cursor");
+        
+        // Get the window under cursor
+        if let Some(window_title) = self.get_window_under_cursor() {
+            // Update the profile to use this window
+            self.profile.capture_source = 1; // Window mode
+            self.profile.window_title = window_title.clone();
+            
+            // Find the window in our list and update the selection
+            for (i, title) in self.available_windows.iter().enumerate() {
+                if title == &window_title {
+                    self.selected_window_index = i;
+                    break;
+                }
+            }
+            
+            // If not found, add it to the list
+            if !self.available_windows.contains(&window_title) {
+                self.available_windows.push(window_title);
+                self.selected_window_index = self.available_windows.len() - 1;
+            }
+            
+            // Launch fullscreen upscaling for this window
+            log::info!("Launching fullscreen upscaling for selected window: {}", window_title);
+            self.launch_fullscreen_mode(frame);
+        } else {
+            log::warn!("No window found under cursor");
+            self.status_message = "No window found under cursor".to_string();
+            self.status_message_type = StatusMessageType::Error;
         }
     }
 }
