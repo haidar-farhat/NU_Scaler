@@ -18,13 +18,23 @@ pub fn init_logger(log_dir: Option<&str>, verbose: bool) -> Result<()> {
         INIT.call_once(|| {
             // Determine log level based on verbose flag
             let log_level = if verbose {
-                LevelFilter::Debug
+                LevelFilter::Trace
             } else {
                 LevelFilter::Info
             };
             
             let mut builder = env_logger::Builder::new();
+            // Set default logger level
             builder.filter_level(log_level);
+            
+            // For diagnosing the black screen issue, set specific modules to Trace
+            if verbose {
+                // Ensure upscaler and renderer modules get all log messages
+                builder.filter(Some("nu_scaler::upscale"), LevelFilter::Trace);
+                builder.filter(Some("nu_scaler::renderer"), LevelFilter::Trace);
+                builder.filter(Some("nu_scaler::capture"), LevelFilter::Trace);
+                builder.filter(Some("nu_scaler::ui"), LevelFilter::Trace);
+            }
             
             // If log_dir is provided, add a file logger
             if let Some(dir) = log_dir_owned {
