@@ -107,6 +107,10 @@ pub struct AppState {
     _phantom: PhantomData<()>,
     /// Currently running upscaling process (if any)
     scaling_process: Option<std::process::Child>,
+    /// Upscaler for the current upscaling mode
+    upscaler: Option<Box<dyn Upscaler>>,
+    /// Frames processed
+    frames_processed: usize,
 }
 
 // Type definition for upscaling buffer
@@ -162,29 +166,24 @@ impl Default for AppState {
             error_message: String::new(),
             _phantom: PhantomData,
             scaling_process: None,
+            upscaler: None,
+            frames_processed: 0,
         }
     }
 }
 
 impl eframe::App for AppState {
     fn update(&mut self, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
+        // Configure fonts if needed
         self.configure_fonts(ctx);
-
-        // Set dark mode for the UI
-        ctx.set_visuals(egui::Visuals::dark());
         
-        // Handle ESC key to exit fullscreen mode
-        if self.is_fullscreen && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.toggle_fullscreen_mode().ok();
-        }
-        
-        // Handle upscaling mode if active
+        // Check if we are in upscaling mode
         if self.is_upscaling {
             self.update_upscaling_mode(ctx);
             return;
         }
         
-        // Main app layout
+        // Regular UI rendering for normal mode
         egui::CentralPanel::default().show(ctx, |_ui| {
             // Top panel with app name and main actions
             egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
@@ -1000,9 +999,15 @@ impl AppState {
             stop_signal.clone(),
         )?;
         
-        // Store references for cleanup
+        // Create the appropriate upscaler based on technology
+        let upscaler = crate::upscale::create_upscaler(technology, quality, algorithm)?;
+        
+        // Store references for cleanup and use
         self.upscaling_buffer = Some(buffer);
         self.upscaling_stop_signal = Some(stop_signal);
+        
+        // Create entry in AppState to track the upscaler
+        self.upscaler = Some(upscaler);
         
         // Set state
         self.is_upscaling = true;
@@ -1013,6 +1018,25 @@ impl AppState {
     /// Update the application upscaling mode state
     /// Renders the captured frames with the upscaler
     fn update_upscaling_mode(&mut self, ctx: &eframe::egui::Context) {
+        // Check for ESC key to exit fullscreen mode
+        if ctx.input(|i| i.key_pressed(eframe::egui::Key::Escape)) {
+            log::info!("ESC pressed, exiting fullscreen mode");
+            
+            // Exit fullscreen mode
+            if self.is_fullscreen {
+                if let Err(e) = self.toggle_fullscreen_mode() {
+                    log::error!("Failed to exit fullscreen mode: {}", e);
+                }
+            }
+            
+            // Stop upscaling
+            if let Some(stop_signal) = &self.upscaling_stop_signal {
+                stop_signal.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+            
+            return;
+        }
+        
         // Clear the UI and display only the upscaled frame
         eframe::egui::CentralPanel::default()
             .frame(eframe::egui::Frame::none().fill(eframe::egui::Color32::BLACK))
@@ -1020,38 +1044,120 @@ impl AppState {
                 // Check if we have a buffer
                 if let Some(buffer) = &self.upscaling_buffer {
                     // Get latest frame if available
-                    if let Ok(Some(frame)) = buffer.get_latest_frame() {
-                        // Display the frame (upscaling would happen here)
-                        // For now, just display the raw frame
-                        let size = [frame.width() as _, frame.height() as _];
-                        
-                        // Convert frame to egui format
-                        let flat_samples = frame.as_flat_samples();
-                        let pixels = flat_samples.as_slice();
-                        
-                        // Create or update texture
-                        let texture = self.frame_texture.get_or_insert_with(|| {
-                            ui.ctx().load_texture(
-                                "captured_frame",
-                                eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels),
-                                eframe::egui::TextureOptions::LINEAR
-                            )
-                        });
-                        
-                        // Update existing texture if we already had one
-                        if texture.size() != size {
-                            *texture = ui.ctx().load_texture(
-                                "captured_frame",
-                                eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels),
-                                eframe::egui::TextureOptions::LINEAR
-                            );
+                    if let Ok(frame) = buffer.get_latest_frame() {
+                        // Get upscaler reference
+                        if let Some(upscaler) = &mut self.upscaler {
+                            // Track processing time
+                            let start_time = std::time::Instant::now();
+                            
+                            // Initialize upscaler if needed
+                            if upscaler.needs_initialization() {
+                                let input_width = frame.width();
+                                let input_height = frame.height();
+                                let output_width = (input_width as f32 * 1.5) as u32; // 1.5x upscaling
+                                let output_height = (input_height as f32 * 1.5) as u32;
+                                
+                                if let Err(e) = upscaler.initialize(
+                                    input_width, input_height, output_width, output_height
+                                ) {
+                                    log::error!("Failed to initialize upscaler: {}", e);
+                                }
+                            }
+                            
+                            // Upscale the frame
+                            match upscaler.upscale(&frame) {
+                                Ok(upscaled_frame) => {
+                                    // Calculate processing time
+                                    let processing_time = start_time.elapsed().as_secs_f32() * 1000.0; // in ms
+                                    
+                                    // Display the upscaled frame
+                                    let size = [upscaled_frame.width() as _, upscaled_frame.height() as _];
+                                    
+                                    // Convert frame to egui format
+                                    let pixels = upscaled_frame.as_raw();
+                                    
+                                    // Create or update texture
+                                    let texture = self.frame_texture.get_or_insert_with(|| {
+                                        ui.ctx().load_texture(
+                                            "upscaled_frame",
+                                            eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels),
+                                            eframe::egui::TextureOptions::LINEAR
+                                        )
+                                    });
+                                    
+                                    // Update existing texture if we already had one
+                                    if texture.size() != size {
+                                        *texture = ui.ctx().load_texture(
+                                            "upscaled_frame",
+                                            eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels),
+                                            eframe::egui::TextureOptions::LINEAR
+                                        );
+                                    } else {
+                                        texture.set(eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels), eframe::egui::TextureOptions::LINEAR);
+                                    }
+                                    
+                                    // Display the texture full screen
+                                    let available_size = ui.available_size();
+                                    ui.image(texture, available_size);
+                                    
+                                    // Show overlay with performance metrics
+                                    ui.painter().text(
+                                        eframe::egui::pos2(10.0, 10.0),
+                                        eframe::egui::Align2::LEFT_TOP,
+                                        format!("Upscaler: {} | Processing: {:.2}ms", 
+                                               upscaler.name(), processing_time),
+                                        eframe::egui::FontId::proportional(14.0),
+                                        eframe::egui::Color32::WHITE
+                                    );
+                                    
+                                    // Log performance occasionally
+                                    if self.frames_processed % 100 == 0 {
+                                        log::info!("Performance: Upscaler: {}, Processing: {:.2}ms", 
+                                                 upscaler.name(), processing_time);
+                                    }
+                                    
+                                    self.frames_processed += 1;
+                                },
+                                Err(e) => {
+                                    log::error!("Failed to upscale frame: {}", e);
+                                    ui.centered_and_justified(|ui| {
+                                        ui.label(eframe::egui::RichText::new(format!("Upscaling error: {}", e))
+                                            .size(24.0).color(eframe::egui::Color32::RED));
+                                    });
+                                }
+                            }
                         } else {
-                            texture.set(eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels), eframe::egui::TextureOptions::LINEAR);
+                            // No upscaler, just display the raw frame
+                            let size = [frame.width() as _, frame.height() as _];
+                            
+                            // Convert frame to egui format
+                            let flat_samples = frame.as_flat_samples();
+                            let pixels = flat_samples.as_slice();
+                            
+                            // Create or update texture
+                            let texture = self.frame_texture.get_or_insert_with(|| {
+                                ui.ctx().load_texture(
+                                    "captured_frame",
+                                    eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels),
+                                    eframe::egui::TextureOptions::LINEAR
+                                )
+                            });
+                            
+                            // Update existing texture if we already had one
+                            if texture.size() != size {
+                                *texture = ui.ctx().load_texture(
+                                    "captured_frame",
+                                    eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels),
+                                    eframe::egui::TextureOptions::LINEAR
+                                );
+                            } else {
+                                texture.set(eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels), eframe::egui::TextureOptions::LINEAR);
+                            }
+                            
+                            // Display the texture full screen
+                            let available_size = ui.available_size();
+                            ui.image(texture, available_size);
                         }
-                        
-                        // Display the texture full screen
-                        let available_size = ui.available_size();
-                        ui.image(texture, available_size);
                     } else {
                         ui.centered_and_justified(|ui| {
                             ui.label(eframe::egui::RichText::new("Waiting for frames...").size(24.0).color(eframe::egui::Color32::WHITE));
@@ -1075,6 +1181,7 @@ impl AppState {
             self.is_upscaling = false;
             self.upscaling_buffer = None;
             self.upscaling_stop_signal = None;
+            self.upscaler = None;
             self.status_message = "Upscaling stopped.".to_string();
             self.status_message_type = StatusMessageType::Info;
             return;
@@ -1130,32 +1237,20 @@ impl AppState {
             None
         };
         
-        // Create the FrameBuffer and the LOCAL AtomicBool stop signal for fullscreen
-        let frame_buffer = Arc::new(FrameBuffer::new(60));
-        let stop_signal = Arc::new(AtomicBool::new(false));
-
-        // Launch the fullscreen UI thread
-        let thread_frame_buffer = frame_buffer.clone();
-        let thread_stop_signal = stop_signal.clone();
-        let thread_tech = tech;
-        let thread_quality = quality;
-        let thread_algorithm = algorithm;
-
-        let _app_handle = std::thread::spawn(move || {
-            // Use crate:: path
-            if let Err(e) = crate::renderer::fullscreen::run_fullscreen_upscaler(
-                thread_frame_buffer,
-                thread_stop_signal,
-                thread_tech,
-                thread_quality,
-                thread_algorithm,
-            ) {
-                eprintln!("Failed to run fullscreen renderer: {}", e);
-            }
-        });
-
-        self.is_fullscreen = true;
-        self.status_message = "Launched fullscreen mode.".to_string();
+        // Instead of launching a new window, use start_upscaling_mode to modify the current window
+        if let Err(e) = self.start_upscaling_mode(target, tech, quality, self.profile.fps, algorithm) {
+            log::error!("Failed to start upscaling mode: {}", e);
+            self.status_message = format!("Failed to start upscaling: {}", e);
+            self.status_message_type = StatusMessageType::Error;
+            return;
+        }
+        
+        // Toggle to fullscreen mode for the current window
+        if let Err(e) = self.toggle_fullscreen_mode() {
+            log::error!("Failed to toggle fullscreen mode: {}", e);
+        }
+        
+        self.status_message = "Launched fullscreen mode in the current window.".to_string();
         self.status_message_type = StatusMessageType::Info;
     }
 
