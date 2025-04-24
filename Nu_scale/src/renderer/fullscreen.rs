@@ -496,7 +496,8 @@ impl FullscreenUpscalerUi {
             log::info!("Upscaler initialized successfully: name={}, input={}x{}, output={}x{}", 
                      self.upscaler.name(),
                      self.upscaler.input_width(), self.upscaler.input_height(),
-                     self.upscaler.output_width(), self.upscaler.output_height());
+                     (self.upscaler.input_width() as f32 * 1.5) as u32, 
+                     (self.upscaler.input_height() as f32 * 1.5) as u32);
         }
         
         // Use the configured upscaler to process the frame with the algorithm

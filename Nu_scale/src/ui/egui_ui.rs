@@ -1416,8 +1416,8 @@ impl AppState {
                 Some(UpscalingAlgorithm::Bilinear)
             },
             3 => {
-                log::debug!("Using Nearest algorithm");
-                Some(UpscalingAlgorithm::Nearest)
+                log::debug!("Using Nearest Neighbor algorithm");
+                Some(UpscalingAlgorithm::NearestNeighbor)
             },
             _ => None
         };
