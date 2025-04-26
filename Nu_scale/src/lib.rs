@@ -305,6 +305,9 @@ pub fn string_to_algorithm(alg_str: &str) -> Option<UpscalingAlgorithm> {
     }
 } 
 
+pub use crate::capture::frame_buffer::FrameBuffer;
+pub use crate::capture::frame_buffer_ext::ArcFrameBufferExt;
+
 #[cfg(test)]
 mod import_test {
     use super::*;

@@ -10,6 +10,8 @@ use std::path::Path;
 use std::time::{Instant, Duration};
 use log::{warn, error, trace, info};
 use std::panic::AssertUnwindSafe;
+use rand;
+use std::sync::Mutex;
 
 use crate::capture::common::FrameBuffer;
 use crate::upscale::{Upscaler, UpscalingTechnology, UpscalingQuality};
@@ -17,6 +19,7 @@ use crate::upscale::common::UpscalingAlgorithm;
 use crate::capture::CaptureTarget;
 use crate::capture::platform::WindowInfo;
 use crate::capture::ScreenCapture;
+use crate::capture::frame_buffer_ext::ArcFrameBufferExt;
 
 // Constants for texture size limits
 const MAX_TEXTURE_SIZE: u32 = 16384; // Maximum dimension for a texture (width or height)
@@ -204,8 +207,15 @@ pub struct FullscreenUpscalerUi {
     upscaler: Box<dyn Upscaler + Send + Sync>,
     /// Upscaling algorithm
     algorithm: Option<UpscalingAlgorithm>,
-    /// Texture for displaying frames
-    texture: Option<egui::TextureHandle>,
+    /// Texture for displaying frames - using Arc<Mutex> for thread safety
+    texture: Arc<Mutex<Option<egui::TextureHandle>>>,
+    /// Processing thread for offloading heavy operations
+    processing_thread: Option<std::thread::JoinHandle<()>>,
+    /// Channel for sending frames from processing thread to UI thread
+    frame_channel: (
+        std::sync::mpsc::Sender<Option<RgbaImage>>,
+        std::sync::mpsc::Receiver<Option<RgbaImage>>
+    ),
     /// Time of last frame
     last_frame_time: std::time::Instant,
     /// FPS counter
@@ -242,6 +252,12 @@ pub struct FullscreenUpscalerUi {
     requires_reinitialization: bool,
     /// Flag to use a different capture method
     fallback_capture: bool,
+    /// Flag to enable frame skipping when lagging
+    enable_frame_skipping: bool,
+    /// Time budget for frame processing in ms
+    frame_time_budget: f32,
+    /// Pending frame to be processed
+    pending_frame: Option<RgbaImage>,
 }
 
 impl FullscreenUpscalerUi {
@@ -272,7 +288,12 @@ impl FullscreenUpscalerUi {
             stop_signal,
             upscaler,
             algorithm,
-            texture: None,
+            texture: Arc::new(Mutex::new(None)),
+            processing_thread: None,
+            frame_channel: (
+                std::sync::mpsc::channel().0,
+                std::sync::mpsc::channel().1,
+            ),
             last_frame_time: std::time::Instant::now(),
             fps: 0.0,
             frames_processed: 0,
@@ -291,6 +312,9 @@ impl FullscreenUpscalerUi {
             memory_pressure_counter: None,
             requires_reinitialization: false,
             fallback_capture: false,
+            enable_frame_skipping: true,
+            frame_time_budget: 2.0,
+            pending_frame: None,
         }
     }
     
@@ -359,15 +383,27 @@ impl FullscreenUpscalerUi {
     /// Update the texture with a new frame
     fn update_texture(&mut self) -> Result<bool> {
         // Check if we have a texture already
-        if self.texture.is_none() {
-            // Create a placeholder texture if needed
+        if self.texture.lock().unwrap().is_none() {
+            // Get dimensions either from a frame or use fallback values
+            let (width, height) = match self.frame_buffer.get_latest_frame() {
+                Ok(Some(frame)) => (frame.width() as usize, frame.height() as usize),
+                _ => (1280, 720) // Default fallback dimensions
+            };
+            
+            // Create a proper blank image with the correct dimensions using magenta for debugging
+            let blank_image = egui::ColorImage::new(
+                [width, height],
+                egui::Color32::from_rgb(255, 0, 255) // Magenta debug color
+            );
+            
             let ctx = egui::Context::default();
-            self.texture = Some(ctx.load_texture(
-                "placeholder",
-                egui::ColorImage::example(),
-                Default::default()
+            self.texture.lock().unwrap().replace(ctx.load_texture(
+                "frame_texture",
+                blank_image,
+                TextureOptions::default()
             ));
-            log::warn!("Texture not initialized, created placeholder");
+            
+            log::info!("Initialized debug texture with dimensions {}x{}", width, height);
         }
 
         // Add performance guard for very frequent updates
@@ -375,9 +411,9 @@ impl FullscreenUpscalerUi {
             let now = Instant::now();
             let elapsed = now.duration_since(last_update);
             
-            // If updates are happening too frequently (< 10ms apart), throttle
-            if elapsed < Duration::from_millis(10) {
-                log::debug!("Throttling texture update ({}ms since last update)", elapsed.as_millis());
+            // Reduce throttling threshold to allow higher FPS (from 10ms to 2ms)
+            if elapsed < Duration::from_millis(2) {
+                log::trace!("Minor throttling at {}ms since last update", elapsed.as_millis());
                 return Ok(false);
             }
             
@@ -389,15 +425,66 @@ impl FullscreenUpscalerUi {
         // Capture performance metrics for this frame
         let capture_start = Instant::now();
         
-        // Safely get a frame from the buffer
-        let frame = match self.frame_buffer.get_latest_frame() {
+        // Use fallback capture method if required
+        if self.fallback_capture {
+            log::debug!("Using fallback capture method");
+            
+            // Add Windows-specific diagnostic warnings
+            #[cfg(windows)]
+            {
+                log::warn!("Using Windows fallback capture - ensure:");
+                log::warn!("1. Running as Administrator");
+                log::warn!("2. Game DVR/Game Bar disabled");
+                log::warn!("3. Target window isn't protected (anti-cheat/DWM-protected)");
+            }
+            
+            // Notify potential listeners that we're using a fallback
+            if let Some(target) = &self.capture_target {
+                // Try an alternative capture method by creating a new capturer
+                if let Ok(mut capturer) = crate::capture::create_capturer() {
+                    if let CaptureTarget::WindowByTitle(title) = target {
+                        // Attempt to force a full redraw of the window to help with capture
+                        if let Ok(windows) = capturer.list_windows() {
+                            if let Some(window) = windows.iter().find(|w| w.title.contains(title)) {
+                                log::info!("Using direct window capture for fallback: {}", window.title);
+                                // Attempt direct capture using the correct method
+                                let window_target = CaptureTarget::WindowById(window.id.clone());
+                                if let Ok(captured_frame) = capturer.capture_frame(&window_target) {
+                                    // Add the captured frame to the buffer
+                                    if self.frame_buffer.add_frame(captured_frame).is_err() {
+                                        log::warn!("Failed to add fallback frame to buffer");
+                                    } else {
+                                        log::debug!("Added fallback frame to buffer");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Safely get a frame from the buffer with timeout
+        let frame = match self.frame_buffer.get_latest_frame_timeout(Duration::from_millis(50)) {
             Ok(Some(frame)) => frame,
             Ok(None) => {
-                log::debug!("No frame available in buffer");
+                log::debug!("No frame available in buffer within timeout");
+                // More detailed information for debugging
+                if let Some(target) = &self.capture_target {
+                    log::debug!("Capture target: {:?}", target);
+                }
                 return Ok(false);
             },
             Err(e) => {
-                log::error!("Failed to get frame: {}", e);
+                log::error!("Failed to get frame within timeout: {}", e);
+                // Try changing capture method on error
+                if self.performance_metrics.error_count > 3 {
+                    log::info!("Multiple errors detected, toggling capture method");
+                    self.fallback_capture = !self.fallback_capture;
+                    self.performance_metrics.error_count = 0;
+                } else {
+                    self.performance_metrics.error_count += 1;
+                }
                 return Ok(false);
             }
         };
@@ -488,33 +575,10 @@ impl FullscreenUpscalerUi {
         }
 
         // Update texture data with upscaled frame
-        if let Some(texture) = &mut self.texture {
-            // Create the image data safely
-            let image_size = [upscaled.width() as usize, upscaled.height() as usize];
-            
-            // Create the color image directly (no catch_unwind)
-            let result = (|| -> anyhow::Result<()> {
-                let color_image = egui::ColorImage::from_rgba_unmultiplied(
-                    image_size,
-                    raw_upscaled
-                );
-                
-                // Update the texture with the upscaled data
-                texture.set(
-                    color_image,
-                    egui::TextureOptions::default()
-                );
-                Ok(())
-            })();
-            
-            if let Err(e) = result {
-                log::error!("Error during texture update: {}", e);
-                return Ok(false);
-            }
-        } else {
-            log::error!("Texture is not available");
-            return Ok(false);
-        }
+        self.texture.lock().unwrap().replace(egui::ColorImage::from_rgba_unmultiplied(
+            [upscaled.width() as usize, upscaled.height() as usize],
+            raw_upscaled
+        ));
 
         // Measure and log rendering time
         let render_duration = render_start.elapsed();
@@ -542,6 +606,7 @@ impl FullscreenUpscalerUi {
     fn safe_check_if_all_black(&mut self, frame: &RgbaImage) -> bool {
         // If the frame is empty, consider it black
         if frame.width() == 0 || frame.height() == 0 {
+            log::warn!("Empty frame detected: {}x{}", frame.width(), frame.height());
             return true;
         }
         
@@ -549,38 +614,212 @@ impl FullscreenUpscalerUi {
         let sample_step_x = frame.width().max(1) / 10;
         let sample_step_y = frame.height().max(1) / 10;
         
-        // Use a defensive approach to avoid panics
+        // Track statistics for better logging
+        let mut total_pixels = 0;
+        let mut black_pixels = 0;
+        let mut sum_brightness = 0;
+        let mut max_brightness = 0;
+        
+        // Check central area more thoroughly (most content tends to be in center)
+        let center_x = frame.width() / 2;
+        let center_y = frame.height() / 2;
+        let central_width = frame.width() / 3;
+        let central_height = frame.height() / 3;
+        
+        let start_x = center_x.saturating_sub(central_width / 2);
+        let start_y = center_y.saturating_sub(central_height / 2);
+        let end_x = (center_x + central_width / 2).min(frame.width());
+        let end_y = (center_y + central_height / 2).min(frame.height());
+        
+        // Log random sampling of pixels for debugging
+        if log::log_enabled!(log::Level::Trace) {
+            for _ in 0..5 {
+                let x = rand::random::<u32>() % frame.width();
+                let y = rand::random::<u32>() % frame.height(); 
+                let pixel = frame.get_pixel(x, y);
+                log::trace!("Random pixel at ({},{}) = {:?}", x, y, pixel);
+            }
+        }
+        
+        // Sample central area
+        for y in start_y..end_y {
+            for x in start_x..end_x {
+                let pixel = frame.get_pixel(x, y);
+                let brightness = pixel[0] as u32 + pixel[1] as u32 + pixel[2] as u32;
+                
+                sum_brightness += brightness;
+                max_brightness = max_brightness.max(brightness);
+                
+                if brightness < 15 { // Slightly higher threshold
+                    black_pixels += 1;
+                }
+                total_pixels += 1;
+            }
+        }
+        
+        // Also sample outer areas less densely 
         for y in (0..frame.height()).step_by(sample_step_y as usize) {
             for x in (0..frame.width()).step_by(sample_step_x as usize) {
+                // Skip the central region we've already checked
+                if x >= start_x && x < end_x && y >= start_y && y < end_y {
+                    continue;
+                }
+                
                 // Make sure coordinates are in bounds
                 if x < frame.width() && y < frame.height() {
                     let pixel = frame.get_pixel(x, y);
-                    if pixel[0] > 5 || pixel[1] > 5 || pixel[2] > 5 {
-                        return false;
+                    let brightness = pixel[0] as u32 + pixel[1] as u32 + pixel[2] as u32;
+                    
+                    sum_brightness += brightness;
+                    max_brightness = max_brightness.max(brightness);
+                    
+                    if brightness < 15 {
+                        black_pixels += 1;
+                    }
+                    total_pixels += 1;
+                }
+            }
+        }
+        
+        let avg_brightness = if total_pixels > 0 { sum_brightness as f32 / total_pixels as f32 } else { 0.0 };
+        let black_percentage = if total_pixels > 0 { black_pixels as f32 / total_pixels as f32 } else { 1.0 };
+        
+        // Detect black frames with additional metrics
+        let is_black = black_percentage > 0.95 && avg_brightness < 10.0;
+        
+        // Detailed logging for black frame detection
+        if is_black {
+            log::warn!("Black frame detected: {}% black pixels, avg brightness: {:.1}, max: {}", 
+                      black_percentage * 100.0, avg_brightness, max_brightness);
+        } else if black_percentage > 0.8 {
+            log::debug!("Dark frame detected: {}% black pixels, avg brightness: {:.1}, max: {}", 
+                      black_percentage * 100.0, avg_brightness, max_brightness);
+        }
+        
+        is_black
+    }
+    
+    /// Check if the system is under memory pressure
+    fn is_memory_pressure(&mut self) -> bool {
+        // A more comprehensive approach using system memory checks
+        #[cfg(target_os = "windows")]
+        {
+            use windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+            
+            let mut status = MEMORYSTATUSEX::default();
+            status.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+            
+            // Use Windows API to get memory status
+            let result = unsafe { GlobalMemoryStatusEx(&mut status) };
+            
+            if result.as_bool() {
+                // If memory utilization is more than 90%, we're under pressure
+                let memory_load = status.dwMemoryLoad as f32 / 100.0;
+                if memory_load > 0.90 {
+                    log::warn!("System memory pressure detected: {}% used", 
+                              status.dwMemoryLoad);
+                    return true;
+                }
+                
+                // Additionally check physical memory availability
+                let available_mb = status.ullAvailPhys / (1024 * 1024);
+                if available_mb < 500 { // Less than 500MB available
+                    log::warn!("Low available physical memory: {} MB", available_mb);
+                    return true;
+                }
+                
+                false
+            } else {
+                // Fallback to simpler heuristic if API fails
+                log::warn!("Failed to get system memory info, using fallback heuristic");
+                if let Some(counter) = self.memory_pressure_counter {
+                    if counter > 10 {
+                        self.memory_pressure_counter = Some(0);
+                        return true;
+                    }
+                    self.memory_pressure_counter = Some(counter + 1);
+                } else {
+                    self.memory_pressure_counter = Some(0);
+                }
+                false
+            }
+        }
+        
+        #[cfg(target_os = "linux")]
+        {
+            // On Linux, read memory info from /proc/meminfo
+            match std::fs::read_to_string("/proc/meminfo") {
+                Ok(meminfo) => {
+                    // Parse the file contents
+                    let mut available_kb = 0;
+                    let mut total_kb = 0;
+                    
+                    for line in meminfo.lines() {
+                        if line.starts_with("MemTotal:") {
+                            if let Some(value) = line.split_whitespace().nth(1) {
+                                if let Ok(val) = value.parse::<u64>() {
+                                    total_kb = val;
+                                }
+                            }
+                        } else if line.starts_with("MemAvailable:") {
+                            if let Some(value) = line.split_whitespace().nth(1) {
+                                if let Ok(val) = value.parse::<u64>() {
+                                    available_kb = val;
+                                }
+                            }
+                        }
+                    }
+                    
+                    if total_kb > 0 {
+                        let usage_ratio = 1.0 - (available_kb as f64 / total_kb as f64);
+                        let available_mb = available_kb / 1024;
+                        
+                        if usage_ratio > 0.90 || available_mb < 500 {
+                            log::warn!("Memory pressure detected: {:.1}% used, {} MB available", 
+                                      usage_ratio * 100.0, available_mb);
+                            return true;
+                        }
+                    }
+                    
+                    false
+                },
+                Err(_) => {
+                    // Fallback to simple heuristic
+                    match self.memory_pressure_counter {
+                        Some(counter) if counter > 10 => {
+                            self.memory_pressure_counter = Some(0);
+                            true
+                        },
+                        Some(counter) => {
+                            self.memory_pressure_counter = Some(counter + 1);
+                            false
+                        },
+                        None => {
+                            self.memory_pressure_counter = Some(0);
+                            false
+                        }
                     }
                 }
             }
         }
         
-        true
-    }
-    
-    /// Check if the system is under memory pressure
-    fn is_memory_pressure(&mut self) -> bool {
-        // A simple heuristic - could be expanded with actual system monitoring
-        match self.memory_pressure_counter {
-            Some(counter) if counter > 10 => {
-                // Reset counter occasionally to allow recovery
-                self.memory_pressure_counter = Some(0);
-                true
-            },
-            Some(counter) => {
-                self.memory_pressure_counter = Some(counter + 1);
-                false
-            },
-            None => {
-                self.memory_pressure_counter = Some(0);
-                false
+        // Default implementation for other platforms
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+        {
+            // Simple fallback - toggle pressure flag every 100 frames
+            match self.memory_pressure_counter {
+                Some(counter) if counter > 100 => {
+                    self.memory_pressure_counter = Some(0);
+                    true
+                },
+                Some(counter) => {
+                    self.memory_pressure_counter = Some(counter + 1);
+                    false
+                },
+                None => {
+                    self.memory_pressure_counter = Some(0);
+                    false
+                }
             }
         }
     }
@@ -691,8 +930,33 @@ impl FullscreenUpscalerUi {
 
             let start = Instant::now();
 
-            // Perform the upscaling directly with our existing upscaler
-            match self.upscaler.upscale(&frame) {
+            // Add more defensive coding around upscaling
+            let upscaled_result = match std::panic::catch_unwind(AssertUnwindSafe(|| {
+                self.upscaler.upscale(&frame)
+            })) {
+                Ok(inner_result) => match inner_result {
+                    Ok(upscaled) => Ok(upscaled),
+                    Err(e) => {
+                        error!("Normal error during upscaling: {}", e);
+                        Err(e)
+                    }
+                },
+                Err(panic_error) => {
+                    if let Some(error_str) = panic_error.downcast_ref::<String>() {
+                        error!("Panic during upscaler.upscale call: {}", error_str);
+                    } else if let Some(error_str) = panic_error.downcast_ref::<&str>() {
+                        error!("Panic during upscaler.upscale call: {}", error_str);
+                    } else {
+                        error!("Unknown panic during upscaler.upscale call");
+                    }
+                    
+                    // Convert panic to a normal error
+                    Err(anyhow::Error::msg("Upscaler panic occurred"))
+                }
+            };
+            
+            // Handle upscaling result with additional logging
+            match upscaled_result {
                 Ok(upscaled) => {
                     let duration = start.elapsed();
                     trace!(
@@ -710,19 +974,46 @@ impl FullscreenUpscalerUi {
                     
                     // Final safety check on dimensions
                     let (actual_width, actual_height) = upscaled.dimensions();
+                    
+                    // Verify upscaled dimensions
+                    if actual_width == 0 || actual_height == 0 {
+                        error!("Upscaler produced invalid dimensions: {}x{}", actual_width, actual_height);
+                        return Some(frame.clone());
+                    }
+                    
+                    // Log difference between expected and actual dimensions
                     if actual_width != target_width || actual_height != target_height {
                         warn!(
-                            "Upscaler produced incorrect dimensions: expected {}x{}, got {}x{}",
+                            "Upscaler produced unexpected dimensions: expected {}x{}, got {}x{}",
                             target_width, target_height, actual_width, actual_height
                         );
                     }
                     
+                    // Return the upscaled image
                     Some(upscaled)
-                }
+                },
                 Err(e) => {
-                    error!("Failed to upscale frame: {}", e);
-                    // Return original frame on error
-                    Some(frame.clone())
+                    // More detailed error reporting
+                    error!("Failed to upscale frame: {} (width={}, height={})", e, width, height);
+                    
+                    // Fall back to bilinear upscaling instead of returning original
+                    info!("Using fallback bilinear scaling after upscaler failure");
+                    let fallback_result = image::imageops::resize(
+                        &frame, 
+                        target_width, 
+                        target_height, 
+                        image::imageops::FilterType::Triangle // Use bilinear filtering (Triangle)
+                    );
+                    
+                    // Track error count for potential recovery
+                    self.performance_metrics.error_count += 1;
+                    if self.performance_metrics.error_count > 5 {
+                        // Force a reinitialization after several errors
+                        self.requires_reinitialization = true;
+                        self.performance_metrics.error_count = 0;
+                    }
+                    
+                    Some(fallback_result)
                 }
             }
         }));
@@ -738,6 +1029,14 @@ impl FullscreenUpscalerUi {
                     error!("Panic during upscaling: {}", error_str);
                 } else {
                     error!("Unknown panic during upscaling");
+                }
+                
+                // Increment panic counter
+                self.performance_metrics.error_count += 1;
+                
+                // Force reinitialization after repeated panics
+                if self.performance_metrics.error_count > 3 {
+                    self.requires_reinitialization = true;
                 }
                 
                 // Return the original frame as a fallback
@@ -920,14 +1219,116 @@ impl FullscreenUpscalerUi {
         // Set up UI with dark mode
         ctx.set_visuals(egui::Visuals::dark());
     }
+
+    /// Reinitialize the upscaler if needed
+    fn check_and_reinitialize_upscaler(&mut self) {
+        if !self.requires_reinitialization {
+            return;
+        }
+        
+        log::info!("Attempting to reinitialize upscaler due to repeated errors");
+        
+        // Remember current settings
+        let upscaler_name = self.upscaler.name().to_string();
+        let quality = self.upscaler.quality();
+        let technology = match upscaler_name.as_str() {
+            "FSR" => UpscalingTechnology::FSR,
+            "FSR3" => UpscalingTechnology::FSR3,
+            "NIS" => UpscalingTechnology::NIS,
+            _ => UpscalingTechnology::FSR, // Default fallback
+        };
+        
+        // Attempt to recreate the upscaler
+        match create_upscaler(technology, quality, self.algorithm) {
+            Ok(new_upscaler) => {
+                log::info!("Successfully reinitialized {} upscaler with {:?} quality", 
+                          new_upscaler.name(), new_upscaler.quality());
+                // Replace the upscaler
+                self.upscaler = new_upscaler;
+                self.upscaler_name = self.upscaler.name().to_string();
+                self.upscaler_quality = self.upscaler.quality();
+            },
+            Err(e) => {
+                log::error!("Failed to reinitialize upscaler: {}", e);
+                
+                // Try a more reliable upscaler as fallback
+                match create_upscaler(UpscalingTechnology::FSR, UpscalingQuality::Balanced, None) {
+                    Ok(fallback_upscaler) => {
+                        log::info!("Using FSR Balanced as emergency fallback upscaler");
+                        self.upscaler = fallback_upscaler;
+                        self.upscaler_name = self.upscaler.name().to_string();
+                        self.upscaler_quality = self.upscaler.quality();
+                    },
+                    Err(e2) => {
+                        log::error!("Failed to create fallback upscaler: {}", e2);
+                        // We'll keep using the existing one and hope it recovers
+                    }
+                }
+            }
+        }
+        
+        // Reset the flag regardless of outcome
+        self.requires_reinitialization = false;
+        
+        // Also reset error counters
+        self.performance_metrics.error_count = 0;
+    }
 }
 
 impl eframe::App for FullscreenUpscalerUi {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // Check if upscaler needs to be reinitialized
+        if self.requires_reinitialization {
+            self.check_and_reinitialize_upscaler();
+        }
+        
         // Update the texture with the latest frame
         // Safe error handling to avoid crashes
         match self.update_texture() {
-            Ok(_) => {},
+            Ok(_) => {
+                // Calculate FPS
+                let now = std::time::Instant::now();
+                let frame_time = now.duration_since(self.last_frame_time);
+                self.last_frame_time = now;
+                
+                // Calculate rolling FPS average
+                let current_fps = 1.0 / frame_time.as_secs_f32();
+                
+                // Update FPS history with smoothing
+                self.fps = if self.fps == 0.0 {
+                    current_fps
+                } else {
+                    self.fps * 0.95 + current_fps * 0.05
+                };
+                
+                // Keep the last 120 frames of history for the graph
+                self.fps_history.push(self.fps);
+                if self.fps_history.len() > 120 {
+                    self.fps_history.remove(0);
+                }
+                
+                // Update upscale time history
+                let upscale_time_ms = self.performance_metrics.upscale_time.as_secs_f32() * 1000.0;
+                self.last_upscale_time = upscale_time_ms;
+                self.upscale_time_history.push(upscale_time_ms);
+                if self.upscale_time_history.len() > 120 {
+                    self.upscale_time_history.remove(0);
+                }
+                
+                // Update frame counter
+                self.frames_processed += 1;
+                
+                // Update input/output size for display
+                if let Some(texture) = &self.texture.lock().unwrap().as_ref() {
+                    let size = texture.size();
+                    self.output_size = (size[0] as u32, size[1] as u32);
+                }
+                
+                // Update input size from the latest frame
+                if let Ok(Some(frame)) = self.frame_buffer.get_latest_frame() {
+                    self.input_size = (frame.width(), frame.height());
+                }
+            },
             Err(e) => {
                 log::error!("Error updating texture: {}", e);
                 // Continue anyway, to avoid crashing the app
@@ -956,7 +1357,7 @@ impl eframe::App for FullscreenUpscalerUi {
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(egui::Color32::from_rgb(10, 10, 10)))
             .show(ctx, |ui| {
-                if let Some(texture) = &self.texture {
+                if let Some(texture) = &self.texture.lock().unwrap().as_ref() {
                     // Get available size
                     let available_size = ui.available_size();
                     let texture_size = texture.size_vec2();
@@ -1020,20 +1421,8 @@ impl eframe::App for FullscreenUpscalerUi {
                 }
             });
         
-        // Calculate target repaint interval based on upscaling performance
-        let target_fps = if self.fps_history.len() > 5 {
-            // Use recent average FPS to determine optimal repaint interval
-            let recent_fps: f32 = self.fps_history.iter().rev().take(5).sum::<f32>() / 5.0;
-            // Cap the FPS to a reasonable range
-            recent_fps.clamp(15.0, 60.0) // Lower max to 60 to reduce strain
-        } else {
-            30.0 // More conservative default FPS
-        };
-        
-        let target_frame_time = std::time::Duration::from_secs_f32(1.0 / target_fps);
-        
-        // Request a repaint after the calculated interval
-        ctx.request_repaint_after(target_frame_time);
+        // Request immediate repaint for higher FPS rather than scheduled
+        ctx.request_repaint();
         
         // Safe window position update without catch_unwind
         self.update_source_window_position(frame);
@@ -1120,66 +1509,116 @@ pub fn run_fullscreen_upscaler(
     
     // If we couldn't get window info from the capture target, try getting it from a frame
     if window_info.is_none() {
-        window_info = match frame_buffer.get_latest_frame() {
+        match frame_buffer.get_latest_frame() {
             Ok(Some(frame)) => {
                 // Since we don't have position info, just use the dimensions
                 log::info!("Using frame dimensions: {}x{}", frame.width(), frame.height());
-                Some((0, 0, frame.width(), frame.height()))
+                window_info = Some((0, 0, frame.width(), frame.height()));
             },
             _ => {
-                // If we can't get a frame yet, use default dimensions
-                log::warn!("Could not get frame dimensions, using default 1280x720");
-                Some((0, 0, 1280, 720))
+                // Try one more direct capture attempt
+                if let CaptureTarget::WindowByTitle(title) = &capture_target {
+                    if let Ok(mut capturer) = crate::capture::create_capturer() {
+                        if let Ok(windows) = capturer.list_windows() {
+                            if let Some(window) = windows.iter().find(|w| w.title.contains(title)) {
+                                if let Ok(frame) = capturer.capture_frame(&CaptureTarget::WindowById(window.id.clone())) {
+                                    log::info!("Direct capture successful: {}x{}", frame.width(), frame.height());
+                                    window_info = Some((
+                                        window.geometry.x,
+                                        window.geometry.y,
+                                        frame.width(),
+                                        frame.height(),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // If we still have no info, use default dimensions
+                if window_info.is_none() {
+                    log::warn!("Could not get frame dimensions, using default 1280x720");
+                    window_info = Some((0, 0, 1280, 720));
+                }
             }
         };
     }
     
-    // Instead of creating a new window, we'll create a renderer that can be integrated into the main window
-    log::info!("Starting in-place upscaling with {} at {:?} quality", upscaler.name(), quality);
+    // Get final window dimensions
+    let (win_x, win_y, win_width, win_height) = window_info.unwrap_or((0, 0, 1280, 720));
     
-    // Create our UI object
-    let mut ui = FullscreenUpscalerUi::new_boxed(
-        frame_buffer,
-        stop_signal.clone(),
-        upscaler,
-        algorithm,
-    );
-    
-    // Set the capture target
-    ui.set_capture_target(capture_target.clone());
-    
-    // Instead of running as a separate window, we'll return the UI component for integration
-    // into the main application window. 
-    // This is a placeholder - the actual implementation depends on how the main window is structured.
-    
-    // Create an integration point to the main application UI
-    // For now, we'll just create a simplified renderer that can be passed back to the main UI
-    
-    // Signal that upscaling is active in the main window
-    crate::ui::set_upscaling_active(true);
-    
-    // Set up a callback to apply upscaling to the main window's content
-    // This part would need to integrate with the main window's UI system
-    crate::ui::set_upscaling_renderer(Box::new(move |ctx, content| {
-        // Apply upscaling to the content and render it in the main window context
-        ui.update_texture();
-        
-        // If we have a texture, render it
-        if let Some(texture) = &ui.texture {
-            return Some(texture.id());
+    // Register cleanup handler
+    let cleanup_lock = std::sync::Arc::new(());
+    let cleanup_lock_weak = std::sync::Arc::downgrade(&cleanup_lock);
+    std::thread::spawn(move || {
+        // Wait for the lock to be dropped (when the main thread exits)
+        while cleanup_lock_weak.upgrade().is_some() {
+            std::thread::sleep(std::time::Duration::from_millis(100));
         }
-        
-        None
-    }));
+        // Clean up the lock file when the app exits
+        remove_lock_file();
+    });
+
+    // Create window options
+    let native_options = eframe::NativeOptions {
+        initial_window_pos: Some(egui::pos2(win_x as f32, win_y as f32)),
+        initial_window_size: Some(egui::vec2(win_width as f32, win_height as f32)),
+        resizable: false,
+        transparent: false,
+        fullscreen: true,
+        vsync: true,
+        multisampling: 0, // Disable multisampling for performance
+        depth_buffer: 0, // No depth buffer needed
+        stencil_buffer: 0, // No stencil buffer needed
+        hardware_acceleration: eframe::HardwareAcceleration::Required,
+        renderer: eframe::Renderer::Wgpu,
+        ..Default::default()
+    };
     
-    Ok(())
+    // Create clones of variables that will be moved into the closure
+    let frame_buffer_clone = frame_buffer.clone();
+    let stop_signal_clone = stop_signal.clone();
+    let capture_target_clone = capture_target.clone();
+    
+    // Store any algorithm for the closure
+    let algorithm_copy = algorithm.clone();
+    
+    // Run the fullscreen upscaler
+    eframe::run_native(
+        "NU_Scaler Fullscreen",
+        native_options,
+        Box::new(move |cc| {
+            // Configure the wgpu renderer if available
+            if let Some(ctx) = &cc.wgpu_render_state {
+                // Additional wgpu configuration can be done here
+                log::info!("Using wgpu renderer with features: {:?}", ctx.adapter.features());
+            }
+            
+            // Create the UI
+            let mut ui = FullscreenUpscalerUi::new(
+                cc,
+                frame_buffer_clone,
+                stop_signal_clone,
+                upscaler,
+                algorithm_copy,
+            );
+            
+            // Set the capture target
+            ui.set_capture_target(capture_target_clone);
+            
+            // Configure the UI
+            ui.configure_ui(&cc.egui_ctx);
+            
+            Box::new(ui)
+        }),
+    ).map_err(|e| e.to_string())
 }
 
 /// Integration method for the main window to use this upscaler
 impl FullscreenUpscalerUi {
     // Method to render upscaled content in any UI context
     pub fn render_upscaled_content(&self, ui: &mut egui::Ui) -> bool {
-        if let Some(texture) = &self.texture {
+        if let Some(texture) = &self.texture.lock().unwrap().as_ref() {
             // Get available size
             let available_size = ui.available_size();
             let texture_size = texture.size_vec2();
@@ -1277,7 +1716,12 @@ impl FullscreenUpscalerUi {
             stop_signal,
             upscaler,
             algorithm,
-            texture: None,
+            texture: Arc::new(Mutex::new(None)),
+            processing_thread: None,
+            frame_channel: (
+                std::sync::mpsc::channel().0,
+                std::sync::mpsc::channel().1,
+            ),
             last_frame_time: std::time::Instant::now(),
             fps: 0.0,
             frames_processed: 0,
@@ -1296,6 +1740,9 @@ impl FullscreenUpscalerUi {
             memory_pressure_counter: None,
             requires_reinitialization: false,
             fallback_capture: false,
+            enable_frame_skipping: true,
+            frame_time_budget: 2.0,
+            pending_frame: None,
         })
     }
 } 

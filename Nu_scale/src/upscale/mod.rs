@@ -30,6 +30,8 @@ pub enum UpscalingTechnology {
     FSR3,
     // NVIDIA Deep Learning Super Sampling
     DLSS,
+    // NVIDIA Image Scaling
+    NIS,
     // CUDA-based upscaling
     CUDA,
     // Vulkan-based upscaling
@@ -109,32 +111,56 @@ pub fn create_upscaler(
                 }
                 return create_basic_upscaler(quality, algorithm);
             }
-            let upscaler = fsr3::Fsr3Upscaler::new(quality, true)?; // Enable frame generation
+            
+            // Create FSR3 upscaler
+            let upscaler = fsr3::Fsr3Upscaler::new(quality, false)?;
             Ok(Box::new(upscaler))
         },
         UpscalingTechnology::DLSS => {
             if !dlss::DlssUpscaler::is_supported() {
-                // Check FSR support before attempting to create it
+                log::info!("DLSS not supported, falling back to FSR");
+                
+                // Try FSR as fallback
                 if fsr::FsrUpscaler::is_supported() {
-                    log::info!("DLSS not supported, falling back to FSR");
+                    log::info!("Falling back to FSR");
                     let upscaler = fsr::FsrUpscaler::new(quality)?;
                     return Ok(Box::new(upscaler));
-                } else {
-                    log::info!("Neither DLSS nor FSR supported, falling back to basic upscaling");
-                    return create_basic_upscaler(quality, algorithm);
                 }
+                
+                log::info!("FSR not supported either, falling back to basic upscaling");
+                return create_basic_upscaler(quality, algorithm);
             }
+            
+            // Create DLSS upscaler
             let upscaler = dlss::DlssUpscaler::new(quality)?;
             Ok(Box::new(upscaler))
         },
-        UpscalingTechnology::CUDA => {
-            // Check if Vulkan is supported since CUDA support has been removed
-            log::info!("CUDA support has been removed, trying Vulkan instead");
-            if crate::render::VulkanRenderer::is_supported() {
-                return create_upscaler(UpscalingTechnology::Vulkan, quality, algorithm);
-            }
+        UpscalingTechnology::NIS => {
+            // Currently NIS is not implemented, so fall back to other technologies
+            log::info!("NIS not implemented, falling back to other technologies");
             
             // Try FSR next
+            if fsr::FsrUpscaler::is_supported() {
+                log::info!("Falling back to FSR");
+                let upscaler = fsr::FsrUpscaler::new(quality)?;
+                return Ok(Box::new(upscaler));
+            }
+            
+            // Try DLSS next
+            if dlss::DlssUpscaler::is_supported() {
+                log::info!("Falling back to DLSS");
+                let upscaler = dlss::DlssUpscaler::new(quality)?;
+                return Ok(Box::new(upscaler));
+            }
+            
+            // Fall back to basic upscaling
+            log::info!("No GPU acceleration available, falling back to basic upscaling");
+            return create_basic_upscaler(quality, algorithm);
+        },
+        UpscalingTechnology::CUDA => {
+            log::info!("CUDA upscaling is not available in this build");
+            
+            // Try other GPU technologies first
             if fsr::FsrUpscaler::is_supported() {
                 log::info!("Falling back to FSR");
                 let upscaler = fsr::FsrUpscaler::new(quality)?;
@@ -177,8 +203,10 @@ pub fn create_upscaler(
             // Create Vulkan upscaler using adapter pattern
             log::info!("Creating Vulkan-based upscaler");
             let alg = algorithm.unwrap_or_else(|| quality_to_algorithm(quality));
-            let upscaler = vulkan::VulkanUpscaler::new(quality, alg)?;
-            Ok(Box::new(upscaler))
+            
+            // Currently not implemented
+            log::warn!("Vulkan upscaler not fully implemented, using fallback");
+            return create_basic_upscaler(quality, Some(alg));
         },
         UpscalingTechnology::GPU => {
             // Placeholder for Vulkan implementation

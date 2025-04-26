@@ -3,6 +3,8 @@
 pub mod platform;
 pub mod window_finder;
 pub mod common;
+pub mod frame_buffer;
+pub mod frame_buffer_ext;
 
 use anyhow::Result;
 use image::RgbaImage;
