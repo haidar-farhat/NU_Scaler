@@ -173,11 +173,7 @@ impl XeSSUpscaler {
 
 impl Upscaler for XeSSUpscaler {
     fn initialize(&mut self, input_width: u32, input_height: u32, output_width: u32, output_height: u32) -> Result<()> {
-        // Acquire lock to ensure thread safety
-        let _lock = self.operation_lock.lock()
-            .map_err(|e| anyhow!("Failed to acquire lock for initialization: {}", e))?;
-        
-        // Store dimensions
+        // Store dimensions first without the lock
         self.input_width = input_width;
         self.input_height = input_height;
         self.output_width = output_width;
@@ -195,11 +191,13 @@ impl Upscaler for XeSSUpscaler {
         
         // Initialize XeSS if it hasn't been initialized yet
         if self.handle.is_none() {
-            // Initialize XeSS - store result first to avoid borrow issues
-            let xess_result = self.initialize_xess();
-            
-            match xess_result {
+            // Initialize XeSS without holding the lock
+            match self.initialize_xess() {
                 Ok(handle) => {
+                    // Now acquire the lock just to update the handle safely
+                    let _lock = self.operation_lock.lock()
+                        .map_err(|e| anyhow!("Failed to acquire lock for initialization: {}", e))?;
+                    
                     self.handle = Some(handle);
                     info!("XeSS initialized successfully");
                 },
@@ -212,7 +210,13 @@ impl Upscaler for XeSSUpscaler {
         
         // In a real implementation, would need to create/resize buffers based on dimensions
         
-        self.initialized = true;
+        // Final update with the lock to ensure thread safety for status changes
+        {
+            let _lock = self.operation_lock.lock()
+                .map_err(|e| anyhow!("Failed to acquire lock for status update: {}", e))?;
+            self.initialized = true;
+        }
+        
         info!("XeSS initialized with dimensions: {}x{} -> {}x{} (scale: {:.2}x)", 
              input_width, input_height, output_width, output_height, scale_ratio);
              
