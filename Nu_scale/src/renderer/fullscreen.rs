@@ -283,17 +283,17 @@ impl FullscreenUpscalerUi {
         let upscaler_name = upscaler.name().to_string();
         let upscaler_quality = upscaler.quality();
         
-        Self {
-            frame_buffer,
-            stop_signal,
+        // Create the MPSC channel for frame processing
+        let (sender, receiver) = std::sync::mpsc::channel();
+        
+        let mut ui = Self {
+            frame_buffer: frame_buffer.clone(),
+            stop_signal: stop_signal.clone(),
             upscaler,
             algorithm,
             texture: Arc::new(Mutex::new(None)),
             processing_thread: None,
-            frame_channel: (
-                std::sync::mpsc::channel().0,
-                std::sync::mpsc::channel().1,
-            ),
+            frame_channel: (sender, receiver),
             last_frame_time: std::time::Instant::now(),
             fps: 0.0,
             frames_processed: 0,
@@ -313,8 +313,117 @@ impl FullscreenUpscalerUi {
             requires_reinitialization: false,
             fallback_capture: false,
             enable_frame_skipping: true,
-            frame_time_budget: 2.0,
+            frame_time_budget: 16.0, // ~60 FPS
             pending_frame: None,
+        };
+        
+        // Start the processing thread
+        ui.start_processing_thread();
+        
+        ui
+    }
+    
+    /// Start the processing thread to handle frame capture and upscaling
+    fn start_processing_thread(&mut self) {
+        // Skip if a thread is already running
+        if self.processing_thread.is_some() {
+            return;
+        }
+        
+        // Clone needed resources for the thread
+        let frame_buffer = self.frame_buffer.clone();
+        let stop_signal = self.stop_signal.clone();
+        let sender = self.frame_channel.0.clone();
+        let upscaler_name = self.upscaler_name.clone();
+        
+        // Create a channel for performance metrics
+        let (metrics_tx, metrics_rx) = std::sync::mpsc::channel();
+        
+        // Spawn the processing thread
+        self.processing_thread = Some(std::thread::spawn(move || {
+            log::info!("Frame processing thread started with upscaler: {}", upscaler_name);
+            
+            // Processing loop
+            while !stop_signal.load(Ordering::SeqCst) {
+                // Capture performance metrics for this frame
+                let capture_start = Instant::now();
+                
+                // Try to get a frame from the buffer with a timeout
+                let frame = match frame_buffer.get_latest_frame_timeout(Duration::from_millis(50)) {
+                    Ok(Some(frame)) => frame,
+                    Ok(None) => {
+                        // No frame available, sleep a bit and try again
+                        std::thread::sleep(Duration::from_millis(5));
+                        continue;
+                    },
+                    Err(e) => {
+                        log::error!("Failed to get frame within timeout: {}", e);
+                        std::thread::sleep(Duration::from_millis(10));
+                        continue;
+                    }
+                };
+                
+                // Measure frame capture time
+                let capture_time = capture_start.elapsed();
+                
+                // Check if we have a valid frame
+                if frame.width() == 0 || frame.height() == 0 {
+                    log::warn!("Captured frame has invalid dimensions: {}x{}", frame.width(), frame.height());
+                    continue;
+                }
+                
+                // Send the frame to the UI thread for processing
+                if sender.send(Some(frame)).is_err() {
+                    log::warn!("Failed to send frame to UI thread");
+                    break;
+                }
+                
+                // Send performance metrics
+                let _ = metrics_tx.send(("capture", capture_time));
+                
+                // Throttle the processing to avoid overwhelming the system
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            
+            log::info!("Frame processing thread stopped");
+        }));
+    }
+    
+    /// Clean up resources when the UI is shutting down
+    fn cleanup(&mut self) {
+        // Signal processing thread to stop
+        self.stop_signal.store(true, Ordering::SeqCst);
+        
+        // Wait for processing thread to finish
+        if let Some(thread) = self.processing_thread.take() {
+            let _ = thread.join();
+            log::info!("Processing thread joined successfully");
+        }
+        
+        // Clear the texture to free GPU resources
+        self.cleanup_textures();
+    }
+    
+    /// Clean up texture resources
+    fn cleanup_textures(&mut self) {
+        // Acquire the lock and take ownership of the texture
+        if let Ok(mut texture_guard) = self.texture.lock() {
+            // Replace with None, effectively dropping the previous texture
+            *texture_guard = None;
+            log::debug!("Textures cleaned up");
+        }
+    }
+    
+    /// Explicitly dispose of a texture to free GPU resources
+    fn dispose_texture(&self, ctx: &egui::Context) {
+        if let Ok(mut texture_guard) = self.texture.lock() {
+            if texture_guard.is_some() {
+                // This allows the texture to be properly disposed
+                // The actual texture disposal will be handled by egui
+                *texture_guard = None;
+                // Request a repaint to ensure the disposal is processed
+                ctx.request_repaint();
+            }
         }
     }
     
@@ -382,28 +491,51 @@ impl FullscreenUpscalerUi {
     
     /// Update the texture with a new frame
     fn update_texture(&mut self) -> Result<bool> {
-        // Check if we have a texture already
-        if self.texture.lock().unwrap().is_none() {
-            // Get dimensions either from a frame or use fallback values
-            let (width, height) = match self.frame_buffer.get_latest_frame() {
-                Ok(Some(frame)) => (frame.width() as usize, frame.height() as usize),
-                _ => (1280, 720) // Default fallback dimensions
-            };
+        // Frame budget check for skipping when behind
+        if self.enable_frame_skipping {
+            let frame_budget = Duration::from_millis(self.frame_time_budget as u64);
+            let elapsed_since_last = self.last_frame_time.elapsed();
             
-            // Create a proper blank image with the correct dimensions using magenta for debugging
-            let blank_image = egui::ColorImage::new(
-                [width, height],
-                egui::Color32::from_rgb(255, 0, 255) // Magenta debug color
-            );
-            
-            let ctx = egui::Context::default();
-            self.texture.lock().unwrap().replace(ctx.load_texture(
-                "frame_texture",
-                blank_image,
-                TextureOptions::default()
-            ));
-            
-            log::info!("Initialized debug texture with dimensions {}x{}", width, height);
+            if elapsed_since_last > frame_budget * 2 {
+                log::warn!("Dropping frame processing due to lag: {}ms elapsed (budget: {}ms)", 
+                          elapsed_since_last.as_millis(), frame_budget.as_millis());
+                return Ok(false);
+            }
+        }
+        
+        // Initialize texture if needed
+        {
+            let texture_guard = self.texture.lock().map_err(|e| anyhow::anyhow!("Failed to lock texture: {}", e))?;
+            if texture_guard.is_none() {
+                // Release the lock before initializing
+                drop(texture_guard);
+                
+                // Get dimensions either from a frame or use fallback values
+                let (width, height) = match self.frame_buffer.get_latest_frame() {
+                    Ok(Some(frame)) => (frame.width() as usize, frame.height() as usize),
+                    _ => (1280, 720) // Default fallback dimensions
+                };
+                
+                // Create a proper blank image with the correct dimensions
+                let blank_image = egui::ColorImage::new(
+                    [width, height],
+                    egui::Color32::from_rgb(10, 10, 10) // Dark background
+                );
+                
+                let ctx = egui::Context::default();
+                let texture = ctx.load_texture(
+                    "frame_texture",
+                    blank_image,
+                    TextureOptions::default()
+                );
+                
+                // Acquire the lock again to store the texture
+                let mut texture_guard = self.texture.lock()
+                    .map_err(|e| anyhow::anyhow!("Failed to lock texture after initialization: {}", e))?;
+                *texture_guard = Some(texture);
+                
+                log::info!("Initialized texture with dimensions {}x{}", width, height);
+            }
         }
 
         // Add performance guard for very frequent updates
@@ -411,9 +543,8 @@ impl FullscreenUpscalerUi {
             let now = Instant::now();
             let elapsed = now.duration_since(last_update);
             
-            // Reduce throttling threshold to allow higher FPS (from 10ms to 2ms)
-            if elapsed < Duration::from_millis(2) {
-                log::trace!("Minor throttling at {}ms since last update", elapsed.as_millis());
+            // Throttle updates for smoother performance
+            if elapsed < Duration::from_millis(5) {
                 return Ok(false);
             }
             
@@ -422,81 +553,42 @@ impl FullscreenUpscalerUi {
             self.last_update_time = Some(Instant::now());
         }
 
-        // Capture performance metrics for this frame
-        let capture_start = Instant::now();
+        // Start tracking frame performance
+        let update_start = Instant::now();
         
-        // Use fallback capture method if required
-        if self.fallback_capture {
-            log::debug!("Using fallback capture method");
-            
-            // Add Windows-specific diagnostic warnings
-            #[cfg(windows)]
-            {
-                log::warn!("Using Windows fallback capture - ensure:");
-                log::warn!("1. Running as Administrator");
-                log::warn!("2. Game DVR/Game Bar disabled");
-                log::warn!("3. Target window isn't protected (anti-cheat/DWM-protected)");
-            }
-            
-            // Notify potential listeners that we're using a fallback
-            if let Some(target) = &self.capture_target {
-                // Try an alternative capture method by creating a new capturer
-                if let Ok(mut capturer) = crate::capture::create_capturer() {
-                    if let CaptureTarget::WindowByTitle(title) = target {
-                        // Attempt to force a full redraw of the window to help with capture
-                        if let Ok(windows) = capturer.list_windows() {
-                            if let Some(window) = windows.iter().find(|w| w.title.contains(title)) {
-                                log::info!("Using direct window capture for fallback: {}", window.title);
-                                // Attempt direct capture using the correct method
-                                let window_target = CaptureTarget::WindowById(window.id.clone());
-                                if let Ok(captured_frame) = capturer.capture_frame(&window_target) {
-                                    // Add the captured frame to the buffer
-                                    if self.frame_buffer.add_frame(captured_frame).is_err() {
-                                        log::warn!("Failed to add fallback frame to buffer");
-                                    } else {
-                                        log::debug!("Added fallback frame to buffer");
-                                    }
-                                }
-                            }
-                        }
-                    }
+        // Process any pending frame or get a new one from the channel
+        let frame = if let Some(pending) = self.pending_frame.take() {
+            Some(pending)
+        } else {
+            // Try to receive a frame from the processing thread
+            match self.frame_channel.1.try_recv() {
+                Ok(Some(frame)) => Some(frame),
+                Ok(None) => None,
+                Err(std::sync::mpsc::TryRecvError::Empty) => None,
+                Err(e) => {
+                    log::warn!("Error receiving frame from processing thread: {}", e);
+                    None
                 }
-            }
-        }
-        
-        // Safely get a frame from the buffer with timeout
-        let frame = match self.frame_buffer.get_latest_frame_timeout(Duration::from_millis(50)) {
-            Ok(Some(frame)) => frame,
-            Ok(None) => {
-                log::debug!("No frame available in buffer within timeout");
-                // More detailed information for debugging
-                if let Some(target) = &self.capture_target {
-                    log::debug!("Capture target: {:?}", target);
-                }
-                return Ok(false);
-            },
-            Err(e) => {
-                log::error!("Failed to get frame within timeout: {}", e);
-                // Try changing capture method on error
-                if self.performance_metrics.error_count > 3 {
-                    log::info!("Multiple errors detected, toggling capture method");
-                    self.fallback_capture = !self.fallback_capture;
-                    self.performance_metrics.error_count = 0;
-                } else {
-                    self.performance_metrics.error_count += 1;
-                }
-                return Ok(false);
             }
         };
+        
+        // If no frame is available, return early
+        let frame = match frame {
+            Some(frame) => frame,
+            None => return Ok(false)
+        };
 
-        // Measure and log capture time
-        let capture_duration = capture_start.elapsed();
-        self.performance_metrics.capture_time = capture_duration;
-        log::debug!("Frame capture completed in {:?}", capture_duration);
+        // Process the frame only if we have enough time
+        if self.enable_frame_skipping && update_start.elapsed() > Duration::from_millis(self.frame_time_budget as u64 / 2) {
+            // Store the frame for later processing
+            self.pending_frame = Some(frame);
+            log::debug!("Deferring frame processing due to time pressure");
+            return Ok(false);
+        }
 
         // Check if we have a valid frame
         if frame.width() == 0 || frame.height() == 0 {
-            log::warn!("Captured frame has invalid dimensions: {}x{}", frame.width(), frame.height());
+            log::warn!("Frame has invalid dimensions: {}x{}", frame.width(), frame.height());
             return Ok(false);
         }
 
@@ -506,7 +598,7 @@ impl FullscreenUpscalerUi {
         let is_all_black = self.safe_check_if_all_black(&frame);
         
         if is_all_black {
-            log::warn!("Captured frame appears to be all black, possible capture failure");
+            log::warn!("Frame appears to be all black, possible capture failure");
             self.performance_metrics.black_frame_count += 1;
             
             // After several black frames, try recovery
@@ -515,6 +607,7 @@ impl FullscreenUpscalerUi {
                 self.fallback_capture = !self.fallback_capture;
                 self.performance_metrics.black_frame_count = 0;
             }
+            return Ok(false);
         } else {
             // Reset black frame counter
             self.performance_metrics.black_frame_count = 0;
@@ -523,10 +616,14 @@ impl FullscreenUpscalerUi {
         // Memory resource guard - skip this frame if system is under memory pressure
         if self.is_memory_pressure() {
             log::warn!("System under memory pressure, skipping frame processing");
+            // Store the frame for later if not in extreme pressure
+            if self.memory_pressure_counter.unwrap_or(0) < 50 {
+                self.pending_frame = Some(frame);
+            }
             return Ok(false);
         }
 
-        // Attempt to upscale the frame with normal error handling (no catch_unwind)
+        // Upscale the frame
         let upscale_start = Instant::now();
         let upscaled_result = self.upscale_frame(frame.clone());
         
@@ -535,6 +632,7 @@ impl FullscreenUpscalerUi {
         self.performance_metrics.upscale_time = upscale_duration;
         log::debug!("Frame upscaled in {:?}", upscale_duration);
 
+        // Handle upscaling result
         let upscaled = match upscaled_result {
             Some(upscaled) => upscaled,
             None => {
@@ -555,11 +653,18 @@ impl FullscreenUpscalerUi {
             }
         };
 
-        // Convert the upscaled image to raw bytes for the GPU
-        // Use defensive coding to avoid crashes
+        // Check if we're still within time budget
+        if self.enable_frame_skipping && update_start.elapsed() > Duration::from_millis(self.frame_time_budget as u64) {
+            log::warn!("Exceeded frame time budget, deferring texture update");
+            // Store the frame for next cycle (using the upscaled version now)
+            self.pending_frame = Some(upscaled);
+            return Ok(false);
+        }
+
+        // Render the upscaled image to texture
         let render_start = Instant::now();
         
-        // Make sure the upscaled image is valid before processing
+        // Make sure the upscaled image is valid
         if upscaled.width() == 0 || upscaled.height() == 0 {
             log::error!("Invalid upscaled image dimensions: {}x{}", upscaled.width(), upscaled.height());
             return Ok(false);
@@ -574,30 +679,53 @@ impl FullscreenUpscalerUi {
             return Ok(false);
         }
 
-        // Update texture data with upscaled frame
-        self.texture.lock().unwrap().replace(egui::ColorImage::from_rgba_unmultiplied(
-            [upscaled.width() as usize, upscaled.height() as usize],
-            raw_upscaled
-        ));
+        // Update the texture in a thread-safe manner
+        {
+            let ctx = egui::Context::default();
+            let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                [upscaled.width() as usize, upscaled.height() as usize],
+                raw_upscaled
+            );
+            
+            let new_texture = ctx.load_texture(
+                format!("frame_texture_{}", self.frames_processed),
+                color_image,
+                TextureOptions::default()
+            );
+            
+            // Update the texture safely
+            let mut texture_guard = self.texture.lock()
+                .map_err(|e| anyhow::anyhow!("Failed to lock texture for update: {}", e))?;
+            *texture_guard = Some(new_texture);
+        }
 
         // Measure and log rendering time
         let render_duration = render_start.elapsed();
         self.performance_metrics.render_time = render_duration;
         
         // Total processing time for this frame
-        let total_duration = capture_start.elapsed();
+        let total_duration = update_start.elapsed();
         self.performance_metrics.total_frame_time = total_duration;
         self.performance_metrics.frame_count += 1;
         
         // Log performance every 100 frames
         if self.performance_metrics.frame_count % 100 == 0 {
-            log::info!("Performance metrics (last 100 frames):");
+            log::info!("Performance metrics (over 100 frames):");
             log::info!("  Capture: {:?}", self.performance_metrics.capture_time);
             log::info!("  Upscale: {:?}", self.performance_metrics.upscale_time);
             log::info!("  Render: {:?}", self.performance_metrics.render_time);
             log::info!("  Total: {:?}", self.performance_metrics.total_frame_time);
             log::info!("  FPS: {:.2}", 1.0 / self.performance_metrics.total_frame_time.as_secs_f64());
         }
+
+        // Log individual frame timings for detailed diagnostics
+        log::debug!("Frame {} - Capture: {:.2}ms, Upscale: {:.2}ms, Render: {:.2}ms, Total: {:.2}ms",
+            self.frames_processed,
+            self.performance_metrics.capture_time.as_secs_f64() * 1000.0,
+            self.performance_metrics.upscale_time.as_secs_f64() * 1000.0,
+            self.performance_metrics.render_time.as_secs_f64() * 1000.0,
+            total_duration.as_secs_f64() * 1000.0
+        );
 
         Ok(true)
     }
@@ -900,17 +1028,17 @@ impl FullscreenUpscalerUi {
             // Calculate scale factor based on upscaler settings
             // Assume a default scale of 1.5 if no configuration is available
             let scale_factor = 1.5;
-            let target_width = (width as f32 * scale_factor).round() as u32;
-            let target_height = (height as f32 * scale_factor).round() as u32;
-
-            // Validate dimensions to prevent excessive memory usage
-            if target_width > MAX_TEXTURE_SIZE || target_height > MAX_TEXTURE_SIZE {
-                warn!(
-                    "Target dimensions exceed maximum allowed: {}x{} (max: {})",
-                    target_width, target_height, MAX_TEXTURE_SIZE
-                );
-                return Some(frame.clone());
-            }
+            
+            // Get maximum texture size from context for safety
+            let max_size = MAX_TEXTURE_SIZE;
+            
+            // Apply size limits to prevent excessive GPU memory usage
+            let target_width = ((width as f32 * scale_factor).round() as u32)
+                .min(max_size)
+                .min(3840); // Limit to 4K resolution
+            let target_height = ((height as f32 * scale_factor).round() as u32)
+                .min(max_size)
+                .min(2160); // Limit to 4K resolution
 
             // Check if dimensions would require excessive memory
             let estimated_memory = (target_width as u64 * target_height as u64 * 4) / (1024 * 1024);
@@ -959,14 +1087,17 @@ impl FullscreenUpscalerUi {
             match upscaled_result {
                 Ok(upscaled) => {
                     let duration = start.elapsed();
+                    let upscale_time_ms = duration.as_secs_f32() * 1000.0;
+                    
+                    // Track performance metrics
                     trace!(
-                        "Upscaled {}x{} to {}x{} using {} in {:?}",
+                        "Upscaled {}x{} to {}x{} using {} in {:.2}ms",
                         width,
                         height,
                         target_width,
                         target_height,
                         self.upscaler.name(),
-                        duration
+                        upscale_time_ms
                     );
                     
                     // Update performance metrics
@@ -989,6 +1120,27 @@ impl FullscreenUpscalerUi {
                         );
                     }
                     
+                    // Check if the upscaled image is too large for the GPU
+                    if actual_width > MAX_TEXTURE_SIZE || actual_height > MAX_TEXTURE_SIZE {
+                        warn!(
+                            "Upscaled image exceeds maximum texture size: {}x{} (max: {})",
+                            actual_width, actual_height, MAX_TEXTURE_SIZE
+                        );
+                        
+                        // Resize to within limits
+                        let max_width = actual_width.min(MAX_TEXTURE_SIZE);
+                        let max_height = actual_height.min(MAX_TEXTURE_SIZE);
+                        
+                        let resized = image::imageops::resize(
+                            &upscaled,
+                            max_width,
+                            max_height,
+                            image::imageops::FilterType::Triangle
+                        );
+                        
+                        return Some(resized);
+                    }
+                    
                     // Return the upscaled image
                     Some(upscaled)
                 },
@@ -998,16 +1150,24 @@ impl FullscreenUpscalerUi {
                     
                     // Fall back to bilinear upscaling instead of returning original
                     info!("Using fallback bilinear scaling after upscaler failure");
+                    
+                    // Apply size limits to fallback as well
+                    let fallback_width = target_width.min(MAX_TEXTURE_SIZE).min(3840);
+                    let fallback_height = target_height.min(MAX_TEXTURE_SIZE).min(2160);
+                    
                     let fallback_result = image::imageops::resize(
                         &frame, 
-                        target_width, 
-                        target_height, 
+                        fallback_width, 
+                        fallback_height, 
                         image::imageops::FilterType::Triangle // Use bilinear filtering (Triangle)
                     );
                     
                     // Track error count for potential recovery
                     self.performance_metrics.error_count += 1;
                     if self.performance_metrics.error_count > 5 {
+                        // Clean up resources before reinitializing
+                        self.cleanup_textures();
+                        
                         // Force a reinitialization after several errors
                         self.requires_reinitialization = true;
                         self.performance_metrics.error_count = 0;
@@ -1036,6 +1196,8 @@ impl FullscreenUpscalerUi {
                 
                 // Force reinitialization after repeated panics
                 if self.performance_metrics.error_count > 3 {
+                    // Clean up resources before trying to reinitialize
+                    self.cleanup_textures();
                     self.requires_reinitialization = true;
                 }
                 
@@ -1279,13 +1441,27 @@ impl eframe::App for FullscreenUpscalerUi {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         // Check if upscaler needs to be reinitialized
         if self.requires_reinitialization {
+            // Clean up existing resources
+            self.cleanup_textures();
+            // Reinitialize the upscaler
             self.check_and_reinitialize_upscaler();
         }
         
         // Update the texture with the latest frame
+        // Use frame budget for skipping if necessary
+        let frame_budget = Duration::from_millis(self.frame_time_budget as u64);
+        let update_start = Instant::now();
+        
         // Safe error handling to avoid crashes
         match self.update_texture() {
             Ok(_) => {
+                // Measure frame processing time and check if we're lagging
+                let frame_time = update_start.elapsed();
+                if frame_time > frame_budget && self.enable_frame_skipping {
+                    log::warn!("Frame processing took {}ms (budget: {}ms), consider adjusting settings",
+                              frame_time.as_millis(), frame_budget.as_millis());
+                }
+                
                 // Calculate FPS
                 let now = std::time::Instant::now();
                 let frame_time = now.duration_since(self.last_frame_time);
@@ -1319,9 +1495,11 @@ impl eframe::App for FullscreenUpscalerUi {
                 self.frames_processed += 1;
                 
                 // Update input/output size for display
-                if let Some(texture) = &self.texture.lock().unwrap().as_ref() {
-                    let size = texture.size();
-                    self.output_size = (size[0] as u32, size[1] as u32);
+                if let Ok(texture_guard) = self.texture.lock() {
+                    if let Some(texture) = texture_guard.as_ref() {
+                        let size = texture.size();
+                        self.output_size = (size[0] as u32, size[1] as u32);
+                    }
                 }
                 
                 // Update input size from the latest frame
@@ -1331,14 +1509,23 @@ impl eframe::App for FullscreenUpscalerUi {
             },
             Err(e) => {
                 log::error!("Error updating texture: {}", e);
-                // Continue anyway, to avoid crashing the app
+                
+                // Increment error counter and trigger recovery if needed
+                self.performance_metrics.error_count += 1;
+                if self.performance_metrics.error_count > 5 {
+                    log::warn!("Multiple texture update errors, triggering recovery");
+                    self.cleanup_textures();
+                    self.requires_reinitialization = true;
+                    self.performance_metrics.error_count = 0;
+                }
             }
         }
         
         // Check for ESC key to exit fullscreen mode
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            // Signal the capture thread to stop
+            // Signal the capture thread to stop and clean up resources
             self.stop_signal.store(true, Ordering::SeqCst);
+            self.cleanup();
             
             // Close the application
             frame.close();
@@ -1350,6 +1537,12 @@ impl eframe::App for FullscreenUpscalerUi {
             self.show_overlay = !self.show_overlay;
         }
         
+        // Check for F2 key to toggle frame skipping
+        if ctx.input(|i| i.key_pressed(egui::Key::F2)) {
+            self.enable_frame_skipping = !self.enable_frame_skipping;
+            log::info!("Frame skipping {}", if self.enable_frame_skipping { "enabled" } else { "disabled" });
+        }
+        
         // Force the window to be opaque black instead of transparent
         ctx.set_visuals(egui::Visuals::dark());
         
@@ -1357,43 +1550,52 @@ impl eframe::App for FullscreenUpscalerUi {
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(egui::Color32::from_rgb(10, 10, 10)))
             .show(ctx, |ui| {
-                if let Some(texture) = &self.texture.lock().unwrap().as_ref() {
-                    // Get available size
-                    let available_size = ui.available_size();
-                    let texture_size = texture.size_vec2();
-                    
-                    // Calculate the scaling to fit in the available space
-                    // while maintaining aspect ratio
-                    let aspect_ratio = texture_size.x / texture_size.y;
-                    let width = available_size.x;
-                    let height = width / aspect_ratio;
-                    
-                    // Center the image if it's smaller than the available space
-                    let rect = if height <= available_size.y {
-                        let y_offset = (available_size.y - height) / 2.0;
-                        egui::Rect::from_min_size(
-                            egui::pos2(0.0, y_offset),
-                            Vec2::new(width, height)
-                        )
-                    } else {
-                        let height = available_size.y;
-                        let width = height * aspect_ratio;
-                        let x_offset = (available_size.x - width) / 2.0;
-                        egui::Rect::from_min_size(
-                            egui::pos2(x_offset, 0.0),
-                            Vec2::new(width, height)
-                        )
-                    };
-                    
-                    // Simple rendering without catch_unwind
-                    // Use a defensive try pattern to handle errors
-                    match (|| {
-                        ui.put(rect, egui::Image::new(texture.id(), egui::Vec2::new(rect.width(), rect.height())));
-                        Ok::<(), String>(())
-                    })() {
-                        Ok(_) => {},
-                        Err(e) => log::error!("Error rendering texture: {}", e)
-                    };
+                let texture_available = if let Ok(texture_guard) = self.texture.lock() {
+                    texture_guard.is_some()
+                } else {
+                    false
+                };
+                
+                if texture_available {
+                    // Get the texture under lock
+                    if let Ok(texture_guard) = self.texture.lock() {
+                        if let Some(texture) = texture_guard.as_ref() {
+                            // Get available size
+                            let available_size = ui.available_size();
+                            let texture_size = texture.size_vec2();
+                            
+                            // Calculate the scaling to fit in the available space
+                            // while maintaining aspect ratio
+                            let aspect_ratio = texture_size.x / texture_size.y;
+                            let width = available_size.x;
+                            let height = width / aspect_ratio;
+                            
+                            // Center the image if it's smaller than the available space
+                            let rect = if height <= available_size.y {
+                                let y_offset = (available_size.y - height) / 2.0;
+                                egui::Rect::from_min_size(
+                                    egui::pos2(0.0, y_offset),
+                                    Vec2::new(width, height)
+                                )
+                            } else {
+                                let height = available_size.y;
+                                let width = height * aspect_ratio;
+                                let x_offset = (available_size.x - width) / 2.0;
+                                egui::Rect::from_min_size(
+                                    egui::pos2(x_offset, 0.0),
+                                    Vec2::new(width, height)
+                                )
+                            };
+                            
+                            // Simple rendering with error handling
+                            if let Err(e) = (|| -> Result<(), String> {
+                                ui.put(rect, egui::Image::new(texture.id(), egui::Vec2::new(rect.width(), rect.height())));
+                                Ok(())
+                            })() {
+                                log::error!("Error rendering texture: {}", e);
+                            }
+                        }
+                    }
                     
                     // Draw performance overlay in the top-right corner only if enabled
                     if self.show_overlay {
@@ -1421,11 +1623,26 @@ impl eframe::App for FullscreenUpscalerUi {
                 }
             });
         
-        // Request immediate repaint for higher FPS rather than scheduled
-        ctx.request_repaint();
+        // Use a smarter repaint strategy instead of requesting immediate repaint
+        let next_frame_time = if self.fps > 0.0 {
+            // Use current FPS to calculate next frame time
+            Duration::from_secs_f32(1.0 / self.fps.max(30.0))
+        } else {
+            // Default to 60 FPS if we don't have FPS data yet
+            Duration::from_millis(16)
+        };
         
-        // Safe window position update without catch_unwind
+        // Request repaint after a short delay, balancing responsiveness and CPU usage
+        ctx.request_repaint_after(next_frame_time.min(Duration::from_millis(16)));
+        
+        // Safe window position update
         self.update_source_window_position(frame);
+    }
+    
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // Clean up resources when the app exits
+        log::info!("Fullscreen upscaler exiting, cleaning up resources");
+        self.cleanup();
     }
 }
 
