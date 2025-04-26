@@ -11,8 +11,13 @@ use std::{
     sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}}, 
     thread,
     time::{Duration, Instant},
-    marker::PhantomData
+    marker::PhantomData,
+    collections::HashMap,
+    collections::VecDeque,
 };
+
+// Import threadpool for offloading upscaling work
+use threadpool::ThreadPool;
 
 // Windows API for process management (cfg guard added in implementation)
 #[cfg(windows)]
@@ -111,10 +116,179 @@ pub struct AppState {
     upscaler: Option<Box<dyn Upscaler>>,
     /// Frames processed
     frames_processed: usize,
+    /// Worker thread pool for upscaling operations
+    upscale_threadpool: ThreadPool,
+    /// In-progress upscaled frame
+    pending_upscaled_frame: Arc<Mutex<Option<image::RgbaImage>>>,
+    /// Flag to indicate an upscale operation is in progress
+    upscale_in_progress: Arc<AtomicBool>,
+    /// Last time an upscale was requested
+    last_upscale_request: Option<Instant>,
+    /// Texture dimensions that were last requested
+    last_texture_dimensions: Option<(u32, u32)>,
+    /// Texture cache for memory management
+    texture_cache: TextureCache,
+    /// Current GPU memory usage limit flag
+    gpu_memory_warning: bool,
+    /// Last memory check time
+    last_memory_check: Option<Instant>,
+    /// Frame rate budgeting for UI responsiveness
+    frame_budget: FrameBudget,
+    /// Upscaler operation timeout in milliseconds
+    upscaler_timeout_ms: u64,
+    /// Start time of current upscaling operation
+    upscale_start_time: Option<Instant>,
+    /// Upscaled frame texture
+    upscaled_texture: Option<TextureHandle>,
+    /// Upscaled frame
+    upscaled_frame: Option<image::RgbaImage>,
+    /// Frame timestamps
+    frame_timestamps: Vec<Instant>,
+    /// Current frame
+    current_frame: Option<Arc<FrameBuffer>>,
 }
 
 // Type definition for upscaling buffer
 type UpscalingBufferType = Arc<FrameBuffer>;
+
+/// Texture cache to prevent memory leaks and improve reuse
+struct TextureCache {
+    /// Map of texture size -> texture handle
+    textures: HashMap<(u32, u32), TextureHandle>,
+    /// Last time each texture was used
+    last_used: HashMap<(u32, u32), Instant>,
+    /// Total texture memory usage in bytes
+    texture_memory_usage: usize,
+}
+
+impl TextureCache {
+    fn new() -> Self {
+        Self {
+            textures: HashMap::new(),
+            last_used: HashMap::new(),
+            texture_memory_usage: 0,
+        }
+    }
+    
+    /// Get a texture of the specified size, reusing if possible
+    fn get_texture(&mut self, ctx: &egui::Context, size: (u32, u32), pixels: &[u8]) -> TextureHandle {
+        let now = Instant::now();
+        
+        // Clean up old textures periodically
+        self.cleanup_old_textures(ctx);
+        
+        // Update last used time
+        self.last_used.insert(size, now);
+        
+        // Get or create texture
+        if let Some(texture) = self.textures.get(&size) {
+            // Update existing texture
+            texture.set(
+                egui::ColorImage::from_rgba_unmultiplied([size.0 as _, size.1 as _], pixels),
+                egui::TextureOptions::default()
+            );
+            texture.clone()
+        } else {
+            // Create new texture
+            let color_image = egui::ColorImage::from_rgba_unmultiplied([size.0 as _, size.1 as _], pixels);
+            let texture = ctx.load_texture(
+                format!("texture_{}_{}_{}", size.0, size.1, now.elapsed().as_millis()),
+                color_image.clone(),
+                egui::TextureOptions::default()
+            );
+            
+            // Update memory usage tracking
+            let texture_bytes = size.0 as usize * size.1 as usize * 4; // RGBA = 4 bytes per pixel
+            self.texture_memory_usage += texture_bytes;
+            
+            // Store in cache
+            self.textures.insert(size, texture.clone());
+            
+            texture
+        }
+    }
+    
+    /// Clean up old unused textures to prevent memory leaks
+    fn cleanup_old_textures(&mut self, ctx: &egui::Context) {
+        let now = Instant::now();
+        let max_age = Duration::from_secs(5); // Keep textures for 5 seconds
+        
+        // Find textures to remove
+        let textures_to_remove: Vec<(u32, u32)> = self.last_used.iter()
+            .filter(|(_, last_use)| now.duration_since(**last_use) > max_age)
+            .map(|(size, _)| *size)
+            .collect();
+        
+        // Remove old textures
+        for size in textures_to_remove {
+            if let Some(texture) = self.textures.remove(&size) {
+                // Free texture
+                let handle_id = texture.id();
+                ctx.forget_image(handle_id);
+                
+                // Update memory tracking
+                let texture_bytes = size.0 as usize * size.1 as usize * 4;
+                self.texture_memory_usage = self.texture_memory_usage.saturating_sub(texture_bytes);
+                
+                // Remove from last_used
+                self.last_used.remove(&size);
+                
+                log::debug!("Cleaned up texture of size {}x{}", size.0, size.1);
+            }
+        }
+    }
+    
+    /// Get total texture memory usage in MB
+    fn get_memory_usage_mb(&self) -> f32 {
+        self.texture_memory_usage as f32 / (1024.0 * 1024.0)
+    }
+}
+
+/// Manages frame rate budgeting to prevent UI lag
+struct FrameBudget {
+    timestamps: VecDeque<Instant>,
+    throttling: bool,
+    max_frames_per_second: usize,
+    window_size_seconds: f32,
+}
+
+impl FrameBudget {
+    fn new() -> Self {
+        Self {
+            timestamps: VecDeque::with_capacity(120),
+            throttling: false,
+            max_frames_per_second: 30, // Target 30 FPS for upscaling operations
+            window_size_seconds: 1.0,  // Measure frames over 1 second window
+        }
+    }
+    
+    fn add_frame(&mut self, now: Instant) {
+        self.timestamps.push_back(now);
+        
+        // Remove timestamps older than our window
+        let cutoff = now - Duration::from_secs_f32(self.window_size_seconds);
+        while let Some(ts) = self.timestamps.front() {
+            if *ts < cutoff {
+                self.timestamps.pop_front();
+            } else {
+                break;
+            }
+        }
+        
+        // Update throttling state based on current rate
+        let current_rate = self.timestamps.len() as f32 / self.window_size_seconds;
+        self.throttling = current_rate > self.max_frames_per_second as f32;
+    }
+    
+    fn is_throttling(&self) -> bool {
+        self.throttling
+    }
+    
+    fn reset(&mut self) {
+        self.timestamps.clear();
+        self.throttling = false;
+    }
+}
 
 impl Default for AppState {
     fn default() -> Self {
@@ -168,6 +342,21 @@ impl Default for AppState {
             scaling_process: None,
             upscaler: None,
             frames_processed: 0,
+            upscale_threadpool: ThreadPool::new(2), // Use 2 worker threads for upscaling
+            pending_upscaled_frame: Arc::new(Mutex::new(None)),
+            upscale_in_progress: Arc::new(AtomicBool::new(false)),
+            last_upscale_request: None,
+            last_texture_dimensions: None,
+            texture_cache: TextureCache::new(),
+            gpu_memory_warning: false,
+            last_memory_check: None,
+            frame_budget: FrameBudget::new(),
+            upscaler_timeout_ms: 5000, // 5 second timeout for upscaler operations
+            upscale_start_time: None,
+            upscaled_texture: None,
+            upscaled_frame: None,
+            frame_timestamps: Vec::new(),
+            current_frame: None,
         }
     }
 }
@@ -254,6 +443,93 @@ impl eframe::App for AppState {
         // Update upscaling mode if active
         if self.is_upscaling {
             self.update_upscaling_mode(ctx, frame);
+        }
+
+        // Check for upscaler timeout
+        if let Some(start_time) = self.upscale_start_time {
+            if start_time.elapsed().as_millis() as u64 > self.upscaler_timeout_ms {
+                log::warn!("Upscale operation timed out after {}ms", self.upscaler_timeout_ms);
+                self.is_upscaling = false;
+                self.upscale_start_time = None;
+            }
+        }
+        
+        // Check if we have a finished upscaled frame
+        if let Ok(upscaled_frame) = self.upscaled_frame_receiver.try_recv() {
+            log::debug!("Received upscaled frame with size: {}x{}", 
+                      upscaled_frame.width, upscaled_frame.height);
+            
+            // Create texture from upscaled frame
+            let texture_id = self.texture_cache.get_or_create_texture(
+                ctx, &upscaled_frame, 
+                format!("upscaled_frame_{}", self.frames_processed)
+            );
+            
+            // Store the upscaled frame and texture
+            self.upscaled_texture = Some(texture_id);
+            self.upscaled_frame = Some(upscaled_frame);
+            
+            // Clear upscaling flag
+            self.is_upscaling = false;
+            self.upscale_start_time = None;
+            
+            // Update frame counter
+            self.frames_processed += 1;
+            
+            // Update timestamp
+            self.frame_timestamps.push(Instant::now());
+            
+            // Keep only the last 100 timestamps
+            if self.frame_timestamps.len() > 100 {
+                self.frame_timestamps.remove(0);
+            }
+        }
+        
+        // Determine whether we need to repaint
+        let mut should_repaint = false;
+        
+        // Only request repaint if we have a pending frame or are processing
+        if self.is_upscaling || self.upscaled_frame.is_some() || 
+           self.pending_upscaled_frame.load(Ordering::SeqCst) {
+            // Dynamic repaint rate based on memory and frame budget
+            let repaint_delay_ms = if self.gpu_memory_warning {
+                100 // 10 FPS when under memory pressure
+            } else if self.frame_budget.is_throttling() {
+                50 // 20 FPS when throttling
+            } else {
+                16 // Roughly 60 FPS normally
+            };
+            
+            ctx.request_repaint_after(Duration::from_millis(repaint_delay_ms));
+            should_repaint = true;
+        }
+        
+        // Always process input even if we're not upscaling
+        self.process_input(ctx);
+
+        // Check if we should update GPU memory usage
+        if let Some(last_check) = self.last_memory_check {
+            // Check memory every second
+            if last_check.elapsed() > Duration::from_secs(1) {
+                self.check_gpu_memory_pressure();
+                self.last_memory_check = Some(Instant::now());
+            }
+        } else {
+            self.check_gpu_memory_pressure();
+            self.last_memory_check = Some(Instant::now());
+        }
+        
+        // Clean up old textures on a regular basis
+        self.texture_cache.cleanup_old_textures(Duration::from_secs(5));
+        
+        // Check if we need to schedule a new upscale
+        if !self.is_upscaling && 
+           !self.pending_upscaled_frame.load(Ordering::SeqCst) &&
+           self.current_frame.is_some() &&
+           should_repaint {
+            if let Some(frame) = &self.current_frame {
+                self.schedule_next_upscale(frame);
+            }
         }
     }
 }
@@ -1108,257 +1384,86 @@ impl AppState {
                 if let Some(buffer) = &self.upscaling_buffer {
                     log::debug!("Upscaling buffer exists, trying to get latest frame");
                     
-                    match buffer.get_latest_frame() {
-                        Ok(Some(frame)) => {
-                            log::info!("Frame received: dimensions={}x{}, format=RGBA", 
-                                     frame.width(), frame.height());
-                            
-                            // Check for valid frame dimensions before proceeding
-                            if frame.width() == 0 || frame.height() == 0 {
-                                log::warn!("Received frame with invalid dimensions: {}x{}", frame.width(), frame.height());
-                                ui.centered_and_justified(|ui| {
-                                    ui.heading("Waiting for valid frame...");
-                                    ui.label("Received frame with zero dimensions. Please ensure the source window is visible.");
-                                });
-                                // Request continuous repainting until we get a valid frame
-                                ctx.request_repaint();
-                                return;
+                    // Check if we already have a pending upscaled frame
+                    let mut have_pending_frame = false;
+                    if let Ok(pending_frame_guard) = self.pending_upscaled_frame.lock() {
+                        have_pending_frame = pending_frame_guard.is_some();
+                    }
+                    
+                    // First, check if there's an upscale in progress
+                    let upscale_in_progress = self.upscale_in_progress.load(Ordering::SeqCst);
+                    
+                    if have_pending_frame {
+                        // We have a ready frame from a previous upscale operation
+                        if let Ok(mut pending_frame_guard) = self.pending_upscaled_frame.lock() {
+                            if let Some(upscaled) = pending_frame_guard.take() {
+                                // We have an upscaled frame ready to display
+                                log::info!("Using previously upscaled frame: {}x{}", 
+                                         upscaled.width(), upscaled.height());
+                                
+                                let size = [upscaled.width() as _, upscaled.height() as _];
+                                let pixels = upscaled.as_raw();
+                                
+                                self.render_frame_to_screen(ui, available_size, size, pixels);
+                                
+                                // Track frame processing
+                                self.frames_processed += 1;
+                                log::debug!("Frames processed: {}", self.frames_processed);
+                                
+                                // Schedule next upscale operation if not already in progress
+                                if !upscale_in_progress {
+                                    self.schedule_next_upscale(buffer);
+                                }
                             }
+                        }
+                    } else if !upscale_in_progress {
+                        // No upscaling in progress and no pending frame, schedule a new upscale
+                        self.schedule_next_upscale(buffer);
+                    } else {
+                        // Upscaling is in progress, render the last frame if available
+                        if let Some(texture) = &self.frame_texture {
+                            log::debug!("Upscaling in progress, rendering last frame");
                             
-                            // Frame received, proceed with upscaling
-                            if let Some(upscaler) = &mut self.upscaler {
-                                log::debug!("Upscaler exists: name={}, initialized={}, input_dimensions={}x{}", 
-                                          upscaler.name(), !upscaler.needs_initialization(),
-                                          upscaler.input_width(), upscaler.input_height());
-                                
-                                // Check if upscaler needs initialization or re-initialization with correct dimensions
-                                if upscaler.needs_initialization() || 
-                                   upscaler.input_width() != frame.width() || 
-                                   upscaler.input_height() != frame.height() {
-                                    
-                                    log::info!("Initializing upscaler with dimensions {}x{}", frame.width(), frame.height());
-                                    
-                                    // The profile has numeric indexes for upscaling tech and quality
-                                    // Tech: 0 = auto, 1 = FSR, 2 = DLSS, 3 = basic
-                                    // Quality: 0 = ultra, 1 = quality, 2 = balanced, 3 = performance
-                                    let scale_factor = match self.profile.upscaling_tech {
-                                        1 => { // FSR
-                                            match self.profile.upscaling_quality {
-                                                0 => 1.3, // Ultra quality
-                                                1 => 1.5, // Quality
-                                                2 => 1.7, // Balanced
-                                                3 => 2.0, // Performance
-                                                _ => self.profile.scale_factor // Use profile's scale factor as fallback
-                                            }
-                                        },
-                                        2 => { // DLSS
-                                            match self.profile.upscaling_quality {
-                                                0 => 1.3, // Ultra quality
-                                                1 => 1.5, // Quality
-                                                2 => 1.7, // Balanced
-                                                3 => 2.0, // Performance
-                                                _ => self.profile.scale_factor // Use profile's scale factor as fallback
-                                            }
-                                        },
-                                        _ => self.profile.scale_factor // Use profile's scale factor for other tech
-                                    };
-                                    
-                                    log::info!("Using scale factor: {}, profile tech: {}, profile quality: {}", 
-                                             scale_factor, self.profile.upscaling_tech, self.profile.upscaling_quality);
-                                    
-                                    let out_width = (frame.width() as f32 * scale_factor) as u32;
-                                    let out_height = (frame.height() as f32 * scale_factor) as u32;
-                                    
-                                    log::info!("Configuring upscaler for {}x{} -> {}x{} (scale: {}x)", 
-                                              frame.width(), frame.height(), out_width, out_height, scale_factor);
-                                    
-                                    if let Err(e) = upscaler.initialize(frame.width(), frame.height(), out_width, out_height) {
-                                        log::error!("Failed to initialize upscaler: {}", e);
-                                        ui.centered_and_justified(|ui| {
-                                            ui.heading("Upscaler initialization error");
-                                            ui.label(format!("Error: {}", e));
-                                        });
-                                        return;
-                                    }
-                                    
-                                    log::info!("Upscaler successfully initialized");
-                                }
-                                
-                                // Perform upscaling on the captured frame
-                                log::debug!("Performing upscaling on frame");
-                                match upscaler.upscale(&frame) {
-                                    Ok(upscaled) => {
-                                        // Successfully upscaled the frame
-                                        log::info!("Upscaling successful, output dimensions: {}x{}", 
-                                                 upscaled.width(), upscaled.height());
-                                        
-                                        let size = [upscaled.width() as _, upscaled.height() as _];
-                                        let pixels = upscaled.as_raw();
-                                        
-                                        // Check if all pixels are black
-                                        let all_black = pixels.chunks(4)
-                                            .take(100) // Sample first 100 pixels
-                                            .all(|pixel| pixel[0] == 0 && pixel[1] == 0 && pixel[2] == 0);
-                                            
-                                        if all_black {
-                                            log::warn!("Upscaled image contains only black pixels!");
-                                        }
-                                        
-                                        log::debug!("Creating/updating texture with size {}x{}", size[0], size[1]);
-                                        
-                                        let texture = self.frame_texture.get_or_insert_with(|| {
-                                            log::debug!("Creating new texture");
-                                            let tex = ui.ctx().load_texture(
-                                                "upscaled_frame",
-                                                eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels),
-                                                eframe::egui::TextureOptions::default()
-                                            );
-                                            
-                                            log::debug!("Created texture ID={:?}, size={}x{}", 
-                                                     tex.id(), tex.size()[0], tex.size()[1]);
-                                            tex
-                                        });
-                                        
-                                        if texture.size() != size {
-                                            log::debug!("Texture size mismatch: texture={}x{}, frame={}x{}, creating new texture", 
-                                                     texture.size()[0], texture.size()[1], size[0], size[1]);
-                                            *texture = ui.ctx().load_texture(
-                                                "upscaled_frame",
-                                                eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels),
-                                                eframe::egui::TextureOptions::default()
-                                            );
-                                        } else {
-                                            log::debug!("Updating existing texture");
-                                            texture.set(eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels), eframe::egui::TextureOptions::default());
-                                        }
-                                        
-                                        // Calculate dimensions to fit the screen
-                                        let aspect_ratio = size[0] as f32 / size[1] as f32;
-                                        let max_width = available_size.x;
-                                        let max_height = available_size.y;
-                                        
-                                        let (width, height) = if aspect_ratio > max_width / max_height {
-                                            (max_width, max_width / aspect_ratio)
-                                        } else {
-                                            (max_height * aspect_ratio, max_height)
-                                        };
-                                        
-                                        // Create a centered rectangle
-                                        let rect = eframe::egui::Rect::from_min_size(
-                                            eframe::egui::pos2((max_width - width) * 0.5, (max_height - height) * 0.5),
-                                            eframe::egui::vec2(width, height)
-                                        );
-                                        
-                                        log::debug!("Drawing image at rect: pos=({}, {}), size={}x{}", 
-                                                 rect.min.x, rect.min.y, rect.width(), rect.height());
-                                        
-                                        // Approach 1: Direct rendering with painter
-                                        let painter = ui.painter();
-                                        painter.image(
-                                            texture.id(), 
-                                            rect, 
-                                            eframe::egui::Rect::from_min_max(
-                                                eframe::egui::pos2(0.0, 0.0),
-                                                eframe::egui::pos2(1.0, 1.0)
-                                            ),
-                                            eframe::egui::Color32::WHITE
-                                        );
-                                        
-                                        // Approach 2: Widget-based rendering
-                                        ui.allocate_ui_at_rect(rect, |ui| {
-                                            ui.centered_and_justified(|ui| {
-                                                ui.image(texture.id(), eframe::egui::vec2(width, height));
-                                                
-                                                // Display a frame counter in the corner
-                                                ui.put(
-                                                    eframe::egui::Rect::from_min_size(
-                                                        eframe::egui::pos2(10.0, 10.0),
-                                                        eframe::egui::vec2(100.0, 20.0)
-                                                    ),
-                                                    eframe::egui::Label::new(
-                                                        eframe::egui::RichText::new(format!("Frame: {}", self.frames_processed))
-                                                            .size(16.0)
-                                                            .color(eframe::egui::Color32::GREEN)
-                                                    )
-                                                );
-                                            });
-                                        });
-                                        
-                                        self.frames_processed += 1;
-                                        log::debug!("Frames processed: {}", self.frames_processed);
-                                    },
-                                    Err(e) => {
-                                        // Error during upscaling
-                                        log::error!("Upscaling error: {}", e);
-                                        ui.centered_and_justified(|ui| {
-                                            ui.label(eframe::egui::RichText::new(format!("Upscaling Error: {}", e))
-                                                .size(18.0).color(eframe::egui::Color32::RED));
-                                        });
-                                    }
-                                }
+                            // Calculate dimensions to fit the screen
+                            let texture_size = texture.size_vec2();
+                            let aspect_ratio = texture_size.x / texture_size.y;
+                            let max_width = available_size.x;
+                            let max_height = available_size.y;
+                            
+                            let (width, height) = if aspect_ratio > max_width / max_height {
+                                (max_width, max_width / aspect_ratio)
                             } else {
-                                // This case should ideally not happen if upscaling mode is active
-                                log::warn!("Upscaling mode active, but no upscaler found!");
-                                // Fallback to displaying raw frame
-                                log::info!("Fallback: displaying raw frame directly");
-                                let size = [frame.width() as _, frame.height() as _];
-                                let pixels = frame.as_raw();
-                                
-                                let texture = self.frame_texture.get_or_insert_with(|| {
-                                    ui.ctx().load_texture(
-                                        "raw_frame",
-                                        eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels),
-                                        eframe::egui::TextureOptions::default()
-                                    )
-                                });
-                                
-                                if texture.size() != size {
-                                    *texture = ui.ctx().load_texture(
-                                        "raw_frame",
-                                        eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels),
-                                        eframe::egui::TextureOptions::default()
-                                    );
-                                } else {
-                                    texture.set(eframe::egui::ColorImage::from_rgba_unmultiplied(size, pixels), eframe::egui::TextureOptions::default());
-                                }
-                                
-                                ui.centered_and_justified(|ui| {
-                                    ui.label(eframe::egui::RichText::new("Warning: No upscaler available")
-                                        .size(18.0).color(eframe::egui::Color32::YELLOW));
-                                    
-                                    let aspect_ratio = size[0] as f32 / size[1] as f32;
-                                    let max_width = available_size.x;
-                                    let max_height = available_size.y;
-                                    let (width, height) = if aspect_ratio > max_width / max_height {
-                                        (max_width, max_width / aspect_ratio)
-                                    } else {
-                                        (max_height * aspect_ratio, max_height)
-                                    };
-                                    let rect = eframe::egui::Rect::from_min_size(
-                                        eframe::egui::pos2((max_width - width) * 0.5, (max_height - height) * 0.5),
-                                        eframe::egui::vec2(width, height)
-                                    );
-                                    ui.put(rect, eframe::egui::Image::new(texture, eframe::egui::vec2(width, height)));
-                                });
-                            }
-                        },
-                        Ok(None) => {
-                            log::warn!("No frame available in buffer");
+                                (max_height * aspect_ratio, max_height)
+                            };
+                            
+                            // Create a centered rectangle
+                            let rect = eframe::egui::Rect::from_min_size(
+                                eframe::egui::pos2((max_width - width) * 0.5, (max_height - height) * 0.5),
+                                eframe::egui::vec2(width, height)
+                            );
+                            
+                            ui.put(rect, eframe::egui::Image::new(texture.id(), eframe::egui::vec2(width, height)));
+                            
+                            // Show a loading indicator during upscaling
+                            let loading_rect = eframe::egui::Rect::from_min_size(
+                                eframe::egui::pos2(max_width - 120.0, 10.0),
+                                eframe::egui::vec2(110.0, 24.0)
+                            );
+                            
+                            ui.put(
+                                loading_rect,
+                                eframe::egui::Label::new(
+                                    eframe::egui::RichText::new("Processing...")
+                                        .size(16.0)
+                                        .color(eframe::egui::Color32::from_rgb(255, 170, 0))
+                                )
+                            );
+                        } else {
+                            // First frame or waiting for upscale operation to complete
                             ui.centered_and_justified(|ui| {
-                                ui.heading("Waiting for frames...");
-                                ui.label("No frames available in buffer. Please ensure the source window is visible and not minimized.");
+                                ui.heading("Processing first frame...");
+                                ui.label("Please wait while the upscaler initializes.");
                             });
-                            // Request a repaint for continuous checking
-                            ctx.request_repaint();
-                        },
-                        Err(e) => {
-                            log::error!("Error getting frame from buffer: {}", e);
-                            ui.centered_and_justified(|ui| {
-                                ui.heading("Error getting frame");
-                                ui.label(format!("Error: {}", e));
-                            });
-                            // Repaint to try again
-                            ctx.request_repaint();
                         }
                     }
                 } else {
@@ -1368,14 +1473,146 @@ impl AppState {
                         ui.label("Upscaling mode is active but no frame buffer is available.");
                         ui.label("This is likely a bug in the application.");
                     });
-                    
-                    // Request a repaint to check again
-                    ctx.request_repaint();
                 }
             });
+        
+        // Use smarter repaint strategy based on frame state and upscaling status
+        let repaint_after = if self.upscale_in_progress.load(Ordering::SeqCst) {
+            // If upscaling is in progress, check more often
+            Duration::from_millis(8)  // ~120 fps check rate 
+        } else if self.frames_processed < 5 {
+            // During startup, check frequently
+            Duration::from_millis(16) // ~60 fps
+        } else {
+            // Normal operation, based on target FPS
+            let target_fps = self.profile.fps.max(30.0);
+            Duration::from_secs_f32(1.0 / target_fps)
+        };
+        
+        ctx.request_repaint_after(repaint_after);
+    }
+    
+    /// Schedule the next upscale operation on the thread pool
+    fn schedule_next_upscale(&mut self, frame: &Arc<FrameBuffer>) {
+        if self.is_upscaling || !self.auto_upscale || self.pending_upscaled_frame.load(Ordering::SeqCst) {
+            return;
+        }
+        
+        // Clone the frame for the worker thread
+        let frame_clone = frame.clone();
+        let settings = self.settings.clone();
+        let upscale_sender = self.upscaled_frame_sender.clone();
+        let pending_flag = self.pending_upscaled_frame.clone();
+        
+        // Set the pending flag before spawning the thread
+        pending_flag.store(true, Ordering::SeqCst);
+        
+        // Record start time for timeout detection
+        self.upscale_start_time = Some(Instant::now());
+        self.is_upscaling = true;
+        
+        // Add frame to budget
+        self.frame_budget.add_frame(Instant::now());
+        
+        // Spawn worker thread to perform upscale
+        std::thread::spawn(move || {
+            let engine = UpscaleEngine::new(&settings);
+            let result = engine.upscale(&frame_clone);
             
-        // Always request a continuous repaint while in upscaling mode
-        ctx.request_repaint();
+            match result {
+                Ok(upscaled_frame) => {
+                    // Send the upscaled frame back to the UI thread
+                    let _ = upscale_sender.send(upscaled_frame);
+                },
+                Err(e) => {
+                    log::error!("Upscale failed: {}", e);
+                }
+            }
+            
+            // Clear the pending flag
+            pending_flag.store(false, Ordering::SeqCst);
+        });
+    }
+    
+    /// Render a frame to the screen with proper texture management
+    fn render_frame_to_screen(&mut self, ui: &mut eframe::egui::Ui, available_size: eframe::egui::Vec2, size: [usize; 2], pixels: &[u8]) {
+        // Use our texture cache instead of storing directly in self.frame_texture
+        let texture = self.texture_cache.get_texture(
+            ui.ctx(), 
+            (size[0] as u32, size[1] as u32), 
+            pixels
+        );
+        
+        // Store the texture for reference (only valid until next time this is called)
+        self.frame_texture = Some(texture.clone());
+        
+        // Calculate dimensions to fit the screen
+        let aspect_ratio = size[0] as f32 / size[1] as f32;
+        let max_width = available_size.x;
+        let max_height = available_size.y;
+        
+        let (width, height) = if aspect_ratio > max_width / max_height {
+            (max_width, max_width / aspect_ratio)
+        } else {
+            (max_height * aspect_ratio, max_height)
+        };
+        
+        // Create a centered rectangle
+        let rect = eframe::egui::Rect::from_min_size(
+            eframe::egui::pos2((max_width - width) * 0.5, (max_height - height) * 0.5),
+            eframe::egui::vec2(width, height)
+        );
+        
+        log::debug!("Drawing image at rect: pos=({}, {}), size={}x{}", 
+                 rect.min.x, rect.min.y, rect.width(), rect.height());
+        
+        // Draw the image
+        ui.put(rect, eframe::egui::Image::new(texture.id(), eframe::egui::vec2(width, height)));
+        
+        // Display performance counter in the corner if enabled
+        if self.settings.show_fps_counter {
+            let memory_text = if self.gpu_memory_warning {
+                format!("| MEM: HIGH!")
+            } else {
+                format!("| MEM: {:.1} MB", self.texture_cache.get_memory_usage_mb())
+            };
+            
+            ui.put(
+                eframe::egui::Rect::from_min_size(
+                    eframe::egui::pos2(10.0, 10.0),
+                    eframe::egui::vec2(200.0, 20.0)
+                ),
+                eframe::egui::Label::new(
+                    eframe::egui::RichText::new(format!("Frame: {} | FPS: {:.1} {}", 
+                                                     self.frames_processed,
+                                                     self.calculate_current_fps(),
+                                                     memory_text))
+                        .size(14.0)
+                        .color(if self.gpu_memory_warning {
+                            eframe::egui::Color32::RED
+                        } else {
+                            eframe::egui::Color32::GREEN
+                        })
+                )
+            );
+        }
+        
+        // Check GPU memory status
+        self.check_gpu_memory(ui.ctx());
+    }
+    
+    /// Calculate current FPS
+    fn calculate_current_fps(&self) -> f32 {
+        if let Some(last_request) = self.last_upscale_request {
+            let elapsed = last_request.elapsed();
+            if elapsed.as_secs_f32() > 0.0 {
+                1.0 / elapsed.as_secs_f32()
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        }
     }
     
     /// Launch the fullscreen upscaling mode with current profile settings
@@ -1762,12 +1999,139 @@ impl AppState {
             self.status_message_type = StatusMessageType::Error;
         }
     }
+
+    /// Check GPU memory pressure
+    fn check_gpu_memory(&mut self, ctx: &egui::Context) -> bool {
+        // Only check periodically to avoid performance impact
+        let should_check = if let Some(last_check) = self.last_memory_check {
+            last_check.elapsed() > Duration::from_secs(1)
+        } else {
+            true
+        };
+        
+        if !should_check {
+            return self.gpu_memory_warning;
+        }
+        
+        self.last_memory_check = Some(Instant::now());
+        
+        // Get the texture memory usage from our cache
+        let texture_memory_mb = self.texture_cache.get_memory_usage_mb();
+        
+        // Check for high memory usage
+        // This is a simple heuristic - in a real app you would query the GPU for actual limits
+        let memory_threshold_mb = 2048.0; // 2 GB threshold for gaming PCs
+        let memory_pressure = texture_memory_mb > memory_threshold_mb;
+        
+        // Log memory usage and pressure
+        if memory_pressure {
+            log::warn!("High GPU memory usage: {:.1} MB (threshold: {:.1} MB)", 
+                     texture_memory_mb, memory_threshold_mb);
+        } else {
+            log::debug!("Current GPU memory usage: {:.1} MB", texture_memory_mb);
+        }
+        
+        // Update warning flag
+        self.gpu_memory_warning = memory_pressure;
+        
+        memory_pressure
+    }
+
+    fn process_input(&mut self, ctx: &egui::Context) {
+        // Process keyboard inputs
+        if ctx.input_mut().consume_key(egui::Modifiers::NONE, egui::Key::Space) {
+            self.toggle_upscaling();
+        }
+        
+        // Process drag and drop
+        if !ctx.input(|i| i.raw.dropped_files.is_empty()) {
+            ctx.input(|i| {
+                let file = &i.raw.dropped_files[0];
+                if let Some(path) = &file.path {
+                    log::info!("File dropped: {:?}", path);
+                    self.load_image(path);
+                }
+            });
+        }
+    }
+
+    fn check_gpu_memory_pressure(&mut self) {
+        // This is a simplified implementation - in a real app, you'd query the GPU
+        // For this example, we'll use a heuristic based on the number of textures
+        let num_textures = self.texture_cache.texture_count();
+        let memory_estimate = num_textures * 50; // Very rough estimate in MB
+        
+        // Set warning flag if we're using too much memory
+        self.gpu_memory_warning = memory_estimate > 1000; // 1GB threshold
+        
+        if self.gpu_memory_warning {
+            log::warn!("GPU memory pressure detected: ~{}MB", memory_estimate);
+            // Force texture cleanup when under pressure
+            self.texture_cache.cleanup_old_textures(Duration::from_secs(1));
+        }
+    }
+    
+    fn load_image(&mut self, path: &Path) {
+        // Try to load the image
+        match image::open(path) {
+            Ok(img) => {
+                let rgba = img.to_rgba8();
+                let width = rgba.width();
+                let height = rgba.height();
+                log::info!("Loaded image: {}x{}", width, height);
+                
+                // Create frame buffer from image
+                let frame = Arc::new(FrameBuffer {
+                    data: rgba,
+                    width,
+                    height,
+                });
+                
+                // Store as current frame
+                self.current_frame = Some(frame.clone());
+                
+                // Reset upscaling state
+                self.is_upscaling = false;
+                self.upscale_start_time = None;
+                
+                // Reset frame budget when loading a new image
+                self.frame_budget.reset();
+                
+                // Schedule upscale
+                self.schedule_next_upscale(&frame);
+            },
+            Err(e) => {
+                log::error!("Failed to load image: {}", e);
+            }
+        }
+    }
+    
+    fn toggle_upscaling(&mut self) {
+        self.auto_upscale = !self.auto_upscale;
+        log::info!("Auto upscaling: {}", self.auto_upscale);
+        
+        if self.auto_upscale && !self.is_upscaling && 
+           self.current_frame.is_some() && 
+           !self.pending_upscaled_frame.load(Ordering::SeqCst) {
+            if let Some(frame) = &self.current_frame {
+                self.schedule_next_upscale(frame);
+            }
+        }
+    }
 }
 
 // Add a cleanup function to ensure we kill the scaling process on exit
 impl Drop for AppState {
     fn drop(&mut self) {
         self.kill_scaling_process();
+    }
+}
+
+// Implement Drop trait to ensure texture cleanup on exit
+impl Drop for TextureCache {
+    fn drop(&mut self) {
+        log::info!("Cleaning up texture cache: {} textures, {:.1} MB", 
+                 self.textures.len(), self.get_memory_usage_mb());
     }
 }
 
