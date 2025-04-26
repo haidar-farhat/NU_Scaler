@@ -7,6 +7,7 @@ pub mod fsr3;
 pub mod dlss;
 pub mod common;
 pub mod vulkan;
+pub mod xess;
 
 use common::UpscalingAlgorithm;
 
@@ -30,6 +31,8 @@ pub enum UpscalingTechnology {
     FSR3,
     // NVIDIA Deep Learning Super Sampling
     DLSS,
+    // Intel Xe Super Sampling
+    XeSS,
     // NVIDIA Image Scaling
     NIS,
     // CUDA-based upscaling
@@ -134,6 +137,41 @@ pub fn create_upscaler(
             // Create DLSS upscaler
             let upscaler = dlss::DlssUpscaler::new(quality)?;
             Ok(Box::new(upscaler))
+        },
+        UpscalingTechnology::XeSS => {
+            // Check if XeSS is supported
+            if xess::XeSSUpscaler::is_supported() {
+                log::info!("Using Intel XeSS for upscaling");
+                match xess::XeSSUpscaler::new(quality) {
+                    Ok(upscaler) => {
+                        return Ok(Box::new(upscaler));
+                    },
+                    Err(e) => {
+                        log::error!("Failed to create XeSS upscaler: {}", e);
+                        // Fall through to fallbacks
+                    }
+                }
+            } else {
+                log::info!("Intel XeSS not supported, checking other technologies");
+            }
+
+            // Try FSR next
+            if fsr::FsrUpscaler::is_supported() {
+                log::info!("Falling back to FSR");
+                let upscaler = fsr::FsrUpscaler::new(quality)?;
+                return Ok(Box::new(upscaler));
+            }
+            
+            // Try DLSS next
+            if dlss::DlssUpscaler::is_supported() {
+                log::info!("Falling back to DLSS");
+                let upscaler = dlss::DlssUpscaler::new(quality)?;
+                return Ok(Box::new(upscaler));
+            }
+            
+            // Finally fall back to basic
+            log::info!("No GPU acceleration available, falling back to basic upscaling");
+            return create_basic_upscaler(quality, algorithm);
         },
         UpscalingTechnology::NIS => {
             // Currently NIS is not implemented, so fall back to other technologies
