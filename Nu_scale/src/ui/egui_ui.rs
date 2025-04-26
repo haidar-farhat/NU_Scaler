@@ -1,23 +1,59 @@
 use anyhow::{anyhow, Result};
 use egui::{
-    epaint::ahash::{HashMap, HashMapExt},
+    epaint::ahash::{HashMap as AHashMap, HashMapExt},
     widgets::*,
     TextureHandle,
     *,
 };
 // Standard library imports
 use std::{
-    path::PathBuf,
+    path::{PathBuf, Path},
     sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}}, 
     thread,
     time::{Duration, Instant},
     marker::PhantomData,
-    collections::HashMap,
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
 };
 
-// Import threadpool for offloading upscaling work
-use threadpool::ThreadPool;
+// Import from local crate instead of external threadpool
+// Create a small internal thread pool implementation
+struct ThreadPool {
+    workers: Vec<thread::JoinHandle<()>>,
+    sender: std::sync::mpsc::Sender<Box<dyn FnOnce() + Send + 'static>>,
+}
+
+impl ThreadPool {
+    fn new(size: usize) -> Self {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let receiver = Arc::new(Mutex::new(receiver));
+
+        let mut workers = Vec::with_capacity(size);
+
+        for id in 0..size {
+            let receiver = Arc::clone(&receiver);
+            let handle = thread::spawn(move || {
+                loop {
+                    let job = match receiver.lock().unwrap().recv() {
+                        Ok(job) => job,
+                        Err(_) => break,
+                    };
+                    job();
+                }
+            });
+            workers.push(handle);
+        }
+
+        ThreadPool { workers, sender }
+    }
+
+    fn execute<F>(&self, f: F)
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        let job = Box::new(f);
+        self.sender.send(job).unwrap();
+    }
+}
 
 // Windows API for process management (cfg guard added in implementation)
 #[cfg(windows)]
@@ -154,9 +190,9 @@ type UpscalingBufferType = Arc<FrameBuffer>;
 /// Texture cache to prevent memory leaks and improve reuse
 struct TextureCache {
     /// Map of texture size -> texture handle
-    textures: HashMap<(u32, u32), TextureHandle>,
+    textures: AHashMap<(u32, u32), TextureHandle>,
     /// Last time each texture was used
-    last_used: HashMap<(u32, u32), Instant>,
+    last_used: AHashMap<(u32, u32), Instant>,
     /// Total texture memory usage in bytes
     texture_memory_usage: usize,
 }
@@ -164,8 +200,8 @@ struct TextureCache {
 impl TextureCache {
     fn new() -> Self {
         Self {
-            textures: HashMap::new(),
-            last_used: HashMap::new(),
+            textures: AHashMap::new(),
+            last_used: AHashMap::new(),
             texture_memory_usage: 0,
         }
     }
@@ -221,10 +257,9 @@ impl TextureCache {
         
         // Remove old textures
         for size in textures_to_remove {
-            if let Some(texture) = self.textures.remove(&size) {
-                // Free texture
-                let handle_id = texture.id();
-                ctx.forget_image(handle_id);
+            if let Some(_texture) = self.textures.remove(&size) {
+                // Free texture - egui manages textures automatically now
+                // No need to explicitly forget the image
                 
                 // Update memory tracking
                 let texture_bytes = size.0 as usize * size.1 as usize * 4;
@@ -241,6 +276,11 @@ impl TextureCache {
     /// Get total texture memory usage in MB
     fn get_memory_usage_mb(&self) -> f32 {
         self.texture_memory_usage as f32 / (1024.0 * 1024.0)
+    }
+
+    /// Get number of textures in cache
+    fn texture_count(&self) -> usize {
+        self.textures.len()
     }
 }
 
