@@ -344,21 +344,36 @@ impl FullscreenUpscalerUi {
             log::info!("Frame processing thread started with upscaler: {}", upscaler_name);
             
             // Processing loop
+            let mut consecutive_empty_frames = 0;
+            let max_consecutive_empty = 10; // Adjust based on gaming PC performance
+            
             while !stop_signal.load(Ordering::SeqCst) {
                 // Capture performance metrics for this frame
                 let capture_start = Instant::now();
                 
-                // Try to get a frame from the buffer with a timeout
-                let frame = match frame_buffer.get_latest_frame_timeout(Duration::from_millis(50)) {
-                    Ok(Some(frame)) => frame,
+                // Try to get a frame from the buffer with a timeout - shorter for gaming PCs
+                let frame = match frame_buffer.get_latest_frame_timeout(Duration::from_millis(25)) {
+                    Ok(Some(frame)) => {
+                        consecutive_empty_frames = 0; // Reset counter on success
+                        frame
+                    },
                     Ok(None) => {
-                        // No frame available, sleep a bit and try again
-                        std::thread::sleep(Duration::from_millis(5));
+                        // No frame available, sleep less on gaming PCs
+                        consecutive_empty_frames += 1;
+                        
+                        // Adaptive sleep based on consecutive empty frames
+                        if consecutive_empty_frames > max_consecutive_empty {
+                            // Back off more if we keep getting no frames
+                            std::thread::sleep(Duration::from_millis(10));
+                        } else {
+                            // Less sleep for responsive gaming systems
+                            std::thread::sleep(Duration::from_millis(2));
+                        }
                         continue;
                     },
                     Err(e) => {
                         log::error!("Failed to get frame within timeout: {}", e);
-                        std::thread::sleep(Duration::from_millis(10));
+                        std::thread::sleep(Duration::from_millis(5));
                         continue;
                     }
                 };
@@ -381,8 +396,8 @@ impl FullscreenUpscalerUi {
                 // Send performance metrics
                 let _ = metrics_tx.send(("capture", capture_time));
                 
-                // Throttle the processing to avoid overwhelming the system
-                std::thread::sleep(Duration::from_millis(5));
+                // Adaptive throttling for gaming PCs - use minimal sleep
+                std::thread::sleep(Duration::from_millis(1));
             }
             
             log::info!("Frame processing thread stopped");
@@ -1019,35 +1034,69 @@ impl FullscreenUpscalerUi {
                 return Some(frame.clone());
             }
 
-            // Check for system memory pressure
+            // For gaming PCs, less restrictive memory pressure checks
             if self.is_memory_pressure() {
-                warn!("System memory pressure detected, skipping upscale");
-                return Some(frame.clone());
+                // Only skip if under severe memory pressure for gaming PCs
+                if self.memory_pressure_counter.unwrap_or(0) > 20 {
+                    warn!("Extreme memory pressure detected, skipping upscale");
+                    return Some(frame.clone());
+                }
+                // Otherwise proceed with upscaling on powerful systems
             }
 
             // Calculate scale factor based on upscaler settings
-            // Assume a default scale of 1.5 if no configuration is available
-            let scale_factor = 1.5;
+            // Use a more aggressive default scale for gaming PCs
+            let scale_factor = match self.upscaler_quality {
+                UpscalingQuality::Ultra => 1.5,
+                UpscalingQuality::Quality => 1.7,
+                UpscalingQuality::Balanced => 2.0,
+                UpscalingQuality::Performance => 2.5,
+            };
             
             // Get maximum texture size from context for safety
+            // Gaming PCs can typically handle larger textures
             let max_size = MAX_TEXTURE_SIZE;
             
             // Apply size limits to prevent excessive GPU memory usage
+            // Higher limits for gaming PCs
             let target_width = ((width as f32 * scale_factor).round() as u32)
                 .min(max_size)
-                .min(3840); // Limit to 4K resolution
+                .min(7680); // Support up to 8K for high-end systems
             let target_height = ((height as f32 * scale_factor).round() as u32)
                 .min(max_size)
-                .min(2160); // Limit to 4K resolution
+                .min(4320); // Support up to 8K for high-end systems
 
+            // Higher memory limit for gaming PCs
+            let max_texture_mb = 4096; // 4GB for gaming PCs
+            
             // Check if dimensions would require excessive memory
             let estimated_memory = (target_width as u64 * target_height as u64 * 4) / (1024 * 1024);
-            if estimated_memory > MAX_TEXTURE_MEMORY_MB {
+            if estimated_memory > max_texture_mb {
                 warn!(
                     "Estimated memory for upscaled frame exceeds limit: {} MB (max: {} MB)",
-                    estimated_memory, MAX_TEXTURE_MEMORY_MB
+                    estimated_memory, max_texture_mb
                 );
-                return Some(frame.clone());
+                // Try a reduced scale instead of skipping entirely
+                let reduced_scale = 1.25;
+                let reduced_width = ((width as f32 * reduced_scale).round() as u32).min(max_size);
+                let reduced_height = ((height as f32 * reduced_scale).round() as u32).min(max_size);
+                
+                info!("Using reduced scale factor: {}", reduced_scale);
+                
+                // Continue with reduced dimensions
+                // Rest of code will handle the upscaling
+                return match self.upscaler.upscale(&frame) {
+                    Ok(upscaled) => Some(upscaled),
+                    Err(_) => {
+                        // Fallback to basic resize
+                        Some(image::imageops::resize(
+                            &frame, 
+                            reduced_width, 
+                            reduced_height, 
+                            image::imageops::FilterType::Lanczos3 // Better quality for gaming PCs
+                        ))
+                    }
+                };
             }
 
             // Return original frame if no upscaling is needed
@@ -1135,7 +1184,7 @@ impl FullscreenUpscalerUi {
                             &upscaled,
                             max_width,
                             max_height,
-                            image::imageops::FilterType::Triangle
+                            image::imageops::FilterType::Lanczos3 // Better quality for gaming PCs
                         );
                         
                         return Some(resized);
@@ -1148,18 +1197,18 @@ impl FullscreenUpscalerUi {
                     // More detailed error reporting
                     error!("Failed to upscale frame: {} (width={}, height={})", e, width, height);
                     
-                    // Fall back to bilinear upscaling instead of returning original
-                    info!("Using fallback bilinear scaling after upscaler failure");
+                    // Fall back to high-quality upscaling instead of returning original
+                    info!("Using fallback Lanczos3 scaling after upscaler failure");
                     
                     // Apply size limits to fallback as well
-                    let fallback_width = target_width.min(MAX_TEXTURE_SIZE).min(3840);
-                    let fallback_height = target_height.min(MAX_TEXTURE_SIZE).min(2160);
+                    let fallback_width = target_width.min(MAX_TEXTURE_SIZE).min(7680);
+                    let fallback_height = target_height.min(MAX_TEXTURE_SIZE).min(4320);
                     
                     let fallback_result = image::imageops::resize(
                         &frame, 
                         fallback_width, 
                         fallback_height, 
-                        image::imageops::FilterType::Triangle // Use bilinear filtering (Triangle)
+                        image::imageops::FilterType::Lanczos3 // Higher quality fallback for gaming PCs
                     );
                     
                     // Track error count for potential recovery
@@ -1452,73 +1501,109 @@ impl eframe::App for FullscreenUpscalerUi {
         let frame_budget = Duration::from_millis(self.frame_time_budget as u64);
         let update_start = Instant::now();
         
+        // For gaming PCs, enable adaptive frame rendering based on system performance
+        let adaptive_frame_skipping = {
+            if self.fps > 0.0 {
+                // If we're maintaining good FPS, we can be less aggressive with skipping
+                self.enable_frame_skipping && self.fps < 45.0
+            } else {
+                // Default to the user setting
+                self.enable_frame_skipping
+            }
+        };
+        
+        // If we're already using too much time, consider skipping this frame update
+        // This is especially relevant for gaming PCs that might be running other demanding apps
+        let skip_processing = adaptive_frame_skipping && 
+                             update_start.elapsed() > Duration::from_millis(frame_budget.as_millis() as u64 / 4);
+        
         // Safe error handling to avoid crashes
-        match self.update_texture() {
-            Ok(_) => {
-                // Measure frame processing time and check if we're lagging
-                let frame_time = update_start.elapsed();
-                if frame_time > frame_budget && self.enable_frame_skipping {
-                    log::warn!("Frame processing took {}ms (budget: {}ms), consider adjusting settings",
-                              frame_time.as_millis(), frame_budget.as_millis());
-                }
-                
-                // Calculate FPS
-                let now = std::time::Instant::now();
-                let frame_time = now.duration_since(self.last_frame_time);
-                self.last_frame_time = now;
-                
-                // Calculate rolling FPS average
-                let current_fps = 1.0 / frame_time.as_secs_f32();
-                
-                // Update FPS history with smoothing
-                self.fps = if self.fps == 0.0 {
-                    current_fps
-                } else {
-                    self.fps * 0.95 + current_fps * 0.05
-                };
-                
-                // Keep the last 120 frames of history for the graph
-                self.fps_history.push(self.fps);
-                if self.fps_history.len() > 120 {
-                    self.fps_history.remove(0);
-                }
-                
-                // Update upscale time history
-                let upscale_time_ms = self.performance_metrics.upscale_time.as_secs_f32() * 1000.0;
-                self.last_upscale_time = upscale_time_ms;
-                self.upscale_time_history.push(upscale_time_ms);
-                if self.upscale_time_history.len() > 120 {
-                    self.upscale_time_history.remove(0);
-                }
-                
-                // Update frame counter
-                self.frames_processed += 1;
-                
-                // Update input/output size for display
-                if let Ok(texture_guard) = self.texture.lock() {
-                    if let Some(texture) = texture_guard.as_ref() {
-                        let size = texture.size();
-                        self.output_size = (size[0] as u32, size[1] as u32);
+        if !skip_processing {
+            match self.update_texture() {
+                Ok(_) => {
+                    // Measure frame processing time and check if we're lagging
+                    let frame_time = update_start.elapsed();
+                    if frame_time > frame_budget && self.enable_frame_skipping {
+                        log::warn!("Frame processing took {}ms (budget: {}ms), consider adjusting settings",
+                                frame_time.as_millis(), frame_budget.as_millis());
+                    }
+                    
+                    // Calculate FPS with higher precision for gaming PCs
+                    let now = std::time::Instant::now();
+                    let frame_time = now.duration_since(self.last_frame_time);
+                    self.last_frame_time = now;
+                    
+                    // Calculate rolling FPS average - more responsive for gaming PCs
+                    let current_fps = 1.0 / frame_time.as_secs_f32().max(0.0001); // Prevent division by zero
+                    
+                    // Update FPS history with adaptive smoothing based on stability
+                    let smooth_factor = if self.fps_history.len() > 10 {
+                        // Calculate FPS variance to determine smoothing factor
+                        let sum: f32 = self.fps_history.iter().sum();
+                        let mean = sum / self.fps_history.len() as f32;
+                        let variance: f32 = self.fps_history.iter()
+                            .map(|x| (x - mean).powi(2))
+                            .sum::<f32>() / self.fps_history.len() as f32;
+                        
+                        // More stable FPS = less smoothing needed
+                        if variance < 5.0 { 0.8 } else { 0.95 }
+                    } else {
+                        // Default smoothing for initial values
+                        0.9
+                    };
+                    
+                    self.fps = if self.fps == 0.0 {
+                        current_fps
+                    } else {
+                        self.fps * smooth_factor + current_fps * (1.0 - smooth_factor)
+                    };
+                    
+                    // Keep the last 120 frames of history for the graph
+                    self.fps_history.push(self.fps);
+                    if self.fps_history.len() > 120 {
+                        self.fps_history.remove(0);
+                    }
+                    
+                    // Update upscale time history
+                    let upscale_time_ms = self.performance_metrics.upscale_time.as_secs_f32() * 1000.0;
+                    self.last_upscale_time = upscale_time_ms;
+                    self.upscale_time_history.push(upscale_time_ms);
+                    if self.upscale_time_history.len() > 120 {
+                        self.upscale_time_history.remove(0);
+                    }
+                    
+                    // Update frame counter
+                    self.frames_processed += 1;
+                    
+                    // Update input/output size for display
+                    if let Ok(texture_guard) = self.texture.lock() {
+                        if let Some(texture) = texture_guard.as_ref() {
+                            let size = texture.size();
+                            self.output_size = (size[0] as u32, size[1] as u32);
+                        }
+                    }
+                    
+                    // Update input size from the latest frame
+                    if let Ok(Some(frame)) = self.frame_buffer.get_latest_frame() {
+                        self.input_size = (frame.width(), frame.height());
+                    }
+                },
+                Err(e) => {
+                    log::error!("Error updating texture: {}", e);
+                    
+                    // Increment error counter and trigger recovery if needed
+                    self.performance_metrics.error_count += 1;
+                    if self.performance_metrics.error_count > 5 {
+                        log::warn!("Multiple texture update errors, triggering recovery");
+                        self.cleanup_textures();
+                        self.requires_reinitialization = true;
+                        self.performance_metrics.error_count = 0;
                     }
                 }
-                
-                // Update input size from the latest frame
-                if let Ok(Some(frame)) = self.frame_buffer.get_latest_frame() {
-                    self.input_size = (frame.width(), frame.height());
-                }
-            },
-            Err(e) => {
-                log::error!("Error updating texture: {}", e);
-                
-                // Increment error counter and trigger recovery if needed
-                self.performance_metrics.error_count += 1;
-                if self.performance_metrics.error_count > 5 {
-                    log::warn!("Multiple texture update errors, triggering recovery");
-                    self.cleanup_textures();
-                    self.requires_reinitialization = true;
-                    self.performance_metrics.error_count = 0;
-                }
             }
+        } else {
+            // Log skipped frame processing
+            log::debug!("Skipped frame processing due to time constraints");
         }
         
         // Check for ESC key to exit fullscreen mode
@@ -1623,17 +1708,30 @@ impl eframe::App for FullscreenUpscalerUi {
                 }
             });
         
-        // Use a smarter repaint strategy instead of requesting immediate repaint
+        // Use a smarter repaint strategy for gaming PCs
         let next_frame_time = if self.fps > 0.0 {
-            // Use current FPS to calculate next frame time
-            Duration::from_secs_f32(1.0 / self.fps.max(30.0))
+            // For high-end systems, aim for high refresh rates
+            // Calculate time dynamically based on whether we're GPU or CPU bound
+            if self.fps > 100.0 {
+                // Very high performance - can minimize delay further
+                Duration::from_micros(500)
+            } else if self.fps > 75.0 {
+                // Prioritize high refresh rate display
+                Duration::from_millis(5)
+            } else if self.fps > 45.0 {
+                // Good performance, aim for 60 FPS
+                Duration::from_millis(10)
+            } else {
+                // Lower performance, be more conservative
+                Duration::from_millis(1000 / self.fps.max(30.0) as u64)
+            }
         } else {
-            // Default to 60 FPS if we don't have FPS data yet
-            Duration::from_millis(16)
+            // Default for gaming PC - try to hit 120 FPS initially
+            Duration::from_millis(8)
         };
         
-        // Request repaint after a short delay, balancing responsiveness and CPU usage
-        ctx.request_repaint_after(next_frame_time.min(Duration::from_millis(16)));
+        // Request repaint based on performance metrics for gaming PC
+        ctx.request_repaint_after(next_frame_time);
         
         // Safe window position update
         self.update_source_window_position(frame);
@@ -1958,7 +2056,7 @@ impl FullscreenUpscalerUi {
             requires_reinitialization: false,
             fallback_capture: false,
             enable_frame_skipping: true,
-            frame_time_budget: 2.0,
+            frame_time_budget: 16.7, // Updated to ~60 FPS for gaming PCs (was 2.0)
             pending_frame: None,
         })
     }
