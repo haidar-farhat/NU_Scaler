@@ -1534,7 +1534,8 @@ impl AppState {
     
     /// Schedule the next upscale operation on the thread pool
     fn schedule_next_upscale(&mut self, frame: &Arc<FrameBuffer>) {
-        if self.is_upscaling || !self.auto_upscale || self.pending_upscaled_frame.load(Ordering::SeqCst) {
+        // Check if upscaling is already in progress or if auto upscale is disabled
+        if self.is_upscaling || self.upscale_in_progress.load(Ordering::SeqCst) {
             return;
         }
         
@@ -1542,10 +1543,10 @@ impl AppState {
         let frame_clone = frame.clone();
         let settings = self.settings.clone();
         let upscale_sender = self.upscaled_frame_sender.clone();
-        let pending_flag = self.pending_upscaled_frame.clone();
+        let in_progress_flag = self.upscale_in_progress.clone();
         
-        // Set the pending flag before spawning the thread
-        pending_flag.store(true, Ordering::SeqCst);
+        // Set the flag before spawning the thread
+        in_progress_flag.store(true, Ordering::SeqCst);
         
         // Record start time for timeout detection
         self.upscale_start_time = Some(Instant::now());
@@ -1569,8 +1570,8 @@ impl AppState {
                 }
             }
             
-            // Clear the pending flag
-            pending_flag.store(false, Ordering::SeqCst);
+            // Clear the flag
+            in_progress_flag.store(false, Ordering::SeqCst);
         });
     }
     
