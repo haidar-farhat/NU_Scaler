@@ -1,5 +1,4 @@
 use std::sync::Mutex;
-use std::path::Path;
 use anyhow::{Result, anyhow};
 use log::{info, warn, error};
 use image::RgbaImage;
@@ -132,7 +131,7 @@ impl XeSSUpscaler {
         self.denoise_strength = strength;
         
         // If already initialized, update the parameter
-        if let Some(handle) = self.handle {
+        if let Some(_handle) = self.handle {
             // In a real implementation, call XeSS SDK to update parameter
             // For now, just log the change
             info!("Updated XeSS denoise strength to {}", strength);
@@ -146,7 +145,7 @@ impl XeSSUpscaler {
         self.use_motion_vectors = use_motion_vectors;
         
         // If already initialized, update the parameter
-        if let Some(handle) = self.handle {
+        if let Some(_handle) = self.handle {
             // In a real implementation, call XeSS SDK to update parameter
             info!("Updated XeSS motion vectors to {}", use_motion_vectors);
         }
@@ -196,7 +195,10 @@ impl Upscaler for XeSSUpscaler {
         
         // Initialize XeSS if it hasn't been initialized yet
         if self.handle.is_none() {
-            match self.initialize_xess() {
+            // Initialize XeSS - store result first to avoid borrow issues
+            let xess_result = self.initialize_xess();
+            
+            match xess_result {
                 Ok(handle) => {
                     self.handle = Some(handle);
                     info!("XeSS initialized successfully");
@@ -268,7 +270,7 @@ impl Upscaler for XeSSUpscaler {
             .map_err(|e| anyhow!("Failed to acquire lock for cleanup: {}", e))?;
         
         // If we have a handle, clean it up
-        if let Some(handle) = self.handle.take() {
+        if let Some(_handle) = self.handle.take() {
             // In a real implementation, call XeSS SDK to clean up
             info!("Cleaning up XeSS resources");
             
@@ -313,7 +315,7 @@ impl Upscaler for XeSSUpscaler {
         self.quality = quality;
         
         // If already initialized, update quality setting
-        if let Some(handle) = self.handle {
+        if let Some(_handle) = self.handle {
             // Convert quality to XeSS-specific mode
             let quality_mode = Self::map_quality_to_xess_mode(quality);
             
