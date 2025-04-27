@@ -196,6 +196,16 @@ impl PerformanceMetrics {
     }
 }
 
+/// State for WGPU rendering
+struct WgpuState {
+    /// WGPU device
+    device: wgpu::Device,
+    /// WGPU queue
+    queue: wgpu::Queue,
+    /// WGPU surface configuration
+    config: wgpu::SurfaceConfiguration,
+}
+
 /// Fullscreen upscaler UI
 pub struct FullscreenUpscalerUi {
     /// Frame buffer for capturing frames
@@ -470,7 +480,7 @@ impl FullscreenUpscalerUi {
     }
     
     /// Update source window position (for tracking moving windows)
-    fn update_source_window_position(&mut self, _ctx: &egui::Context) { // Prefixed ctx as unused
+    fn update_source_window_info(&mut self, ctx: &egui::Context) { // Prefixed ctx as unused
         // Only track windows by title for now
         if let Some(target) = &self.capture_target {
             // We only need to check window positions for specific windows
@@ -495,11 +505,13 @@ impl FullscreenUpscalerUi {
                                 // Update stored position
                                 self.source_window_info = Some(new_pos);
                                 
-                                // Update overlay window position - TODO: Find eframe 0.27 equivalent, maybe viewport commands?
-                                // ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(new_pos.0 as f32, new_pos.1 as f32))); // Example
-                                // ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(new_pos.2 as f32, new_pos.3 as f32))); // Example
-                                // frame.set_window_pos(egui::pos2(new_pos.0 as f32, new_pos.1 as f32));
-                                // frame.set_window_size(egui::vec2(new_pos.2 as f32, new_pos.3 as f32));
+                                // Update overlay window position with eframe 0.27+ viewport commands
+                                ctx.send_viewport_cmd(
+                                    egui::ViewportCommand::WindowBounds(egui::Rect::from_min_size(
+                                        egui::pos2(new_pos.0 as f32, new_pos.1 as f32),
+                                        egui::vec2(new_pos.2 as f32, new_pos.3 as f32)
+                                    ))
+                                );
                             }
                         }
                     }
@@ -545,7 +557,7 @@ impl FullscreenUpscalerUi {
                 let texture = ctx.load_texture(
                     "frame_texture",
                     blank_image,
-                    TextureOptions::default()
+                    TextureOptions::LINEAR // Use linear filtering for better quality
                 );
                 
                 // Acquire the lock again to store the texture
@@ -709,7 +721,7 @@ impl FullscreenUpscalerUi {
             let new_texture = ctx.load_texture(
                 format!("frame_texture_{}", self.frames_processed),
                 color_image,
-                TextureOptions::default()
+                TextureOptions::LINEAR
             );
             
             // Update the texture safely
@@ -1402,7 +1414,7 @@ impl FullscreenUpscalerUi {
                             .allow_drag(false)
                             .include_y(0.0)
                             .include_y(max_fps)
-                            .show_axes([false; 2]);
+                            .show_axes([false, false]);
                             
                         graph.show(ui, |plot_ui| {
                             let fps_points: Vec<[f64; 2]> = self.fps_history.iter()
@@ -1678,7 +1690,7 @@ impl eframe::App for FullscreenUpscalerUi {
                             
                             // Simple rendering with error handling
                             if let Err(e) = (|| -> Result<(), String> {
-                                ui.put(rect, egui::Image::new((texture.id(), rect.size())).fit_to_exact_size(rect.size())); // Fix: Use tuple (TextureId, Vec2)
+                                ui.put(rect, egui::Image::new(texture_handle));
                                 Ok(())
                             })() {
                                 log::error!("Error rendering texture: {}", e);
@@ -1738,7 +1750,7 @@ impl eframe::App for FullscreenUpscalerUi {
         ctx.request_repaint_after(next_frame_time);
         
         // Safe window position update
-        self.update_source_window_position(ctx);
+        self.update_source_window_info(ctx);
     }
     
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -1897,6 +1909,12 @@ pub fn run_fullscreen_upscaler(
             .with_fullscreen(true)
             .with_transparent(false),
         
+        // Enable GPU features needed for upscaling
+        wgpu_options: eframe::WgpuConfiguration {
+            features: wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
+            ..Default::default()
+        },
+        
         ..Default::default()
     };
     
@@ -1947,7 +1965,7 @@ impl FullscreenUpscalerUi {
                 // if texture_handle.is_allocated() {
                 // Correct usage of Image::new with tuple
                 let texture_size = texture_handle.size_vec2();
-                let image_widget = egui::Image::new((texture_handle.id(), texture_size));
+                let image_widget = egui::Image::new(texture_handle);
 
                 let available_size = ui.available_size();
                 let aspect_ratio = texture_size.x / texture_size.y;
@@ -1979,9 +1997,43 @@ impl FullscreenUpscalerUi {
 
 impl FullscreenUpscalerUi {
     // Update source window position
-    fn update_source_window_position(&mut self, ctx: &egui::Context) {
-        // Example viewport commands for updating position and size
-        // ctx.send_viewport_cmd(egui::ViewportCommand::SetPos(egui::pos2(x, y)));
-        // ctx.send_viewport_cmd(egui::ViewportCommand::SetInnerSize(egui::vec2(width, height)));
+    fn update_source_window_info(&mut self, ctx: &egui::Context) {
+        // Only track windows by title for now
+        if let Some(target) = &self.capture_target {
+            // We only need to check window positions for specific windows
+            if let CaptureTarget::WindowByTitle(title) = target {
+                // Get window information by title
+                if let Ok(capturer) = crate::capture::create_capturer() {
+                    if let Ok(windows) = capturer.list_windows() {
+                        // Find window with matching title
+                        if let Some(window) = windows.iter().find(|w| w.title.contains(title)) {
+                            // Check if position changed
+                            let new_pos = (
+                                window.geometry.x,
+                                window.geometry.y,
+                                window.geometry.width,
+                                window.geometry.height,
+                            );
+                            
+                            if self.source_window_info != Some(new_pos) {
+                                log::debug!("Window position changed from {:?} to {:?}", 
+                                        self.source_window_info, new_pos);
+                                        
+                                // Update stored position
+                                self.source_window_info = Some(new_pos);
+                                
+                                // Update overlay window position with eframe 0.27+ viewport commands
+                                ctx.send_viewport_cmd(
+                                    egui::ViewportCommand::WindowBounds(egui::Rect::from_min_size(
+                                        egui::pos2(new_pos.0 as f32, new_pos.1 as f32),
+                                        egui::vec2(new_pos.2 as f32, new_pos.3 as f32)
+                                    ))
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
