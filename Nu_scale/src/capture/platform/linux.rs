@@ -10,9 +10,22 @@ use x11rb::protocol::randr::{ConnectionExt as RandrConnectionExt};
 use x11rb::image::{Image, ImageFormat};
 use x11rb::wrapper::ConnectionExt as WrapperConnectionExt;
 use once_cell::sync::Lazy;
+use std::sync::Arc;
 
 use crate::capture::{ScreenCapture, CaptureTarget, CaptureError};
-use super::{WindowId, WindowInfo, WindowGeometry};
+use super::{WindowId, WindowInfo, WindowGeometry, CaptureBackend};
+
+// For X11 support
+#[cfg(feature = "x11")]
+use x11rb::xcb_ffi::XCBConnection;
+
+// For Wayland support
+#[cfg(feature = "wayland")]
+use wayland_client::{Connection as WaylandConnection, Dispatch, Display, GlobalManager};
+#[cfg(feature = "wayland")]
+use wayland_protocols::wlr::unstable::screencopy::v1::client::zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1;
+#[cfg(feature = "wayland")]
+use wayland_protocols::wlr::unstable::screencopy::v1::client::zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1;
 
 /// Linux (X11) implementation of screen capture
 pub struct PlatformScreenCapture {
@@ -49,6 +62,37 @@ struct Atoms {
     net_wm_window_type_normal: Atom,
     /// UTF8_STRING atom
     utf8_string: Atom,
+}
+
+/// X11 implementation of screen capture
+#[cfg(feature = "x11")]
+pub struct X11ScreenCapture {
+    /// X11 connection
+    connection: Arc<XCBConnection>,
+    /// Root window
+    root: Window,
+    /// Last captured frame for debugging
+    last_frame: Option<RgbaImage>,
+    /// List of windows cached from last enumeration
+    cached_windows: Vec<WindowInfo>,
+}
+
+/// Wayland implementation of screen capture
+#[cfg(feature = "wayland")]
+pub struct WaylandScreenCapture {
+    /// Last captured frame for debugging
+    last_frame: Option<RgbaImage>,
+    /// List of windows cached from last enumeration
+    cached_windows: Vec<WindowInfo>,
+}
+
+/// Platform-agnostic Linux screen capture
+pub enum LinuxScreenCapture {
+    #[cfg(feature = "x11")]
+    X11(X11ScreenCapture),
+    #[cfg(feature = "wayland")]
+    Wayland(WaylandScreenCapture),
+    Fallback, // Used when no supported backend is available
 }
 
 impl PlatformScreenCapture {
@@ -381,6 +425,315 @@ impl PlatformScreenCapture {
         }
         
         Ok(rgba_image)
+    }
+}
+
+// X11 Implementation
+#[cfg(feature = "x11")]
+impl X11ScreenCapture {
+    /// Creates a new X11 screen capture
+    pub fn new() -> Result<Self> {
+        // Connect to X server
+        let (connection, screen_num) = XCBConnection::connect(None)?;
+        let connection = Arc::new(connection);
+        let setup = connection.setup();
+        let screen = setup.roots.get(screen_num as usize)
+            .ok_or_else(|| anyhow!("Failed to get screen"))?;
+        
+        // Get root window
+        let root = screen.root;
+        
+        // Create screen capture
+        let mut capture = Self {
+            connection,
+            root,
+            last_frame: None,
+            cached_windows: Vec::new(),
+        };
+        
+        // Update window list
+        capture.update_window_list()?;
+        
+        Ok(capture)
+    }
+    
+    /// Update the cached window list
+    fn update_window_list(&mut self) -> Result<()> {
+        // Clear cached windows
+        self.cached_windows.clear();
+        
+        // Query tree to get all windows
+        let tree = self.connection.query_tree(self.root)?.reply()?;
+        
+        // Enumerate windows
+        for window in tree.children {
+            // Get window attributes
+            if let Ok(attr_cookie) = self.connection.get_window_attributes(window) {
+                if let Ok(attr) = attr_cookie.reply() {
+                    // Skip invisible windows
+                    if attr.map_state != MapState::VIEWABLE {
+                        continue;
+                    }
+                    
+                    // Get window geometry
+                    if let Ok(geom_cookie) = self.connection.get_geometry(window.into()) {
+                        if let Ok(geom) = geom_cookie.reply() {
+                            // Try to get window name
+                            let mut title = String::new();
+                            if let Ok(name_cookie) = self.connection.get_property(
+                                false,
+                                window,
+                                AtomEnum::WM_NAME.into(),
+                                AtomEnum::STRING.into(),
+                                0,
+                                1024
+                            ) {
+                                if let Ok(name) = name_cookie.reply() {
+                                    if let Ok(name_str) = String::from_utf8(name.value) {
+                                        title = name_str;
+                                    }
+                                }
+                            }
+                            
+                            // Create window info
+                            let window_info = WindowInfo {
+                                id: WindowId::X11(window.resource_id()),
+                                title,
+                                class: None, // Could be filled with WM_CLASS property
+                                geometry: WindowGeometry::new(
+                                    geom.x as i32,
+                                    geom.y as i32,
+                                    geom.width as u32,
+                                    geom.height as u32,
+                                ),
+                                visible: true,
+                                minimized: false, // Could be determined with WM state
+                                fullscreen: false, // Could be determined with WM state
+                            };
+                            
+                            self.cached_windows.push(window_info);
+                        }
+                    }
+                }
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Capture a window by ID
+    fn capture_window(&mut self, window_id: WindowId) -> Result<RgbaImage> {
+        // Get window ID
+        let x11_window_id = match window_id {
+            WindowId::X11(id) => id,
+            _ => return Err(anyhow!(CaptureError::WindowNotFound)),
+        };
+        
+        // Find window
+        let window = self.cached_windows.iter()
+            .find(|w| {
+                if let WindowId::X11(id) = w.id {
+                    return id == x11_window_id;
+                }
+                false
+            })
+            .ok_or_else(|| anyhow!(CaptureError::WindowNotFound))?;
+        
+        // Get geometry
+        let width = window.geometry.width;
+        let height = window.geometry.height;
+        
+        // Create a new image
+        let mut image = RgbaImage::new(width, height);
+        
+        // Get window image from X server
+        let x11_window = Window::new(x11_window_id);
+        let image_reply = self.connection.get_image(
+            ImageFormat::Z_PIXMAP,
+            x11_window,
+            0, 0,
+            width, height,
+            !0
+        )?.reply()?;
+        
+        // Convert raw data to RGBA
+        let data = image_reply.data;
+        let mut pixel_index = 0;
+        
+        // In a real implementation, we would handle different depths and formats
+        // This is a simplified version assuming 24 or 32 bit depth
+        for y in 0..height {
+            for x in 0..width {
+                let r = data[pixel_index];
+                let g = data[pixel_index + 1];
+                let b = data[pixel_index + 2];
+                image.put_pixel(x, y, Rgba([r, g, b, 255]));
+                pixel_index += 4; // Assuming 32-bit format
+            }
+        }
+        
+        // Save the image for debugging
+        self.last_frame = Some(image.clone());
+        
+        Ok(image)
+    }
+    
+    /// Capture the entire screen
+    fn capture_screen(&mut self) -> Result<RgbaImage> {
+        // Get root window geometry
+        let geom = self.connection.get_geometry(self.root.into())?.reply()?;
+        let width = geom.width;
+        let height = geom.height;
+        
+        // Create a new image
+        let mut image = RgbaImage::new(width, height);
+        
+        // Get screen image from X server
+        let image_reply = self.connection.get_image(
+            ImageFormat::Z_PIXMAP,
+            self.root,
+            0, 0,
+            width, height,
+            !0
+        )?.reply()?;
+        
+        // Convert raw data to RGBA
+        let data = image_reply.data;
+        let mut pixel_index = 0;
+        
+        // In a real implementation, we would handle different depths and formats
+        // This is a simplified version assuming 24 or 32 bit depth
+        for y in 0..height {
+            for x in 0..width {
+                let r = data[pixel_index];
+                let g = data[pixel_index + 1];
+                let b = data[pixel_index + 2];
+                image.put_pixel(x, y, Rgba([r, g, b, 255]));
+                pixel_index += 4; // Assuming 32-bit format
+            }
+        }
+        
+        // Save the image for debugging
+        self.last_frame = Some(image.clone());
+        
+        Ok(image)
+    }
+}
+
+// Wayland Implementation
+#[cfg(feature = "wayland")]
+impl WaylandScreenCapture {
+    /// Creates a new Wayland screen capture
+    pub fn new() -> Result<Self> {
+        // In a real implementation, we would connect to Wayland server
+        // and set up the screencopy protocol
+        
+        Ok(Self {
+            last_frame: None,
+            cached_windows: Vec::new(),
+        })
+    }
+    
+    /// Update the cached window list
+    fn update_window_list(&mut self) -> Result<()> {
+        // In a real implementation, this would use the Wayland protocol to enumerate
+        // available surfaces/outputs
+        Ok(())
+    }
+    
+    /// Capture a screen region
+    fn capture_output(&mut self, output_id: usize) -> Result<RgbaImage> {
+        // This is a placeholder; in a real implementation, we would
+        // use the wlr_screencopy protocol to capture an output
+        
+        // Create a dummy image
+        let width = 800;
+        let height = 600;
+        let mut image = RgbaImage::new(width, height);
+        
+        // Fill with test pattern
+        for y in 0..height {
+            for x in 0..width {
+                let r = (x % 255) as u8;
+                let g = (y % 255) as u8;
+                let b = ((x + y) % 255) as u8;
+                image.put_pixel(x, y, Rgba([r, g, b, 255]));
+            }
+        }
+        
+        // Save the image for debugging
+        self.last_frame = Some(image.clone());
+        
+        Ok(image)
+    }
+}
+
+// Implementation for LinuxScreenCapture
+impl LinuxScreenCapture {
+    /// Creates a new Linux screen capture
+    pub fn new() -> Self {
+        // Try to create an X11 capture first
+        #[cfg(feature = "x11")]
+        {
+            if let Ok(x11) = X11ScreenCapture::new() {
+                return Self::X11(x11);
+            }
+        }
+        
+        // Then try Wayland
+        #[cfg(feature = "wayland")]
+        {
+            if let Ok(wayland) = WaylandScreenCapture::new() {
+                return Self::Wayland(wayland);
+            }
+        }
+        
+        // Fallback if no backend is available
+        Self::Fallback
+    }
+}
+
+// Implement CaptureBackend for LinuxScreenCapture
+impl CaptureBackend for LinuxScreenCapture {
+    fn process_frame(&mut self, frame: &Option<RgbaImage>) -> Option<RgbaImage> {
+        match self {
+            #[cfg(feature = "x11")]
+            Self::X11(x11) => {
+                if let Some(image) = frame {
+                    // Store a copy for debugging
+                    x11.last_frame = Some(image.clone());
+                    Some(image.clone())
+                } else {
+                    // Return the last frame if available
+                    x11.last_frame.clone()
+                }
+            },
+            #[cfg(feature = "wayland")]
+            Self::Wayland(wayland) => {
+                if let Some(image) = frame {
+                    // Store a copy for debugging
+                    wayland.last_frame = Some(image.clone());
+                    Some(image.clone())
+                } else {
+                    // Return the last frame if available
+                    wayland.last_frame.clone()
+                }
+            },
+            Self::Fallback => {
+                // In fallback mode, just pass through frames
+                frame.clone()
+            },
+        }
+    }
+    
+    fn backend_name(&self) -> String {
+        match self {
+            #[cfg(feature = "x11")]
+            Self::X11(_) => "X11".to_string(),
+            #[cfg(feature = "wayland")]
+            Self::Wayland(_) => "Wayland".to_string(),
+            Self::Fallback => "Fallback (No Graphics Backend)".to_string(),
+        }
     }
 }
 
