@@ -6,7 +6,6 @@ use std::env;
 use std::fs;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use std::cell::RefCell;
 use crate::upscale::{Upscaler, UpscalingQuality};
 use crate::upscale::common::UpscalingAlgorithm;
 

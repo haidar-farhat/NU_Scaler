@@ -4,7 +4,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{Error as IoError, ErrorKind};
 use anyhow::Result;
 use eframe::{self, egui};
-use egui::{Vec2, ColorImage, TextureOptions, TextureId};
+use egui::{Vec2};
 use egui_plot::*;
 use image::RgbaImage;
 use std::path::Path;
@@ -18,7 +18,6 @@ use crate::capture::common::FrameBuffer;
 use crate::upscale::{Upscaler, UpscalingTechnology, UpscalingQuality};
 use crate::upscale::common::UpscalingAlgorithm;
 use crate::capture::CaptureTarget;
-use crate::capture::platform::WindowInfo;
 use crate::capture::ScreenCapture;
 use crate::capture::frame_buffer_ext::ArcFrameBufferExt;
 
