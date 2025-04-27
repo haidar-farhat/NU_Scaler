@@ -500,4 +500,28 @@ pub fn run_capture_thread(
     
     log::info!("Capture thread stopped");
     Ok(())
+}
+
+/// Resizes an image using the specified algorithm.
+pub fn resize_image(
+    input: &DynamicImage,
+    width: u32,
+    height: u32,
+    algorithm: crate::upscale::common::UpscalingAlgorithm,
+    frame_start_time: Instant,
+) -> Result<RgbaImage, String> {
+    let filter_type = match algorithm {
+        crate::upscale::common::UpscalingAlgorithm::Bilinear => imageops::FilterType::Triangle,
+        crate::upscale::common::UpscalingAlgorithm::Bicubic => imageops::FilterType::CatmullRom,
+        crate::upscale::common::UpscalingAlgorithm::Lanczos3 => imageops::FilterType::Lanczos3,
+        crate::upscale::common::UpscalingAlgorithm::Lanczos2 => imageops::FilterType::Lanczos3, // Fallback
+        crate::upscale::common::UpscalingAlgorithm::Nearest => imageops::FilterType::Nearest,
+    };
+    let _elapsed = frame_start_time.elapsed(); // Keep for now, prefix unused
+    Ok(imageops::resize(input, width, height, filter_type))
+}
+
+/// Saves an image buffer to a file with timestamp.
+pub fn save_image_buffer(
+    // ... rest of file ...
 } 
