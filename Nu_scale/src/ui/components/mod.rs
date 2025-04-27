@@ -67,6 +67,6 @@ pub fn card_frame() -> egui::Frame {
         .fill(egui::Color32::from_rgb(32, 34, 37))
         .rounding(egui::Rounding::same(5.0))
         .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(54, 57, 63)))
-        .inner_margin(egui::style::Margin::same(10.0))
-        .outer_margin(egui::style::Margin::same(5.0))
+        .inner_margin(egui::Margin::same(10.0))
+        .outer_margin(egui::Margin::same(5.0))
 } 
