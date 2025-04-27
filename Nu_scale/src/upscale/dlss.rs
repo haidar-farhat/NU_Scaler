@@ -253,267 +253,40 @@ impl DlssUpscaler {
     
     /// Create a mock upscaled image using DLSS-like processing
     fn create_mock_dlss_upscaled(&self, input: &RgbaImage) -> Result<RgbaImage> {
-        // In a real implementation, this would:
-        // 1. Convert the input RgbaImage to a format that DLSS can process
-        // 2. Call the NVIDIA NGX DLSS API to upscale
-        // 3. Convert the result back to an RgbaImage
+        // Ensure dimensions are valid
+        if self.output_width == 0 || self.output_height == 0 {
+            return Err(anyhow!("Output dimensions not set"));
+        }
         
-        // Get the context
-        let context = match &self.context {
-            Some(ctx) => ctx,
-            None => return Err(anyhow!("DLSS context is not initialized")),
-        };
+        // Correctly create the output image buffer
+        let mut output = RgbaImage::new(self.output_width, self.output_height);
         
-        // Create output image
-        let _output = RgbaImage::new(self.output_width, self.output_height);
-        
-        // For simulation purposes, we'll implement different stages of DLSS processing:
-        // 1. Initial upscaling (similar to bilinear but with edge detection)
-        // 2. Detail enhancement (simulate neural network detail recovery)
-        // 3. Temporal stabilization (if we have previous frames)
-        
-        // Get quality-specific parameters
-        let detail_recovery = match context.quality_mode {
-            DlssQualityMode::Ultra => 0.95,           // High detail recovery
-            DlssQualityMode::Quality => 0.90,
-            DlssQualityMode::Balanced => 0.80,
-            DlssQualityMode::Performance => 0.70,     // Lower detail recovery in performance mode
-            DlssQualityMode::UltraPerformance => 0.60, // Even lower for ultra performance
-        };
-        
-        let temporal_weight = match context.quality_mode {
-            DlssQualityMode::Ultra => 0.90,           // More weight on current frame
-            DlssQualityMode::Quality => 0.85,
-            DlssQualityMode::Balanced => 0.80,
-            DlssQualityMode::Performance => 0.75,     // More temporal stability in performance mode
-            DlssQualityMode::UltraPerformance => 0.70, // High temporal reuse for ultra performance
-        };
-        
-        // Scale factors
+        // Simple nearest-neighbor scaling as a placeholder for DLSS
         let scale_x = self.input_width as f32 / self.output_width as f32;
         let scale_y = self.input_height as f32 / self.output_height as f32;
         
-        // Step 1: Initial upscaling pass
-        // This simulates the base upscaling layer of DLSS
-        let mut initial_upscale = RgbaImage::new(self.output_width, self.output_height);
-        
         for y in 0..self.output_height {
             for x in 0..self.output_width {
-                // Calculate input coordinates with jitter for temporal AA
-                // DLSS uses subpixel jittering for better quality
-                let jitter_x = (context.frame_counter % 4) as f32 * 0.25; // 4-frame jitter pattern
-                let jitter_y = ((context.frame_counter / 4) % 4) as f32 * 0.25;
+                // Calculate source coordinates
+                let src_x = (x as f32 * scale_x).floor() as u32;
+                let src_y = (y as f32 * scale_y).floor() as u32;
                 
-                let input_x_f = (x as f32 + jitter_x) * scale_x;
-                let input_y_f = (y as f32 + jitter_y) * scale_y;
+                // Clamp coordinates to input bounds
+                let clamped_x = src_x.min(self.input_width - 1);
+                let clamped_y = src_y.min(self.input_height - 1);
                 
-                let input_x = input_x_f.floor() as u32;
-                let input_y = input_y_f.floor() as u32;
+                // Get pixel from input
+                let pixel = input.get_pixel(clamped_x, clamped_y);
                 
-                // Subpixel positions
-                let dx = input_x_f - input_x as f32;
-                let dy = input_y_f - input_y as f32;
-                
-                // Clamp to input image bounds
-                let input_x = input_x.min(self.input_width - 2); // Allow room for bilinear
-                let input_y = input_y.min(self.input_height - 2);
-                
-                // Get four neighboring pixels for bilinear interpolation
-                let p00 = input.get_pixel(input_x, input_y);
-                let p10 = input.get_pixel(input_x + 1, input_y);
-                let p01 = input.get_pixel(input_x, input_y + 1);
-                let p11 = input.get_pixel(input_x + 1, input_y + 1);
-                
-                // Perform bilinear interpolation
-                let mut color = [0.0f32; 4];
-                for i in 0..4 {
-                    let top = p00.0[i] as f32 * (1.0 - dx) + p10.0[i] as f32 * dx;
-                    let bottom = p01.0[i] as f32 * (1.0 - dx) + p11.0[i] as f32 * dx;
-                    color[i] = top * (1.0 - dy) + bottom * dy;
-                }
-                
-                // Store result in initial upscale buffer
-                initial_upscale.put_pixel(x, y, image::Rgba([
-                    color[0].clamp(0.0, 255.0) as u8,
-                    color[1].clamp(0.0, 255.0) as u8,
-                    color[2].clamp(0.0, 255.0) as u8,
-                    color[3].clamp(0.0, 255.0) as u8,
-                ]));
+                // Correctly put the pixel into the output buffer
+                output.put_pixel(x, y, *pixel);
             }
         }
         
-        // Step 2: Detail recovery pass (simulate neural network enhancement)
-        // DLSS uses a neural network to recover high-frequency details lost during upscaling
-        let mut detail_recovery_pass = RgbaImage::new(self.output_width, self.output_height);
+        // Simulate DLSS processing delay (e.g., 10ms)
+        std::thread::sleep(std::time::Duration::from_millis(10));
         
-        // Apply edge-aware detail enhancement - simulating neural network behavior
-        for y in 1..self.output_height - 1 {
-            for x in 1..self.output_width - 1 {
-                // Get center pixel from initial upscale
-                let center = initial_upscale.get_pixel(x, y);
-                
-                // Get neighboring pixels
-                let left = initial_upscale.get_pixel(x - 1, y);
-                let right = initial_upscale.get_pixel(x + 1, y);
-                let top = initial_upscale.get_pixel(x, y - 1);
-                let bottom = initial_upscale.get_pixel(x, y + 1);
-                
-                // Additional neighbors for better edge detection
-                let top_left = initial_upscale.get_pixel(x - 1, y - 1);
-                let top_right = initial_upscale.get_pixel(x + 1, y - 1);
-                let bottom_left = initial_upscale.get_pixel(x - 1, y + 1);
-                let bottom_right = initial_upscale.get_pixel(x + 1, y + 1);
-                
-                // Enhanced pixel with detail recovery
-                let mut enhanced = [0.0f32; 4];
-                
-                for i in 0..3 { // Process RGB channels
-                    // Calculate local structure using a simple edge detector
-                    let horizontal_grad = ((right.0[i] as i32 - left.0[i] as i32).abs() as f32) / 255.0;
-                    let vertical_grad = ((bottom.0[i] as i32 - top.0[i] as i32).abs() as f32) / 255.0;
-                    let diagonal1_grad = ((bottom_right.0[i] as i32 - top_left.0[i] as i32).abs() as f32) / 255.0;
-                    let diagonal2_grad = ((top_right.0[i] as i32 - bottom_left.0[i] as i32).abs() as f32) / 255.0;
-                    
-                    // Gradient magnitude
-                    let edge_strength = (horizontal_grad.powi(2) + vertical_grad.powi(2) + 
-                                         diagonal1_grad.powi(2) + diagonal2_grad.powi(2)).sqrt() / 2.0;
-                    let edge_strength = edge_strength.min(1.0);
-                    
-                    // Edge direction (simplified)
-                    let is_horizontal = vertical_grad > horizontal_grad;
-                    let is_diagonal = diagonal1_grad > horizontal_grad && diagonal1_grad > vertical_grad;
-                    
-                    // In real DLSS, the neural network would determine exactly how to enhance
-                    // the image. Here, we're simulating what DLSS might do.
-                    
-                    // Apply directional enhancement
-                    if is_horizontal {
-                        // Enhance horizontal details
-                        if top.0[i] > center.0[i] && bottom.0[i] > center.0[i] {
-                            // Potential line between pixels
-                            enhanced[i] = center.0[i] as f32 + (top.0[i] as f32 + bottom.0[i] as f32 - 2.0 * center.0[i] as f32) * 0.5 * edge_strength * detail_recovery;
-                        } else if top.0[i] < center.0[i] && bottom.0[i] < center.0[i] {
-                            // Center is a peak
-                            enhanced[i] = center.0[i] as f32 * (1.0 + 0.1 * edge_strength * detail_recovery);
-                        } else {
-                            enhanced[i] = center.0[i] as f32;
-                        }
-                    } else if is_diagonal {
-                        // Enhance diagonal details
-                        if top_left.0[i] > center.0[i] && bottom_right.0[i] > center.0[i] {
-                            enhanced[i] = center.0[i] as f32 + (top_left.0[i] as f32 + bottom_right.0[i] as f32 - 2.0 * center.0[i] as f32) * 0.5 * edge_strength * detail_recovery;
-                        } else if top_right.0[i] > center.0[i] && bottom_left.0[i] > center.0[i] {
-                            enhanced[i] = center.0[i] as f32 + (top_right.0[i] as f32 + bottom_left.0[i] as f32 - 2.0 * center.0[i] as f32) * 0.5 * edge_strength * detail_recovery;
-                        } else {
-                            enhanced[i] = center.0[i] as f32;
-                        }
-                    } else {
-                        // Enhance vertical details
-                        if left.0[i] > center.0[i] && right.0[i] > center.0[i] {
-                            enhanced[i] = center.0[i] as f32 + (left.0[i] as f32 + right.0[i] as f32 - 2.0 * center.0[i] as f32) * 0.5 * edge_strength * detail_recovery;
-                        } else if left.0[i] < center.0[i] && right.0[i] < center.0[i] {
-                            enhanced[i] = center.0[i] as f32 * (1.0 + 0.1 * edge_strength * detail_recovery);
-                        } else {
-                            enhanced[i] = center.0[i] as f32;
-                        }
-                    }
-                    
-                    // Add film grain reduction (DLSS removes noise patterns)
-                    let neighbors_avg = (left.0[i] as f32 + right.0[i] as f32 + top.0[i] as f32 + bottom.0[i] as f32) / 4.0;
-                    let noise_diff = (center.0[i] as f32 - neighbors_avg).abs();
-                    let is_noise = noise_diff > 10.0 && noise_diff < 30.0 && edge_strength < 0.3;
-                    
-                    if is_noise {
-                        // Blend with neighbors to reduce noise
-                        enhanced[i] = enhanced[i] * 0.7 + neighbors_avg * 0.3;
-                    }
-                    
-                    // Ensure we stay in valid range
-                    enhanced[i] = enhanced[i].clamp(0.0, 255.0);
-                }
-                
-                // Copy alpha channel
-                enhanced[3] = center.0[3] as f32;
-                
-                // Store in detail recovery buffer
-                detail_recovery_pass.put_pixel(x, y, image::Rgba([
-                    enhanced[0] as u8,
-                    enhanced[1] as u8,
-                    enhanced[2] as u8,
-                    enhanced[3] as u8,
-                ]));
-            }
-        }
-        
-        // Copy border pixels which we couldn't process with neighbors
-        for x in 0..self.output_width {
-            detail_recovery_pass.put_pixel(x, 0, *initial_upscale.get_pixel(x, 0));
-            detail_recovery_pass.put_pixel(x, self.output_height - 1, *initial_upscale.get_pixel(x, self.output_height - 1));
-        }
-        
-        for y in 1..self.output_height - 1 {
-            detail_recovery_pass.put_pixel(0, y, *initial_upscale.get_pixel(0, y));
-            detail_recovery_pass.put_pixel(self.output_width - 1, y, *initial_upscale.get_pixel(self.output_width - 1, y));
-        }
-        
-        // Step 3: Temporal stability pass
-        // Real DLSS uses previous frames to improve temporal stability
-        // For our simulation, we'll blend with the previous frame if available
-        
-        // Start with the detail recovery output
-        let output = detail_recovery_pass;
-        
-        // If we have a previous frame, apply temporal stabilization
-        // In real DLSS, motion vectors would be used for better temporal reprojection
-        // We'll do a simple blend for our simulation
-        if let Some(prev_frame_data) = &context.previous_frame {
-            if prev_frame_data.len() == (self.output_width * self.output_height * 4) as usize {
-                // Blend current frame with previous frame with temporal weight
-                for y in 0..self.output_height {
-                    for x in 0..self.output_width {
-                        let current_pixel = output.get_pixel(x, y);
-                        
-                        // Get previous pixel from flattened data
-                        let idx = ((y * self.output_width + x) * 4) as usize;
-                        if idx + 3 < prev_frame_data.len() {
-                            // Extract previous pixel
-                            let prev_r = prev_frame_data[idx];
-                            let prev_g = prev_frame_data[idx + 1];
-                            let prev_b = prev_frame_data[idx + 2];
-                            let prev_a = prev_frame_data[idx + 3];
-                            
-                            // Temporal blend
-                            let r = (current_pixel.0[0] as f32 * temporal_weight + 
-                                    prev_r as f32 * (1.0 - temporal_weight)) as u8;
-                            let g = (current_pixel.0[1] as f32 * temporal_weight + 
-                                    prev_g as f32 * (1.0 - temporal_weight)) as u8;
-                            let b = (current_pixel.0[2] as f32 * temporal_weight + 
-                                    prev_b as f32 * (1.0 - temporal_weight)) as u8;
-                            let a = (current_pixel.0[3] as f32 * temporal_weight + 
-                                    prev_a as f32 * (1.0 - temporal_weight)) as u8;
-                            
-                            // Update output with temporally stabilized pixel
-                            output.put_pixel(x, y, image::Rgba([r, g, b, a]));
-                        }
-                    }
-                }
-            }
-        }
-        
-        // In a real implementation, we would update the context with the current frame
-        // But due to borrowing limitations in our mock implementation, we can't directly update it
-        // This would be handled internally by the DLSS API in a real implementation
-        
-        // Note: In a real implementation, we would store the current frame for the next run
-        // and increment the frame counter for temporal processing
-        // In practice, NVIDIA NGX API would handle this internally
-        
-        // Apply sharpening based on DLSS parameters
-        let mut sharpened_image = RgbaImage::new(self.output_width, self.output_height);
-        
-        // Combine results
-        // For now, just return the sharpened image
-        Ok(sharpened_image)
+        Ok(output)
     }
 }
 

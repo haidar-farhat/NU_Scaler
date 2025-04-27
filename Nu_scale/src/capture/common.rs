@@ -511,14 +511,14 @@ pub fn resize_image(
     frame_start_time: Instant,
 ) -> Result<RgbaImage, String> {
     let filter_type = match algorithm {
-        crate::upscale::common::UpscalingAlgorithm::Bilinear => imageops::FilterType::Triangle,
-        crate::upscale::common::UpscalingAlgorithm::Bicubic => imageops::FilterType::CatmullRom,
-        crate::upscale::common::UpscalingAlgorithm::Lanczos3 => imageops::FilterType::Lanczos3,
-        crate::upscale::common::UpscalingAlgorithm::Lanczos2 => imageops::FilterType::Lanczos3, // Fallback
-        // Fix: Use the index corresponding to Nearest-Neighbor from the UI (assuming it's 3)
-        // crate::upscale::common::UpscalingAlgorithm::Nearest => imageops::FilterType::Nearest,
-        3 => imageops::FilterType::Nearest, // Assuming index 3 is Nearest
-        _ => imageops::FilterType::Lanczos3, // Default fallback algorithm
+        // Use fully qualified path for enum variants
+        crate::upscale::common::UpscalingAlgorithm::Nearest => image::imageops::FilterType::Nearest,
+        crate::upscale::common::UpscalingAlgorithm::Bilinear => image::imageops::FilterType::Triangle, // Triangle is often used for Bilinear
+        crate::upscale::common::UpscalingAlgorithm::Bicubic => image::imageops::FilterType::CatmullRom, // CatmullRom is often used for Bicubic
+        crate::upscale::common::UpscalingAlgorithm::Lanczos3 => image::imageops::FilterType::Lanczos3,
+        // Add other variants if they exist in UpscalingAlgorithm
+        // Handle potential unknown or unmapped algorithms gracefully
+        _ => image::imageops::FilterType::Lanczos3, // Default fallback
     };
     let _elapsed = frame_start_time.elapsed(); // Prefix unused
     Ok(imageops::resize(input, width, height, filter_type))
