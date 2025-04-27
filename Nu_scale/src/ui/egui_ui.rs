@@ -1778,6 +1778,7 @@ impl AppState {
     fn show_source_window_list(&mut self, ctx: &Context, ui: &mut Ui) {
          if ui.button("Set Capture Window").clicked() {
              if let Some(name) = self.available_windows.get(self.selected_window_index) {
+                 let name = name.clone();
                  self.set_capture_target_window_title(ctx, &name);
              }
          }
@@ -1790,11 +1791,13 @@ impl AppState {
              let response = ui.selectable_label(self.selected_window_index == index, name);
              if response.clicked() {
                  self.selected_window_index = index;
-                 self.set_capture_target_window_title(ctx, name);
+                 let name = name.clone();
+                 self.set_capture_target_window_title(ctx, &name);
              }
              if response.double_clicked() {
                  self.selected_window_index = index;
-                 self.set_capture_target_window_title(ctx, name);
+                 let name = name.clone();
+                 self.set_capture_target_window_title(ctx, &name);
              }
          }
      }
