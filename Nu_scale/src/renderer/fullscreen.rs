@@ -5,7 +5,6 @@ use std::io::{Error as IoError, ErrorKind};
 use anyhow::Result;
 use eframe::{self, egui};
 use egui::{Vec2, ColorImage, TextureOptions, TextureId};
-use egui::plot::Plot;
 use egui_plot::*;
 use image::RgbaImage;
 use std::path::Path;
@@ -470,7 +469,7 @@ impl FullscreenUpscalerUi {
     }
     
     /// Update source window position (for tracking moving windows)
-    fn update_source_window_position(&mut self, frame: &mut eframe::Frame) {
+    fn update_source_window_position(&mut self, ctx: &egui::Context) {
         // Only track windows by title for now
         if let Some(target) = &self.capture_target {
             // We only need to check window positions for specific windows
@@ -496,6 +495,8 @@ impl FullscreenUpscalerUi {
                                 self.source_window_info = Some(new_pos);
                                 
                                 // Update overlay window position - TODO: Find eframe 0.27 equivalent, maybe viewport commands?
+                                // ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(new_pos.0 as f32, new_pos.1 as f32))); // Example
+                                // ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(new_pos.2 as f32, new_pos.3 as f32))); // Example
                                 // frame.set_window_pos(egui::pos2(new_pos.0 as f32, new_pos.1 as f32));
                                 // frame.set_window_size(egui::vec2(new_pos.2 as f32, new_pos.3 as f32));
                             }
@@ -1615,8 +1616,7 @@ impl eframe::App for FullscreenUpscalerUi {
             self.cleanup();
             
             // Close the application
-            // frame.close(); // Old way
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close); // New way
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             return;
         }
         
@@ -1737,8 +1737,7 @@ impl eframe::App for FullscreenUpscalerUi {
         ctx.request_repaint_after(next_frame_time);
         
         // Safe window position update
-        // self.update_source_window_position(frame); // Pass ctx instead?
-         self.update_source_window_position(ctx); // Pass ctx
+        self.update_source_window_position(ctx);
     }
     
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
