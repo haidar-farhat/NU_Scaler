@@ -1,9 +1,6 @@
 use anyhow::{Result, anyhow};
 use image::RgbaImage;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::path::Path;
-use std::env;
-use std::fs;
 use crate::upscale::{Upscaler, UpscalingQuality};
 
 // Static check for FSR support to avoid repeated checks
@@ -248,7 +245,6 @@ impl FsrUpscaler {
                     
                     // Normalize edge strength
                     edge_strength /= 3.0;
-                    edge_strength = edge_strength.min(1.0);
                 }
                 
                 // Bilinear interpolation with edge-aware weights

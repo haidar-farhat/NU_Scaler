@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow};
-use image::{DynamicImage, RgbaImage};
+use image::{DynamicImage, RgbaImage, Rgba, imageops};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -42,7 +42,6 @@ mod upscale_api {
         };
         
         // Use a simple resizing as fallback if direct API access doesn't work
-        use image::imageops;
         Ok(imageops::resize(input, width, height, imageops::FilterType::Lanczos3))
     }
 }
@@ -66,7 +65,7 @@ pub fn capture_and_upscale_to_fullscreen(
     _technology: Option<UpscalingTechnology>,
     _quality: Option<UpscalingQuality>,
     _algorithm: Option<&str>, // Optional algorithm for basic upscaling
-    save_path: Option<&Path>
+    _save_path: Option<&Path> // Prefix unused save_path
 ) -> Result<()> {
     let mut capturer = super::create_capturer()?;
     
