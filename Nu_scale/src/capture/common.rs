@@ -221,7 +221,7 @@ pub fn start_live_capture_thread(
         let mut next_time = Instant::now();
 
         while !stop.load(Ordering::SeqCst) {
-            let start = Instant::now();
+            let _start = Instant::now();
             match capturer.capture_frame(&target) {
                 Ok(frame) => {
                     buf.add_frame(frame)?;
