@@ -85,6 +85,8 @@ pub enum UpscalingAlgorithm {
     Area,
     /// Best algorithm based on the situation
     Balanced,
+    /// Nearest neighbor (fastest, lowest quality)
+    Nearest,
 }
 
 // Implement Display for UpscalingAlgorithm
@@ -99,6 +101,7 @@ impl fmt::Display for UpscalingAlgorithm {
             UpscalingAlgorithm::Mitchell => "Mitchell",
             UpscalingAlgorithm::Area => "Area",
             UpscalingAlgorithm::Balanced => "Balanced",
+            UpscalingAlgorithm::Nearest => "Nearest",
         };
         write!(f, "{}", name)
     }
@@ -305,6 +308,17 @@ impl Upscaler for BasicUpscaler {
                 );
                 output = resized;
             },
+            UpscalingAlgorithm::Nearest => {
+                // Nearest neighbor implementation
+                for y in 0..self.output_height {
+                    for x in 0..self.output_width {
+                        let src_x = (x * self.input_width / self.output_width).min(self.input_width - 1);
+                        let src_y = (y * self.input_height / self.output_height).min(self.input_height - 1);
+                        let pixel = input.get_pixel(src_x, src_y);
+                        output.put_pixel(x, y, *pixel);
+                    }
+                }
+            },
         };
         
         Ok(output)
@@ -330,6 +344,7 @@ impl Upscaler for BasicUpscaler {
             UpscalingAlgorithm::Mitchell => "Basic Mitchell-Netravali",
             UpscalingAlgorithm::Area => "Basic Area Resampling",
             UpscalingAlgorithm::Balanced => "Basic Auto Upscaling",
+            UpscalingAlgorithm::Nearest => "Basic Nearest",
         }
     }
     
@@ -546,6 +561,7 @@ impl UpscalingAlgorithm {
             UpscalingAlgorithm::Mitchell => INTER_CUBIC,    // OpenCV doesn't have Mitchell, use cubic
             UpscalingAlgorithm::Area => INTER_AREA,
             UpscalingAlgorithm::Balanced => INTER_LINEAR,   // Use bilinear as a balanced default
+            UpscalingAlgorithm::Nearest => INTER_NEAREST,
         }
     }
     
@@ -560,6 +576,7 @@ impl UpscalingAlgorithm {
             UpscalingAlgorithm::Mitchell => "Mitchell-Netravali",
             UpscalingAlgorithm::Area => "Area (Box) Resample",
             UpscalingAlgorithm::Balanced => "Auto (Balanced)",
+            UpscalingAlgorithm::Nearest => "Nearest",
         }
     }
 } 

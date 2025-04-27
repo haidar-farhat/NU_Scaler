@@ -1693,10 +1693,8 @@ impl AppState {
                  rect.min.x, rect.min.y, rect.width(), rect.height());
         
         // Draw the image
-        let tex_id = texture.id();
-        let tex_size = texture.size_vec2();
-        // Correct usage: Provide ImageSource::Texture to Image::new
-        let img_widget = egui::Image::new(egui::ImageSource::Texture(egui::TextureHandle::from(texture.clone()))); // Pass ImageSource::Texture
+        // Use the TextureHandle directly with egui::Image::new
+        let img_widget = egui::Image::new(texture.clone()); // Pass TextureHandle directly
         ui.put(rect, img_widget);
         
         // Display performance counter in the corner if enabled
@@ -2182,20 +2180,21 @@ pub fn run_app() -> Result<()> {
     // Manually set theme on viewport
     let mut native_options = options;
     // Fix: Use .with_theme() method correctly
-    native_options.viewport = native_options.viewport.with_theme(Some(eframe::Theme::Dark.into()));
+    // Remove viewport theme setting here, will be set via context later
+    // native_options.viewport = native_options.viewport.with_theme(Some(eframe::Theme::Dark.into())); 
 
     eframe::run_native(
         "NU Scale",
-        native_options, // Use modified options
+        native_options, // Use native options without theme
         Box::new(|cc| {
             let mut app_state = AppState::default();
             app_state.configure_fonts(&cc.egui_ctx);
-            // Apply theme from settings
+            // Apply theme from settings using context visuals
             let theme = match app_state.settings.theme.as_str() {
-                "light" => eframe::Theme::Light,
-                _ => eframe::Theme::Dark, // Default to Dark
+                "light" => egui::Visuals::light(),
+                _ => egui::Visuals::dark(), // Default to Dark
             };
-            cc.egui_ctx.set_visuals(theme.egui_visuals());
+            cc.egui_ctx.set_visuals(theme);
             Box::new(app_state)
         }),
     )
