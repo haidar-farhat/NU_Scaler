@@ -1,9 +1,9 @@
 use anyhow::{anyhow, Result};
 use egui::{
-    epaint::ahash::{AHashMap, HashMapExt},
+    epaint::ahash::AHashMap,
     widgets::*,
-    TextureHandle, Ui, Context, ViewportCommand, ViewportBuilder, ImageData, ColorImage, TextureOptions, TextureId, Vec2,
-    RichText, Slider, Color32, Frame, Stroke, Rounding, Layout, Align,
+    TextureHandle, Ui, Context, ViewportCommand, ViewportBuilder, TextureId, Vec2,
+    RichText, Slider, Color32, Frame, Stroke, Rounding, Layout,
 };
 // Standard library imports
 use std::{
@@ -398,10 +398,10 @@ impl Default for AppState {
 }
 
 impl eframe::App for AppState {
-    fn update(&mut self, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &Context, frame: &mut eframe::Frame) {
         // Check for Alt+S to upscale window under cursor
         if ctx.input(|i| i.modifiers.alt && i.key_pressed(eframe::egui::Key::S)) {
-            self.upscale_window_under_cursor(frame);
+            self.upscale_window_under_cursor(ctx, frame);
             return;
         }
         
@@ -466,7 +466,7 @@ impl eframe::App for AppState {
                 // Central content area
                 egui::CentralPanel::default().show(ctx, |ui| {
                     match self.selected_tab {
-                        TabState::Capture => self.show_capture_tab(ui),
+                        TabState::Capture => self.show_capture_tab(ctx, ui),
                         TabState::Settings => self.show_settings_tab(ui),
                         TabState::Advanced => self.show_advanced_tab(ui),
                     }
@@ -598,7 +598,7 @@ impl eframe::App for AppState {
 
 impl AppState {
     /// Configure custom fonts
-    fn configure_fonts(&self, ctx: &eframe::egui::Context) {
+    fn configure_fonts(&self, ctx: &egui::Context) {
         let fonts = eframe::egui::FontDefinitions::default();
         // Could add custom fonts here
         ctx.set_fonts(fonts);
@@ -642,7 +642,8 @@ impl AppState {
                 if scale_button.clicked() {
                     // Use launch_fullscreen_mode instead of start_scaling_process
                     // This applies upscaling directly in the current window
-                    self.launch_fullscreen_mode(frame);
+                    let ctx = ui.ctx().clone(); // Clone context if needed within this scope
+                    self.launch_fullscreen_mode(&ctx, frame);
                 }
                 
                 ui.add_space(8.0);
@@ -653,7 +654,8 @@ impl AppState {
                         .fill(Color32::from_rgb(0, 120, 215)));
                 
                 if fullscreen_button.clicked() {
-                    self.launch_fullscreen_mode(frame);
+                    let ctx = ui.ctx().clone(); // Clone context if needed
+                    self.launch_fullscreen_mode(&ctx, frame);
                 }
                 
                 ui.add_space(8.0);
@@ -786,7 +788,7 @@ impl AppState {
     }
     
     /// Show the region selection dialog
-    fn show_region_dialog(&mut self, ctx: &eframe::egui::Context) {
+    fn show_region_dialog(&mut self, ctx: &Context) {
         let mut dialog = RegionDialog::new();
         
         // Set initial region values
@@ -1406,7 +1408,7 @@ impl AppState {
     
     /// Update the application upscaling mode state
     /// Renders the captured frames with the upscaler
-    fn update_upscaling_mode(&mut self, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
+    fn update_upscaling_mode(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         // Check for ESC key to exit fullscreen mode
         if ctx.input(|i| i.key_pressed(eframe::egui::Key::Escape)) {
             log::info!("ESC pressed, exiting fullscreen mode");
@@ -1961,7 +1963,7 @@ impl AppState {
     }
     
     /// Launch upscaling for the window under cursor (triggered by shortcut)
-    fn upscale_window_under_cursor(&mut self, frame: &mut eframe::Frame) {
+    fn upscale_window_under_cursor(&mut self, ctx: &Context, frame: &mut eframe::Frame) {
         log::info!("Upscaling window under cursor");
         
         // Get the window under cursor
@@ -1989,7 +1991,7 @@ impl AppState {
             
             // Launch fullscreen upscaling for this window
             log::info!("Launching fullscreen upscaling for selected window: {}", window_title);
-            self.launch_fullscreen_mode(frame);
+            self.launch_fullscreen_mode(ctx, frame);
         } else {
             log::warn!("No window found under cursor");
             self.status_message = "No window found under cursor".to_string();
