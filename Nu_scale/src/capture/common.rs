@@ -1,5 +1,6 @@
 use anyhow::{Result, anyhow};
-use image::{DynamicImage, RgbaImage, Rgba, imageops};
+use image::{DynamicImage, RgbaImage, imageops};
+use image::imageops::FilterType;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
