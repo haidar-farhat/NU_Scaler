@@ -12,6 +12,7 @@ use log::{warn, error, trace, info};
 use std::panic::AssertUnwindSafe;
 use rand;
 use std::sync::Mutex;
+use egui_wgpu::WgpuConfiguration;
 
 use crate::capture::common::FrameBuffer;
 use crate::upscale::{Upscaler, UpscalingTechnology, UpscalingQuality};
@@ -507,7 +508,7 @@ impl FullscreenUpscalerUi {
                                 
                                 // Update overlay window position with eframe 0.27+ viewport commands
                                 ctx.send_viewport_cmd(
-                                    egui::ViewportCommand::WindowBounds(egui::Rect::from_min_size(
+                                    egui::ViewportCommand::InnerRect(egui::Rect::from_min_size(
                                         egui::pos2(new_pos.0 as f32, new_pos.1 as f32),
                                         egui::vec2(new_pos.2 as f32, new_pos.3 as f32)
                                     ))
@@ -1910,7 +1911,7 @@ pub fn run_fullscreen_upscaler(
             .with_transparent(false),
         
         // Enable GPU features needed for upscaling
-        wgpu_options: eframe::WgpuConfiguration {
+        wgpu_options: WgpuConfiguration {
             features: wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
             ..Default::default()
         },

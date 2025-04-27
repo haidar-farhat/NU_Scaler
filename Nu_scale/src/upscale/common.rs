@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use image::{RgbaImage, Rgba, imageops};
+use image::imageops::FilterType;
 use serde::{Serialize, Deserialize};
 use anyhow::{Result, anyhow};
 use crate::upscale::{Upscaler, UpscalingQuality};
