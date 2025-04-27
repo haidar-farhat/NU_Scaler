@@ -1690,7 +1690,7 @@ impl eframe::App for FullscreenUpscalerUi {
                             
                             // Simple rendering with error handling
                             if let Err(e) = (|| -> Result<(), String> {
-                                ui.put(rect, egui::Image::new(texture_handle));
+                                ui.put(rect, egui::Image::new(texture));
                                 Ok(())
                             })() {
                                 log::error!("Error rendering texture: {}", e);
@@ -1992,48 +1992,5 @@ impl FullscreenUpscalerUi {
             error!("Failed to lock texture mutex");
         }
         texture_updated
-    }
-}
-
-impl FullscreenUpscalerUi {
-    // Update source window position
-    fn update_source_window_info(&mut self, ctx: &egui::Context) {
-        // Only track windows by title for now
-        if let Some(target) = &self.capture_target {
-            // We only need to check window positions for specific windows
-            if let CaptureTarget::WindowByTitle(title) = target {
-                // Get window information by title
-                if let Ok(capturer) = crate::capture::create_capturer() {
-                    if let Ok(windows) = capturer.list_windows() {
-                        // Find window with matching title
-                        if let Some(window) = windows.iter().find(|w| w.title.contains(title)) {
-                            // Check if position changed
-                            let new_pos = (
-                                window.geometry.x,
-                                window.geometry.y,
-                                window.geometry.width,
-                                window.geometry.height,
-                            );
-                            
-                            if self.source_window_info != Some(new_pos) {
-                                log::debug!("Window position changed from {:?} to {:?}", 
-                                        self.source_window_info, new_pos);
-                                        
-                                // Update stored position
-                                self.source_window_info = Some(new_pos);
-                                
-                                // Update overlay window position with eframe 0.27+ viewport commands
-                                ctx.send_viewport_cmd(
-                                    egui::ViewportCommand::WindowBounds(egui::Rect::from_min_size(
-                                        egui::pos2(new_pos.0 as f32, new_pos.1 as f32),
-                                        egui::vec2(new_pos.2 as f32, new_pos.3 as f32)
-                                    ))
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-        }
     }
 }
