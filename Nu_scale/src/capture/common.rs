@@ -520,7 +520,7 @@ pub fn resize_image(
         // Handle potential unknown or unmapped algorithms gracefully
         _ => image::imageops::FilterType::Lanczos3, // Default fallback
     };
-    let _elapsed = frame_start_time.elapsed(); // Prefix unused
+    let _elapsed = frame_start_time.elapsed(); // Prefix unused variable
     Ok(imageops::resize(input, width, height, filter_type))
 }
 
