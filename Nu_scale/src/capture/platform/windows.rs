@@ -593,8 +593,6 @@ impl WgpuWindowsCapture {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
             dx12_shader_compiler: Default::default(),
-            flags: wgpu::InstanceFlags::default(),
-            gles_minor_version: Default::default(),
         });
         
         // Initialize cached windows
@@ -702,8 +700,8 @@ impl WgpuWindowsCapture {
             gdi_capture.as_raw(),
             wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: Some(4 * gdi_capture.width()),
-                rows_per_image: Some(gdi_capture.height()),
+                bytes_per_row: std::num::NonZeroU32::new(4 * gdi_capture.width()),
+                rows_per_image: std::num::NonZeroU32::new(gdi_capture.height()),
             },
             texture_size,
         );
