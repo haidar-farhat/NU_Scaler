@@ -1676,7 +1676,7 @@ impl eframe::App for FullscreenUpscalerUi {
                             
                             // Simple rendering with error handling
                             if let Err(e) = (|| -> Result<(), String> {
-                                ui.put(rect, egui::Image::new(texture.id(), egui::Vec2::new(rect.width(), rect.height())));
+                                ui.put(rect, egui::Image::new(texture.id()).fit_to_exact_size(rect.size()));
                                 Ok(())
                             })() {
                                 log::error!("Error rendering texture: {}", e);
@@ -1964,7 +1964,7 @@ impl FullscreenUpscalerUi {
             };
             
             // Draw the texture to cover the entire space
-            ui.put(rect, egui::Image::new(texture.id(), texture_size));
+            ui.put(rect, egui::Image::new(texture.id()).fit_to_exact_size(rect.size()));
             
             // Draw performance overlay in the top-right corner only if enabled
             if self.show_overlay {
