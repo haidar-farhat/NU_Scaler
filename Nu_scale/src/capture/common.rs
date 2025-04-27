@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use crate::capture::CaptureTarget;
 use crate::upscale::{UpscalingTechnology, UpscalingQuality};
+use image::imageops;
 
 /// Type aliases for upscaling functionality to avoid import issues
 #[allow(dead_code)]
@@ -44,7 +45,7 @@ mod upscale_api {
         };
         
         // Use a simple resizing as fallback if direct API access doesn't work
-        Ok(imageops::resize(input, width, height, imageops::FilterType::Lanczos3))
+        Ok(imageops::resize(input, width, height, FilterType::Lanczos3))
     }
 }
 
