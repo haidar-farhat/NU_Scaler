@@ -495,9 +495,9 @@ impl FullscreenUpscalerUi {
                                 // Update stored position
                                 self.source_window_info = Some(new_pos);
                                 
-                                // Update overlay window position
-                                frame.set_window_pos(egui::pos2(new_pos.0 as f32, new_pos.1 as f32));
-                                frame.set_window_size(egui::vec2(new_pos.2 as f32, new_pos.3 as f32));
+                                // Update overlay window position - TODO: Find eframe 0.27 equivalent, maybe viewport commands?
+                                // frame.set_window_pos(egui::pos2(new_pos.0 as f32, new_pos.1 as f32));
+                                // frame.set_window_size(egui::vec2(new_pos.2 as f32, new_pos.3 as f32));
                             }
                         }
                     }
@@ -1615,7 +1615,8 @@ impl eframe::App for FullscreenUpscalerUi {
             self.cleanup();
             
             // Close the application
-            frame.close();
+            // frame.close(); // Old way
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close); // New way
             return;
         }
         
@@ -1736,7 +1737,8 @@ impl eframe::App for FullscreenUpscalerUi {
         ctx.request_repaint_after(next_frame_time);
         
         // Safe window position update
-        self.update_source_window_position(frame);
+        // self.update_source_window_position(frame); // Pass ctx instead?
+         self.update_source_window_position(ctx); // Pass ctx
     }
     
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
