@@ -3,7 +3,6 @@ use anyhow::{Result, anyhow};
 use crate::upscale::{Upscaler, UpscalingQuality};
 use std::fmt;
 use image::{RgbaImage, Rgba, imageops};
-use crate::UpscalingAlgorithm;
 
 /// Pass-through upscaler that doesn't change the image
 pub struct PassThroughUpscaler {}
