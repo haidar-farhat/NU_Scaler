@@ -154,7 +154,7 @@ impl RegionDialog {
                         self.width = (screen_x1.max(screen_x2) - self.x).max(1);
                         self.height = (screen_y1.max(screen_y2) - self.y).max(1);
                     }
-                } else if response.drag_released() {
+                } else if response.dragged_stopped() {
                     self.dragging = false;
                     self.drag_start = None;
                     self.drag_current = None;
