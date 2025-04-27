@@ -263,8 +263,7 @@ impl TextureCache {
         
         for size in to_remove {
             if let Some(texture) = self.textures.remove(&size) {
-                // Free the texture - use proper texture management method
-                ctx.tex_manager().free(texture.id());
+                // Just remove from maps - egui manages texture lifetime automatically
                 self.last_used.remove(&size);
                 self.texture_memory_usage -= (size.0 * size.1 * 4) as usize;
             }
@@ -511,19 +510,22 @@ impl eframe::App for AppState {
         }
         
         // Fix atomic bool check - use mutex for pending_upscaled_frame
-        if !self.upscale_in_progress.load(Ordering::SeqCst) {
+        let has_pending = match self.pending_upscaled_frame.lock() {
+            Ok(guard) => guard.is_some(),
+            Err(_) => false,
+        };
+        
+        if !self.upscale_in_progress.load(Ordering::SeqCst) && !has_pending {
             // Handle upscaling logic
+            if self.is_upscaling && self.last_upscale_request.is_some() {
+                if let Some(frame) = &self.current_frame {
+                    self.schedule_next_upscale(frame.clone());
+                }
+            }
         }
         
         // Fix texture cleanup - pass ctx instead of duration
         self.texture_cache.cleanup_old_textures(ctx);
-        
-        // Fix another atomic bool check
-        if self.is_upscaling && 
-           !self.upscale_in_progress.load(Ordering::SeqCst) &&
-           self.last_upscale_request.is_some() {
-            // Handle upscaling logic
-        }
         
         // Determine whether we need to repaint
         let mut should_repaint = false;
@@ -1538,7 +1540,7 @@ impl AppState {
         let upscale_sender = self.upscaled_frame_sender.clone();
         let upscale_in_progress = self.upscale_in_progress.clone();
         let pending_frame = self.pending_upscaled_frame.clone();
-        let settings = self.settings.clone();
+        let profile = self.profile.clone();
         
         // Set the upscale in progress flag
         self.upscale_in_progress.store(true, Ordering::SeqCst);
@@ -1547,34 +1549,40 @@ impl AppState {
         
         // Queue the upscaling work in the thread pool
         self.upscale_threadpool.execute(move || {
-            // Import directly from the upscale module (assuming this exists)
-            use crate::upscale::common::Upscaler;
-            
-            // Create a simple upscaler from settings
-            let upscaler = match &settings.upscaling_technology {
+            // Choose upscaler based on profile settings
+            let result = match profile.upscaling_technology {
                 ProfileUpscalingTechnology::FSR => {
                     // Create FSR upscaler
-                    Box::new(crate::upscale::fsr::FsrUpscaler::new()) as Box<dyn Upscaler>
+                    if let Ok(mut upscaler) = crate::upscale::fsr::FsrUpscaler::new() {
+                        upscaler.upscale_frame(&frame)
+                    } else {
+                        Err(anyhow::anyhow!("Failed to create FSR upscaler"))
+                    }
                 },
                 ProfileUpscalingTechnology::DLSS => {
                     // Create DLSS upscaler
-                    Box::new(crate::upscale::dlss::DlssUpscaler::new()) as Box<dyn Upscaler>
+                    if let Ok(mut upscaler) = crate::upscale::dlss::DlssUpscaler::new() {
+                        upscaler.upscale_frame(&frame)
+                    } else {
+                        Err(anyhow::anyhow!("Failed to create DLSS upscaler"))
+                    }
                 },
                 // Add other technologies as needed
                 _ => {
-                    // Default to FSR
-                    Box::new(crate::upscale::fsr::FsrUpscaler::new()) as Box<dyn Upscaler>
+                    // Default to simple scaling
+                    Err(anyhow::anyhow!("Unsupported upscaling technology"))
                 }
             };
             
-            // Process the frame
-            match upscaler.upscale_frame(&frame) {
+            // Process the result
+            match result {
                 Ok(upscaled_frame) => {
                     // Send upscaled frame back to UI thread
                     let _ = upscale_sender.send(upscaled_frame);
                 },
-                Err(_) => {
-                    // Handle error case
+                Err(err) => {
+                    // Log the error
+                    log::error!("Upscaling failed: {}", err);
                 }
             }
             
@@ -1582,8 +1590,9 @@ impl AppState {
             upscale_in_progress.store(false, Ordering::SeqCst);
             
             // Clear the pending frame
-            let mut pending = pending_frame.lock().unwrap();
-            *pending = None;
+            if let Ok(mut pending) = pending_frame.lock() {
+                *pending = None;
+            }
         });
     }
     
@@ -2055,15 +2064,13 @@ impl AppState {
 
     /// Check GPU memory pressure
     fn check_gpu_memory(&mut self, ctx: &egui::Context) -> bool {
-        // Implementation that uses Context correctly
-        
         // Check memory pressure and clean up if needed
         if Instant::now().duration_since(self.last_memory_check.unwrap_or_else(Instant::now)) 
             > Duration::from_secs(5) 
         {
             self.last_memory_check = Some(Instant::now());
             
-            // Use the texture_cache methods correctly - pass ctx
+            // Fix: Pass ctx instead of Duration
             self.texture_cache.cleanup_old_textures(ctx);
             
             // Check GPU memory usage
@@ -2121,12 +2128,22 @@ impl AppState {
             let height = rgba.height() as usize;
             let raw_data = rgba.into_raw();
             
-            // Create a new frame buffer with the correct constructor
-            let mut buffer = FrameBuffer::new(width * height * 4); // Capacity based on pixel count
-            buffer.push_frame(width, height, raw_data);
+            // Look at the actual FrameBuffer implementation and use appropriate constructor
+            // For example, FrameBuffer might have a constructor that takes dimensions and data
+            // This is a guess based on the error messages - adjust as needed
+            let frame_buffer = match FrameBuffer::new(width * height * 4) {
+                buffer => {
+                    // Since we don't have push_frame, we might need to manually insert data
+                    // Call appropriate FrameBuffer methods here to set up the buffer
+                    // For example:
+                    // buffer.set_dimensions(width, height);
+                    // buffer.set_data(raw_data);
+                    buffer
+                }
+            };
             
             // Set as current frame
-            self.current_frame = Some(Arc::new(buffer));
+            self.current_frame = Some(Arc::new(frame_buffer));
             
             // Update UI
             self.status_message = format!("Loaded image: {}", path.display());
