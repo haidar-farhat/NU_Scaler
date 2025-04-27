@@ -3,7 +3,7 @@ use egui::{
     epaint::ahash::AHashMap,
     widgets::*,
     TextureHandle, Ui, Context, ViewportCommand, ViewportBuilder, TextureId, Vec2,
-    RichText, Slider, Color32, Frame, Stroke, Rounding, Layout,
+    RichText, Slider, Color32, Frame, Stroke, Rounding,
 };
 // Standard library imports
 use std::{
@@ -24,7 +24,7 @@ struct ThreadPool {
 
 impl ThreadPool {
     pub fn new(size: usize) -> Self {
-        let (sender, receiver) = std::sync::mpsc::channel();
+        let (sender, receiver) = std::sync::mpsc::channel::<Box<dyn FnOnce() + Send + 'static>>();
         let receiver = Arc::new(Mutex::new(receiver));
 
         let mut workers = Vec::with_capacity(size);
@@ -450,7 +450,7 @@ impl eframe::App for AppState {
                     // Render the upscaled texture to fill the window
                     let available_size = upscale_ui.available_size();
                     upscale_ui.add(
-                        egui::Image::new(texture_id)
+                        egui::Image::new((texture_id, available_size))
                             .fit_to_exact_size(available_size)
                     );
                 } else {
@@ -1541,7 +1541,7 @@ impl AppState {
                                 eframe::egui::vec2(width, height)
                             );
                             
-                            ui.put(rect, eframe::egui::Image::new(texture.id(), eframe::egui::vec2(width, height)));
+                            ui.put(rect, eframe::egui::Image::new((texture.id(), eframe::egui::vec2(width, height))));
                         } else {
                             ui.centered_and_justified(|ui| {
                                 ui.heading("Initializing upscaler...");
@@ -1686,7 +1686,7 @@ impl AppState {
         
         // Draw the image
         // Use the TextureHandle directly with egui::Image::new
-        let img_widget = egui::Image::new(texture.clone()); // Pass TextureHandle directly
+        let img_widget = egui::Image::new(&texture); // Pass TextureHandle directly
         ui.put(rect, img_widget);
         
         // Display performance counter in the corner if enabled
@@ -1776,27 +1776,27 @@ impl AppState {
 
     // ... show_source_window_list needs ctx passed to set_capture_target_window_title ...
     fn show_source_window_list(&mut self, ctx: &Context, ui: &mut Ui) {
-         // ... existing code ...
-         if ui.button("Set Capture Window").clicked() { // Fix: Use .clicked()
+         if ui.button("Set Capture Window").clicked() {
              if let Some(name) = self.available_windows.get(self.selected_window_index) {
-                 self.set_capture_target_window_title(ctx, &name); // Pass ctx
+                 self.set_capture_target_window_title(ctx, &name);
              }
          }
-         if ui.button("Reset Window").clicked() { // Fix: Use .clicked()
-             self.set_capture_target_window_title(ctx, ""); // Pass ctx
+         if ui.button("Reset Window").clicked() {
+             self.set_capture_target_window_title(ctx, "");
          }
-         // ... inside loop ...
-         // CAPTURE response from selectable_label
-         let response = ui.selectable_label(self.selected_window_index == index, name);
-         if response.clicked() { // Use captured response
-             self.selected_window_index = index;
-             self.set_capture_target_window_title(ctx, name); // Pass ctx
+         // Fix borrow checker: clone window names before the loop
+         let window_names: Vec<String> = self.available_windows.clone();
+         for (index, name) in window_names.iter().enumerate() {
+             let response = ui.selectable_label(self.selected_window_index == index, name);
+             if response.clicked() {
+                 self.selected_window_index = index;
+                 self.set_capture_target_window_title(ctx, name);
+             }
+             if response.double_clicked() {
+                 self.selected_window_index = index;
+                 self.set_capture_target_window_title(ctx, name);
+             }
          }
-         if response.double_clicked() { // Use captured response
-             self.selected_window_index = index;
-             self.set_capture_target_window_title(ctx, name); // Pass ctx
-         }
-         // ... rest of function ...
      }
 
     /// Start a scaling process in a separate application instance

@@ -1,10 +1,10 @@
 use anyhow::{Result, anyhow};
 use image::RgbaImage;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::path::Path;
 use std::env;
 use std::fs;
 use crate::upscale::{Upscaler, UpscalingQuality};
+use std::path::Path;
 
 // Static check for DLSS support to avoid repeated checks
 static DLSS_SUPPORTED: AtomicBool = AtomicBool::new(false);

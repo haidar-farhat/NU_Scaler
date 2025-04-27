@@ -1,11 +1,9 @@
-use std::path::Path;
-use std::sync::{Arc, Mutex};
-use image::{RgbaImage, Rgba, imageops};
-use image::imageops::FilterType;
 use serde::{Serialize, Deserialize};
 use anyhow::{Result, anyhow};
 use crate::upscale::{Upscaler, UpscalingQuality};
 use std::fmt;
+use image::{RgbaImage, Rgba, imageops};
+use crate::UpscalingAlgorithm;
 
 /// Pass-through upscaler that doesn't change the image
 pub struct PassThroughUpscaler {}
@@ -511,7 +509,7 @@ impl ErrorMetrics {
         }
         
         // MSE is average error per pixel per channel
-        let mse = sum_squared_error / (total_pixels * 3.0);
+        let mse: f64 = sum_squared_error / (total_pixels * 3.0);
         
         // Calculate PSNR
         let max_value = 255.0;

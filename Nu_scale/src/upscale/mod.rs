@@ -1,6 +1,7 @@
 use anyhow::Result;
 use image::RgbaImage;
 use std::path::Path;
+use crate::UpscalingAlgorithm;
 
 pub mod fsr;
 pub mod fsr3;
@@ -8,8 +9,6 @@ pub mod dlss;
 pub mod common;
 pub mod vulkan;
 pub mod xess;
-
-use common::UpscalingAlgorithm;
 
 // Quality levels for upscaling
 #[derive(Debug, Clone, Copy, PartialEq)]

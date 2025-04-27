@@ -2,7 +2,6 @@ use anyhow::Result;
 use log::{debug, error, info, trace, LevelFilter};
 use std::fs::{self, File};
 use std::io::Write;
-use std::path::Path;
 use std::sync::Once;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -38,8 +37,7 @@ pub fn init_logger(log_dir: Option<&str>, verbose: bool) -> Result<()> {
             
             // If log_dir is provided, add a file logger
             if let Some(dir) = log_dir_owned {
-                // Create log directory if it doesn't exist
-                let log_dir_path = Path::new(&dir);
+                let log_dir_path = std::path::Path::new(&dir);
                 if !log_dir_path.exists() {
                     if let Err(e) = fs::create_dir_all(log_dir_path) {
                         eprintln!("Failed to create log directory: {}", e);
