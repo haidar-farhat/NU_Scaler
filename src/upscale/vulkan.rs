@@ -1,3 +1,0 @@
-fn upscale_with_algorithm(&self, _input: &RgbaImage, _algorithm: UpscalingAlgorithm) -> Result<RgbaImage> {
-// ... existing code ...
-} 

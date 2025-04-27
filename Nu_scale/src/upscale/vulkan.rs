@@ -99,12 +99,12 @@ impl Upscaler for VulkanUpscaler {
         }
     }
     
-    fn upscale_with_algorithm(&self, input: &RgbaImage, algorithm: UpscalingAlgorithm) -> Result<RgbaImage> {
+    fn upscale_with_algorithm(&self, _input: &RgbaImage, _algorithm: UpscalingAlgorithm) -> Result<RgbaImage> {
         // Otherwise, create a new upscaler with the requested algorithm
         warn!("Changing algorithm requires reinitializing Vulkan upscaler, which may be inefficient");
         let mut new_upscaler = VulkanUpscaler::new(self.quality)?;
         new_upscaler.initialize(self.input_width, self.input_height, self.output_width, self.output_height)?;
-        let result = new_upscaler.upscale(input);
+        let result = new_upscaler.upscale(self.input_width, self.input_height);
         new_upscaler.cleanup()?;
         result
     }
