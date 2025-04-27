@@ -64,3 +64,4 @@ wayland-protocols = { version = "0.30", features = ["client"] }
 [dependencies.egui-wgpu]
 version = "0.27"
 default-features = false
+pollster = "0.3"
