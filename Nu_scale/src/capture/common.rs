@@ -523,5 +523,11 @@ pub fn resize_image(
 
 /// Saves an image buffer to a file with timestamp.
 pub fn save_image_buffer(
-    // ... rest of file ...
+    path: &Path,
+    buffer: &image::ImageBuffer<image::Rgba<u8>, Vec<u8>>,
+) -> Result<()> {
+    // Basic implementation: Save the buffer to the specified path
+    // TODO: Add timestamp to filename?
+    log::info!("Saving image buffer to: {}", path.display());
+    buffer.save(path).map_err(|e| anyhow!("Failed to save image: {}", e))
 } 
