@@ -1929,9 +1929,6 @@ pub fn run_fullscreen_upscaler(
             // Set the capture target
             ui.set_capture_target(capture_target_clone);
             
-            // Configure the UI
-            ui.configure_ui(&cc.egui_ctx);
-            
             Box::new(ui)
         }),
     ).map_err(|e| e.to_string())
@@ -2000,72 +1997,13 @@ impl FullscreenUpscalerUi {
             false
         }
     }
-    
-    // Method to check and handle ESC key for exit
-    pub fn check_exit(&self, ctx: &egui::Context) -> bool {
-        // Check for ESC key to exit fullscreen mode
-        ctx.input(|i| i.key_pressed(egui::Key::Escape))
-    }
 }
 
 impl FullscreenUpscalerUi {
-    // Separate configuration of the context
-    fn configure(cc: &eframe::CreationContext<'_>) {
-        // Enable vsync and fullscreen
-        if let Some(ctx) = &cc.wgpu_render_state {
-            // Configure wgpu renderer if available
-            let _ = ctx.adapter.features();
-            // Additional wgpu configuration can be done here
-        }
-        
-        // Set up UI with dark mode
-        cc.egui_ctx.set_visuals(egui::Visuals::dark());
+    // Update source window position
+    fn update_source_window_position(&mut self, ctx: &egui::Context) {
+        // Example viewport commands for updating position and size
+        // ctx.send_viewport_cmd(egui::ViewportCommand::SetPos(egui::pos2(x, y)));
+        // ctx.send_viewport_cmd(egui::ViewportCommand::SetInnerSize(egui::vec2(width, height)));
     }
-    
-    // Create a new boxed instance of FullscreenUpscalerUi
-    fn new_boxed(
-        frame_buffer: Arc<FrameBuffer>,
-        stop_signal: Arc<AtomicBool>,
-        upscaler: Box<dyn Upscaler + Send + Sync>,
-        algorithm: Option<UpscalingAlgorithm>,
-    ) -> Box<Self> {
-        // We can't actually create the UI here because we need the CreationContext
-        // from eframe, so this is just a placeholder that creates the resources
-        let upscaler_name = upscaler.name().to_string();
-        let upscaler_quality = upscaler.quality();
-        
-        Box::new(Self {
-            frame_buffer,
-            stop_signal,
-            upscaler,
-            algorithm,
-            texture: Arc::new(Mutex::new(None)),
-            processing_thread: None,
-            frame_channel: (
-                std::sync::mpsc::channel().0,
-                std::sync::mpsc::channel().1,
-            ),
-            last_frame_time: std::time::Instant::now(),
-            fps: 0.0,
-            frames_processed: 0,
-            upscaler_name,
-            upscaler_quality,
-            show_overlay: true,
-            fps_history: Vec::with_capacity(120),
-            upscale_time_history: Vec::with_capacity(120),
-            last_upscale_time: 0.0,
-            input_size: (0, 0),
-            output_size: (0, 0),
-            source_window_info: None,
-            capture_target: None,
-            performance_metrics: PerformanceMetrics::new(),
-            last_update_time: None,
-            memory_pressure_counter: None,
-            requires_reinitialization: false,
-            fallback_capture: false,
-            enable_frame_skipping: true,
-            frame_time_budget: 16.7, // Updated to ~60 FPS for gaming PCs (was 2.0)
-            pending_frame: None,
-        })
-    }
-} 
+}
