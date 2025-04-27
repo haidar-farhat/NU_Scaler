@@ -8,6 +8,7 @@ use image::RgbaImage;
 use crate::capture::common::FrameBuffer;
 use crate::upscale::Upscaler;
 use crate::upscale::common::UpscalingAlgorithm;
+use crate::capture::platform::CaptureBackend;
 
 /// Fullscreen upscaler UI
 pub struct FullscreenUpscalerUi {
@@ -27,6 +28,8 @@ pub struct FullscreenUpscalerUi {
     fps: f32,
     /// Number of frames processed
     frames_processed: u64,
+    /// Backend for capturing
+    capture_backend: Box<dyn CaptureBackend>,
 }
 
 impl FullscreenUpscalerUi {
@@ -38,6 +41,26 @@ impl FullscreenUpscalerUi {
         upscaler: Box<dyn Upscaler>,
         algorithm: Option<UpscalingAlgorithm>,
     ) -> Self {
+        // Initialize the appropriate capture backend based on platform
+        #[cfg(target_os = "windows")]
+        let capture_backend = Box::new(crate::capture::platform::windows::WgpuWindowsCapture::new().unwrap());
+        
+        #[cfg(target_os = "linux")]
+        let capture_backend = {
+            use crate::capture::platform::linux::{detect_backend, LinuxBackendType};
+            match detect_backend() {
+                LinuxBackendType::Wayland => Box::new(crate::capture::platform::linux::WaylandCapture::new().unwrap()),
+                LinuxBackendType::X11 => Box::new(crate::capture::platform::linux::X11Capture::new().unwrap()),
+                LinuxBackendType::Unknown => {
+                    // Fallback to X11 if detection fails
+                    Box::new(crate::capture::platform::linux::X11Capture::new().unwrap())
+                }
+            }
+        };
+        
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+        let capture_backend = Box::new(crate::capture::platform::generic::GenericCapture::new().unwrap());
+
         // Enable vsync and fullscreen
         if let Some(ctx) = &cc.wgpu_render_state {
             // Configure wgpu renderer if available
@@ -57,6 +80,7 @@ impl FullscreenUpscalerUi {
             last_frame_time: Instant::now(),
             fps: 0.0,
             frames_processed: 0,
+            capture_backend,
         }
     }
     
@@ -64,39 +88,42 @@ impl FullscreenUpscalerUi {
     fn update_texture(&mut self, ctx: &egui::Context) {
         // Get the latest frame from the buffer
         if let Ok(frame) = self.frame_buffer.get_latest_frame() {
-            // Calculate input dimensions
-            let input_width = frame.width();
-            let input_height = frame.height();
-            
-            // Upscale the frame
-            if let Ok(upscaled) = self.upscale_frame(&frame) {
-                // Convert to egui::ColorImage
-                let size = [upscaled.width() as usize, upscaled.height() as usize];
-                let mut pixels = Vec::with_capacity(size[0] * size[1]);
+            // Process frame with the capture backend
+            if let Some(processed_frame) = self.capture_backend.process_frame(&frame) {
+                // Calculate input dimensions
+                let input_width = processed_frame.width();
+                let input_height = processed_frame.height();
                 
-                for y in 0..upscaled.height() {
-                    for x in 0..upscaled.width() {
-                        let pixel = upscaled.get_pixel(x, y);
-                        pixels.push(egui::Color32::from_rgba_unmultiplied(
-                            pixel[0], pixel[1], pixel[2], pixel[3]
-                        ));
+                // Upscale the frame
+                if let Ok(upscaled) = self.upscale_frame(&processed_frame) {
+                    // Convert to egui::ColorImage
+                    let size = [upscaled.width() as usize, upscaled.height() as usize];
+                    let mut pixels = Vec::with_capacity(size[0] * size[1]);
+                    
+                    for y in 0..upscaled.height() {
+                        for x in 0..upscaled.width() {
+                            let pixel = upscaled.get_pixel(x, y);
+                            pixels.push(egui::Color32::from_rgba_unmultiplied(
+                                pixel[0], pixel[1], pixel[2], pixel[3]
+                            ));
+                        }
                     }
+                    
+                    // Create or update the texture
+                    let color_image = ColorImage::from_rgba_unmultiplied(size, &pixels);
+                    
+                    self.texture = Some(ctx.load_texture(
+                        "frame_texture",
+                        color_image,
+                        TextureOptions::LINEAR
+                    ));
+                    
+                    // Update stats
+                    self.frames_processed += 1;
+                    let elapsed = self.last_frame_time.elapsed();
+                    self.fps = 1.0 / elapsed.as_secs_f32();
+                    self.last_frame_time = Instant::now();
                 }
-                
-                // Create or update the texture
-                let color_image = ColorImage::from_rgba_unmultiplied(size, &pixels);
-                
-                self.texture = Some(ctx.load_texture(
-                    "frame_texture",
-                    color_image,
-                    TextureOptions::LINEAR
-                ));
-                
-                // Update stats
-                self.frames_processed += 1;
-                let elapsed = self.last_frame_time.elapsed();
-                self.fps = 1.0 / elapsed.as_secs_f32();
-                self.last_frame_time = Instant::now();
             }
         }
     }
@@ -177,6 +204,15 @@ impl eframe::App for FullscreenUpscalerUi {
                         egui::FontId::proportional(14.0),
                         egui::Color32::WHITE
                     );
+                    
+                    // Show backend info
+                    ui.painter().text(
+                        egui::pos2(10.0, 60.0),
+                        egui::Align2::LEFT_TOP,
+                        format!("Backend: {}", self.capture_backend.backend_name()),
+                        egui::FontId::proportional(14.0),
+                        egui::Color32::WHITE
+                    );
                 } else {
                     // Show loading message if no texture is available
                     ui.centered_and_justified(|ui| {
@@ -204,6 +240,7 @@ pub fn run_fullscreen_upscaler(
         transparent: false,
         vsync: true,
         initial_window_size: Some(Vec2::new(1920.0, 1080.0)),
+        renderer: eframe::Renderer::Wgpu,  // Explicitly use WGPU renderer
         ..Default::default()
     };
     
