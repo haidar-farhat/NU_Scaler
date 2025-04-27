@@ -5,7 +5,7 @@ use vulkano::{
         physical::{PhysicalDevice, PhysicalDeviceType},
         Device, DeviceCreateInfo, DeviceExtensions, QueueCreateInfo, QueueFlags,
     },
-    instance::{Instance, InstanceCreateInfo, InstanceExtensions},
+    instance::{Instance, InstanceCreateInfo},
     VulkanLibrary,
 };
 

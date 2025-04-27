@@ -388,7 +388,10 @@ impl Fsr3Upscaler {
         // Select sharpening strength based on quality mode
         let sharpening = context.sharpness;
         
-        // Create a working buffer for the edge adaptive spatial upsampling
+        // Temporal stability
+        let _temporal_stability = context.temporal_stability;
+        
+        // Create a working buffer for the first pass (EASU - Edge Adaptive Spatial Upsampling)
         let mut easu_pass = RgbaImage::new(self.output_width, self.output_height);
         
         // Calculate scale factors
