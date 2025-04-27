@@ -1610,7 +1610,7 @@ impl AppState {
             // FIXED: Match on technology index
             let result = match profile.upscaling_tech {
                 0 => { // FSR
-                    if let Ok(mut upscaler) = crate::upscale::fsr::FsrUpscaler::new(quality) {
+                    if let Ok(upscaler) = crate::upscale::fsr::FsrUpscaler::new(quality) {
                         // FIXED: Convert FrameBuffer to RgbaImage
                         match frame_buffer_to_rgba_image(&frame) {
                             Ok(image) => upscaler.upscale(&image),
@@ -1621,7 +1621,7 @@ impl AppState {
                     }
                 },
                 1 => { // DLSS
-                    if let Ok(mut upscaler) = crate::upscale::dlss::DlssUpscaler::new(quality) {
+                    if let Ok(upscaler) = crate::upscale::dlss::DlssUpscaler::new(quality) {
                         // FIXED: Convert FrameBuffer to RgbaImage
                         match frame_buffer_to_rgba_image(&frame) {
                             Ok(image) => upscaler.upscale(&image),
@@ -1695,8 +1695,8 @@ impl AppState {
         // Draw the image
         let tex_id = texture.id();
         let tex_size = texture.size_vec2();
-        // Correct usage: Provide tuple (TextureId, Vec2) to Image::new
-        let img_widget = egui::Image::new((tex_id, tex_size)); // Pass tuple
+        // Correct usage: Provide ImageSource::Texture to Image::new
+        let img_widget = egui::Image::new(egui::ImageSource::Texture(egui::TextureHandle::from(texture.clone()))); // Pass ImageSource::Texture
         ui.put(rect, img_widget);
         
         // Display performance counter in the corner if enabled
@@ -2182,7 +2182,7 @@ pub fn run_app() -> Result<()> {
     // Manually set theme on viewport
     let mut native_options = options;
     // Fix: Use .with_theme() method correctly
-    native_options.viewport = native_options.viewport.with_theme(eframe::Theme::Dark);
+    native_options.viewport = native_options.viewport.with_theme(Some(eframe::Theme::Dark.into()));
 
     eframe::run_native(
         "NU Scale",
@@ -2190,6 +2190,12 @@ pub fn run_app() -> Result<()> {
         Box::new(|cc| {
             let mut app_state = AppState::default();
             app_state.configure_fonts(&cc.egui_ctx);
+            // Apply theme from settings
+            let theme = match app_state.settings.theme.as_str() {
+                "light" => eframe::Theme::Light,
+                _ => eframe::Theme::Dark, // Default to Dark
+            };
+            cc.egui_ctx.set_visuals(theme.egui_visuals());
             Box::new(app_state)
         }),
     )
