@@ -509,7 +509,7 @@ impl eframe::App for AppState {
             self.upscaled_texture = Some(texture_id);
         }
         
-        // Fix atomic bool check - use mutex for pending_upscaled_frame
+        // Replace all load() calls with proper mutex locking
         let has_pending = match self.pending_upscaled_frame.lock() {
             Ok(guard) => guard.is_some(),
             Err(_) => false,
@@ -524,7 +524,7 @@ impl eframe::App for AppState {
             }
         }
         
-        // Fix texture cleanup - pass ctx instead of duration
+        // Fix texture cleanup - use ctx
         self.texture_cache.cleanup_old_textures(ctx);
         
         // Determine whether we need to repaint
@@ -553,11 +553,11 @@ impl eframe::App for AppState {
         if let Some(last_check) = self.last_memory_check {
             // Check memory every second
             if last_check.elapsed() > Duration::from_secs(1) {
-                self.check_gpu_memory_pressure();
+                self.check_gpu_memory_pressure(ctx);
                 self.last_memory_check = Some(Instant::now());
             }
         } else {
-            self.check_gpu_memory_pressure();
+            self.check_gpu_memory_pressure(ctx);
             self.last_memory_check = Some(Instant::now());
         }
         
@@ -571,6 +571,20 @@ impl eframe::App for AppState {
            should_repaint {
             if let Some(frame) = &self.current_frame {
                 self.schedule_next_upscale(frame);
+            }
+        }
+        
+        // Check if we should reload textures based on some criteria 
+        // (maybe frame rate or memory pressure)
+        if self.should_reload_textures() {
+            // Fix: Check the pending frame properly
+            let has_pending = match self.pending_upscaled_frame.lock() {
+                Ok(guard) => guard.is_some(),
+                Err(_) => false,
+            };
+            
+            if !has_pending {
+                // Do texture reloading
             }
         }
     }
@@ -1550,19 +1564,26 @@ impl AppState {
         // Queue the upscaling work in the thread pool
         self.upscale_threadpool.execute(move || {
             // Choose upscaler based on profile settings
-            let result = match profile.upscaling_technology {
+            let quality = match profile.upscaling_quality {
+                ProfileUpscalingQuality::Performance => crate::upscale::UpscalingQuality::Performance,
+                ProfileUpscalingQuality::Balanced => crate::upscale::UpscalingQuality::Balanced,
+                ProfileUpscalingQuality::Quality => crate::upscale::UpscalingQuality::Quality,
+                ProfileUpscalingQuality::UltraQuality => crate::upscale::UpscalingQuality::UltraQuality,
+            };
+            
+            let result = match profile.upscaling_tech {
                 ProfileUpscalingTechnology::FSR => {
-                    // Create FSR upscaler
-                    if let Ok(mut upscaler) = crate::upscale::fsr::FsrUpscaler::new() {
-                        upscaler.upscale_frame(&frame)
+                    // Create FSR upscaler with quality parameter
+                    if let Ok(mut upscaler) = crate::upscale::fsr::FsrUpscaler::new(quality) {
+                        upscaler.upscale(&frame)
                     } else {
                         Err(anyhow::anyhow!("Failed to create FSR upscaler"))
                     }
                 },
                 ProfileUpscalingTechnology::DLSS => {
-                    // Create DLSS upscaler
-                    if let Ok(mut upscaler) = crate::upscale::dlss::DlssUpscaler::new() {
-                        upscaler.upscale_frame(&frame)
+                    // Create DLSS upscaler with quality parameter
+                    if let Ok(mut upscaler) = crate::upscale::dlss::DlssUpscaler::new(quality) {
+                        upscaler.upscale(&frame)
                     } else {
                         Err(anyhow::anyhow!("Failed to create DLSS upscaler"))
                     }
@@ -2070,7 +2091,7 @@ impl AppState {
         {
             self.last_memory_check = Some(Instant::now());
             
-            // Fix: Pass ctx instead of Duration
+            // Pass ctx for cleanup
             self.texture_cache.cleanup_old_textures(ctx);
             
             // Check GPU memory usage
@@ -2104,19 +2125,13 @@ impl AppState {
         });
     }
 
-    fn check_gpu_memory_pressure(&mut self) {
-        // This is a simplified implementation - in a real app, you'd query the GPU
-        // For this example, we'll use a heuristic based on the number of textures
-        let num_textures = self.texture_cache.texture_count();
-        let memory_estimate = num_textures * 50; // Very rough estimate in MB
-        
-        // Set warning flag if we're using too much memory
-        self.gpu_memory_warning = memory_estimate > 1000; // 1GB threshold
-        
-        if self.gpu_memory_warning {
-            log::warn!("GPU memory pressure detected: ~{}MB", memory_estimate);
-            // Force texture cleanup when under pressure
-            self.texture_cache.cleanup_old_textures(Duration::from_secs(1));
+    fn check_gpu_memory_pressure(&mut self, ctx: &egui::Context) {
+        // Check if we need to clean up GPU memory
+        if self.texture_cache.get_memory_usage_mb() > 1000.0 {
+            // Fix: Pass ctx instead of Duration
+            self.texture_cache.cleanup_old_textures(ctx);
+            log::info!("Cleaned up GPU memory. Current usage: {} MB", 
+                      self.texture_cache.get_memory_usage_mb());
         }
     }
     
@@ -2158,7 +2173,7 @@ impl AppState {
         self.auto_upscale = !self.auto_upscale;
         log::info!("Auto upscaling: {}", self.auto_upscale);
         
-        // Fix borrow checker issues by cloning frame before using it
+        // Fix: Check pending frame properly
         if self.auto_upscale && !self.is_upscaling {
             let has_pending = match self.pending_upscaled_frame.lock() {
                 Ok(guard) => guard.is_some(),
@@ -2173,6 +2188,26 @@ impl AppState {
                 }
             }
         }
+    }
+    
+    fn should_reload_textures(&self) -> bool {
+        // Check timing and state to determine if textures should be reloaded
+        if let Some(last_request) = self.last_upscale_request {
+            if last_request.elapsed() > Duration::from_secs(5) {
+                // Only reload if we're not currently upscaling
+                let in_progress = self.upscale_in_progress.load(Ordering::SeqCst);
+                
+                // Fix: Check for pending frame properly
+                let has_pending = match self.pending_upscaled_frame.lock() {
+                    Ok(guard) => guard.is_some(),
+                    Err(_) => false,
+                };
+                
+                return !in_progress && !has_pending;
+            }
+        }
+        
+        false
     }
 }
 
