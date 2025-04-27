@@ -7,6 +7,9 @@ use super::{CaptureTarget, ScreenCapture};
 use crate::ui::profile::{UpscalingTechnology, UpscalingQuality};
 use std::sync::atomic::{AtomicBool, Ordering};
 use log;
+use crate::upscale::common::UpscalingAlgorithm;
+use chrono;
+use std::time::Instant;
 
 /// Type aliases for upscaling functionality to avoid import issues
 #[allow(dead_code)]
