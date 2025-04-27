@@ -481,7 +481,7 @@ impl FullscreenUpscalerUi {
     }
     
     /// Update source window position (for tracking moving windows)
-    fn update_source_window_info(&mut self, ctx: &egui::Context) { // Prefixed ctx as unused
+    fn update_source_window_info(&mut self, _ctx: &egui::Context) {
         // Only track windows by title for now
         if let Some(target) = &self.capture_target {
             // We only need to check window positions for specific windows
@@ -514,7 +514,7 @@ impl FullscreenUpscalerUi {
     }
     
     /// Update the texture with a new frame
-    fn update_texture(&mut self, ctx: &egui::Context) -> Result<bool> {
+    fn update_texture(&mut self, _ctx: &egui::Context) -> Result<bool> {
         // Frame budget check for skipping when behind
         if self.enable_frame_skipping {
             let frame_budget = Duration::from_millis(self.frame_time_budget as u64);
@@ -1496,7 +1496,7 @@ impl FullscreenUpscalerUi {
 }
 
 impl eframe::App for FullscreenUpscalerUi {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+    fn update(&mut self, _ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Check if upscaler needs to be reinitialized
         if self.requires_reinitialization {
             // Clean up existing resources
@@ -1528,7 +1528,7 @@ impl eframe::App for FullscreenUpscalerUi {
         
         // Safe error handling to avoid crashes
         if !skip_processing {
-            match self.update_texture(ctx) {
+            match self.update_texture(_ctx) {
                 Ok(_) => {
                     // Measure frame processing time and check if we're lagging
                     let frame_time = update_start.elapsed();
@@ -1616,34 +1616,34 @@ impl eframe::App for FullscreenUpscalerUi {
         }
         
         // Check for ESC key to exit fullscreen mode
-        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        if _ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             // Signal the capture thread to stop and clean up resources
             self.stop_signal.store(true, Ordering::SeqCst);
             self.cleanup();
             
             // Close the application
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            _ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             return;
         }
         
         // Check for F1 key to toggle performance overlay
-        if ctx.input(|i| i.key_pressed(egui::Key::F1)) {
+        if _ctx.input(|i| i.key_pressed(egui::Key::F1)) {
             self.show_overlay = !self.show_overlay;
         }
         
         // Check for F2 key to toggle frame skipping
-        if ctx.input(|i| i.key_pressed(egui::Key::F2)) {
+        if _ctx.input(|i| i.key_pressed(egui::Key::F2)) {
             self.enable_frame_skipping = !self.enable_frame_skipping;
             log::info!("Frame skipping {}", if self.enable_frame_skipping { "enabled" } else { "disabled" });
         }
         
         // Force the window to be opaque black instead of transparent
-        ctx.set_visuals(egui::Visuals::dark());
+        _ctx.set_visuals(egui::Visuals::dark());
         
         // Use a dark background instead of transparent
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(egui::Color32::from_rgb(10, 10, 10)))
-            .show(ctx, |ui| {
+            .show(_ctx, |ui| {
                 let texture_available = if let Ok(texture_guard) = self.texture.lock() {
                     texture_guard.is_some()
                 } else {
@@ -1740,10 +1740,10 @@ impl eframe::App for FullscreenUpscalerUi {
         };
         
         // Request repaint based on performance metrics for gaming PC
-        ctx.request_repaint_after(next_frame_time);
+        _ctx.request_repaint_after(next_frame_time);
         
         // Safe window position update
-        self.update_source_window_info(ctx);
+        self.update_source_window_info(_ctx);
     }
     
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
