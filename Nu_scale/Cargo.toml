@@ -37,7 +37,7 @@ ash = "0.37"
 # lazy_static = "1.4"
 
 egui = { version = "0.22.0", optional = true }
-eframe = { version = "0.22.0", optional = true, features = ["wgpu", "glow"], default-features = false }
+eframe = { version = "0.25", optional = true, features = ["wgpu", "glow"] }
 opencv = { version = "0.75", optional = true }
 
 [features]
