@@ -5,7 +5,6 @@ use std::io::{Error as IoError, ErrorKind};
 use anyhow::Result;
 use eframe::{self, egui};
 use egui::{Vec2};
-use egui_plot::*;
 use image::RgbaImage;
 use std::path::Path;
 use std::time::{Instant, Duration};
@@ -337,7 +336,7 @@ impl FullscreenUpscalerUi {
         let upscaler_name = self.upscaler_name.clone();
         
         // Create a channel for performance metrics
-        let (metrics_tx, metrics_rx) = std::sync::mpsc::channel();
+        let (metrics_tx, _metrics_rx) = std::sync::mpsc::channel(); // Prefixed unused rx
         
         // Spawn the processing thread
         self.processing_thread = Some(std::thread::spawn(move || {
@@ -468,7 +467,7 @@ impl FullscreenUpscalerUi {
     }
     
     /// Update source window position (for tracking moving windows)
-    fn update_source_window_position(&mut self, ctx: &egui::Context) {
+    fn update_source_window_position(&mut self, _ctx: &egui::Context) { // Prefixed ctx as unused
         // Only track windows by title for now
         if let Some(target) = &self.capture_target {
             // We only need to check window positions for specific windows
@@ -507,7 +506,7 @@ impl FullscreenUpscalerUi {
     }
     
     /// Update the texture with a new frame
-    fn update_texture(&mut self) -> Result<bool> {
+    fn update_texture(&mut self, ctx: &egui::Context) -> Result<bool> {
         // Frame budget check for skipping when behind
         if self.enable_frame_skipping {
             let frame_budget = Duration::from_millis(self.frame_time_budget as u64);
@@ -1521,7 +1520,7 @@ impl eframe::App for FullscreenUpscalerUi {
         
         // Safe error handling to avoid crashes
         if !skip_processing {
-            match self.update_texture() {
+            match self.update_texture(ctx) {
                 Ok(_) => {
                     // Measure frame processing time and check if we're lagging
                     let frame_time = update_start.elapsed();
@@ -1938,70 +1937,34 @@ pub fn run_fullscreen_upscaler(
 impl FullscreenUpscalerUi {
     // Method to render upscaled content in any UI context
     pub fn render_upscaled_content(&self, ui: &mut egui::Ui) -> bool {
-        if let Some(texture) = &self.texture.lock().unwrap().as_ref() {
-            // Get available size
-            let available_size = ui.available_size();
-            let texture_size = texture.size_vec2();
-            
-            // Calculate the scaling to fit in the available space
-            // while maintaining aspect ratio
-            let aspect_ratio = texture_size.x / texture_size.y;
-            let width = available_size.x;
-            let height = width / aspect_ratio;
-            
-            // Center the image if it's smaller than the available space
-            let rect = if height <= available_size.y {
-                let y_offset = (available_size.y - height) / 2.0;
-                egui::Rect::from_min_size(
-                    egui::pos2(0.0, y_offset),
-                    Vec2::new(width, height)
-                )
+        let texture_lock = self.texture.lock().unwrap();
+        if let Some(texture_handle) = texture_lock.as_ref() {
+            if texture_handle.is_allocated() {
+                // ... calculate display size ...
+                let available_size = ui.available_size();
+                let texture_size = texture_handle.size_vec2();
+                // ... center the image ...
+                let (response, _painter) = ui.allocate_painter(available_size, egui::Sense::hover()); // Prefix painter
+                let rect = egui::Rect::from_center_size(response.rect.center(), texture_size);
+
+                // Draw the image - FIX HERE
+                let image_widget = egui::Image::new((texture_handle.id(), texture_size)) // Use tuple (TextureId, Vec2)
+                    .fit_to_exact_size(rect.size());
+                image_widget.paint_at(ui, rect);
+                return true;
             } else {
-                let height = available_size.y;
-                let width = height * aspect_ratio;
-                let x_offset = (available_size.x - width) / 2.0;
-                egui::Rect::from_min_size(
-                    egui::pos2(x_offset, 0.0),
-                    Vec2::new(width, height)
-                )
-            };
-            
-            // Draw the texture to cover the entire space
-            ui.put(rect, egui::Image::new(texture.id()).fit_to_exact_size(rect.size()));
-            
-            // Draw performance overlay in the top-right corner only if enabled
-            if self.show_overlay {
-                let overlay_width = 250.0;
-                let overlay_rect = egui::Rect::from_min_size(
-                    egui::pos2(ui.available_rect_before_wrap().right() - overlay_width - 10.0, 10.0),
-                    Vec2::new(overlay_width, 0.0) // Height will be determined by content
-                );
-                
-                ui.allocate_ui_at_rect(overlay_rect, |ui| {
-                    self.draw_performance_overlay(ui);
-                });
+                ui.label("Texture not allocated.");
             }
-            
-            true
         } else {
-            // Show loading message if no texture is available
-            ui.centered_and_justified(|ui| {
-                ui.vertical_centered(|ui| {
-                    ui.heading("Waiting for frames...");
-                    ui.add_space(10.0);
-                    ui.label("If you don't see any content, please ensure the source window is visible and not minimized.");
-                    ui.add_space(5.0);
-                    ui.label("Press ESC to exit and try again.");
-                });
-            });
-            false
+            // ... spinner ...
         }
+        false
     }
 }
 
 impl FullscreenUpscalerUi {
     // Update source window position
-    fn update_source_window_position(&mut self, ctx: &egui::Context) {
+    fn update_source_window_position(&mut self, _ctx: &egui::Context) {
         // Example viewport commands for updating position and size
         // ctx.send_viewport_cmd(egui::ViewportCommand::SetPos(egui::pos2(x, y)));
         // ctx.send_viewport_cmd(egui::ViewportCommand::SetInnerSize(egui::vec2(width, height)));

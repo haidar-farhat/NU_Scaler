@@ -1,18 +1,18 @@
 use anyhow::{anyhow, Result};
 use egui::{
-    epaint::ahash::{HashMap as AHashMap, HashMapExt},
+    epaint::ahash::{AHashMap, HashMapExt},
     widgets::*,
-    TextureHandle,
-    *,
+    TextureHandle, Ui, Context, ViewportCommand, ViewportBuilder, ImageData, ColorImage, TextureOptions, TextureId, Vec2,
+    RichText, Slider, Color32, Frame, Stroke, Rounding, Layout, Align,
 };
 // Standard library imports
 use std::{
     path::{PathBuf, Path},
-    sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}}, 
+    sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}},
     thread,
     time::{Duration, Instant},
     marker::PhantomData,
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
 };
 
 // Import from local crate instead of external threadpool
@@ -1709,159 +1709,59 @@ impl AppState {
     }
     
     /// Launch the fullscreen upscaling mode with current profile settings
-    fn launch_fullscreen_mode(&mut self, frame: &mut eframe::Frame) {
-        // Log the launch of fullscreen mode
-        log::info!("=== LAUNCHING FULLSCREEN MODE ===");
-        
-        // Map profile upscaling tech to crate::upscale::UpscalingTechnology
-        let upscaling_tech = match self.profile.upscaling_tech {
-            0 => {
-                // Auto-detect the best available upscaling technology
-                log::info!("Auto-detecting best upscaling tech...");
-                if crate::upscale::fsr3::Fsr3Upscaler::is_supported() {
-                    log::info!("Auto-detected FSR3 support");
-                    crate::upscale::UpscalingTechnology::FSR3
-                } else if crate::upscale::fsr::FsrUpscaler::is_supported() {
-                    log::info!("Auto-detected FSR support");
-                    crate::upscale::UpscalingTechnology::FSR
-                } else {
-                    log::info!("Falling back to basic upscaler");
-                    crate::upscale::UpscalingTechnology::Fallback
-                }
-            },
-            1 => crate::upscale::UpscalingTechnology::FSR,
-            2 => crate::upscale::UpscalingTechnology::DLSS,
-            3 => crate::upscale::UpscalingTechnology::Fallback,
-            _ => {
-                log::warn!("Unknown upscaling tech {}, fallback to auto-detect", 
-                          self.profile.upscaling_tech);
-                // Auto-detect
-                if crate::upscale::fsr3::Fsr3Upscaler::is_supported() {
-                    crate::upscale::UpscalingTechnology::FSR3
-                } else {
-                    crate::upscale::UpscalingTechnology::Fallback
-                }
-            }
-        };
-        
-        // Map profile quality to crate::upscale::UpscalingQuality
-        let upscaling_quality = match self.profile.upscaling_quality {
-            0 => crate::upscale::UpscalingQuality::Ultra,
-            1 => crate::upscale::UpscalingQuality::Quality,
-            2 => crate::upscale::UpscalingQuality::Balanced,
-            3 => crate::upscale::UpscalingQuality::Performance,
-            _ => {
-                log::warn!("Unknown upscaling quality {}, fallback to balanced", 
-                          self.profile.upscaling_quality);
-                crate::upscale::UpscalingQuality::Balanced
-            }
-        };
-        
-        // Map profile algorithm to crate::upscale::common::UpscalingAlgorithm
-        let upscaling_algorithm = match self.profile.upscaling_algorithm {
-            0 => Some(crate::upscale::common::UpscalingAlgorithm::Lanczos3),
-            1 => Some(crate::upscale::common::UpscalingAlgorithm::Bicubic),
-            2 => Some(crate::upscale::common::UpscalingAlgorithm::Bilinear),
-            3 => Some(crate::upscale::common::UpscalingAlgorithm::NearestNeighbor),
-            _ => None
-        };
-        
-        // Toggle fullscreen mode (maximizes window)
+    fn launch_fullscreen_mode(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        log::info!("Entering fullscreen mode via eframe command");
+        ctx.send_viewport_cmd(ViewportCommand::Fullscreen(true)); // Use ViewportCommand
         self.is_fullscreen = true;
-        self.is_upscaling = true;
-        log::info!("Toggled fullscreen mode: {}", self.is_fullscreen);
-        
-        // Maximize the window
-        frame.set_maximized(true);
-        
-        // Set window title to indicate upscaling mode
+        let upscaling_tech = self.map_tech(&self.profile.upscaling_config.technology);
+        let upscaling_quality = self.map_quality(&self.profile.upscaling_config.quality);
         let title = format!(
-            "NU_Scaler - Upscaling with {:?} at {:?} quality", 
+            "NU_Scaler - Upscaling with {:?} at {:?} quality",
             upscaling_tech, upscaling_quality
         );
-        ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
-        
-        // Choose the capture target based on profile
-        let capture_target = match self.profile.capture_source {
-            0 => {
-                // Fullscreen capture
-                crate::capture::CaptureTarget::FullScreen
-            },
-            1 => {
-                // Window capture by title
-                let window_title = &self.profile.window_title;
-                crate::capture::CaptureTarget::WindowByTitle(window_title.clone())
-            },
-            2 => {
-                // Region capture
-                crate::capture::CaptureTarget::Region { 
-                    x: self.profile.region_x, 
-                    y: self.profile.region_y, 
-                    width: self.profile.region_width, 
-                    height: self.profile.region_height 
-                }
-            },
-            _ => {
-                // Default to fullscreen if not recognized
-                log::warn!("Unknown capture source {}, fallback to fullscreen", 
-                          self.profile.capture_source);
-                crate::capture::CaptureTarget::FullScreen
-            }
+        ctx.send_viewport_cmd(ViewportCommand::Title(title)); // Use ViewportCommand
+        self.status_bar.set_message("Fullscreen mode activated".to_string(), StatusMessageType::Success);
+        // NOTE: The original logic spawning a separate process is removed.
+        // If separate process is desired, reinstate that logic and remove ViewportCommand::Fullscreen.
+    }
+
+    /// Sets the title of the window to capture in the profile and updates the window title.
+    fn set_capture_target_window_title(&mut self, ctx: &Context, title: &str) {
+        self.profile.capture_config.target_window_title = title.to_string();
+        log::info!("Set capture target window title to: '{}'", title);
+        let display_title = if title.is_empty() {
+            "NU Scale".to_string()
+        } else {
+            format!("NU Scale - Capturing: {}", title)
         };
-        
-        // Create a new frame buffer and stop signal for this upscaling session
-        let frame_buffer = Arc::new(crate::capture::common::FrameBuffer::new(30)); // buffer 30 frames
-        let stop_signal = Arc::new(AtomicBool::new(false));
-        
-        // Store them for later stopping
-        self.upscaling_buffer = Some(frame_buffer.clone());
-        self.upscaling_stop_signal = Some(stop_signal.clone());
-        
-        // Set the status message
-        self.status_message = format!("Upscaling with {:?}", upscaling_tech);
-        self.status_message_type = StatusMessageType::Info;
-        
-        // Create a temp status for the capture thread
-        let temp_status = Arc::new(Mutex::new(None::<(String, std::time::SystemTime)>));
-        
-        // Start the capture thread
-        if let Err(e) = crate::capture::common::run_capture_thread(
-            capture_target.clone(),
-            frame_buffer.clone(),
-            stop_signal.clone(),
-            self.capture_status.clone(),
-            temp_status
-        ) {
-            // Failed to start capture thread
-            log::error!("Failed to start capture thread: {}", e);
-            self.status_message = format!("Failed to start capture: {}", e);
-            self.status_message_type = StatusMessageType::Error;
-            return;
-        }
-        
-        // Actually start upscaling now - use the parameters we retrieved
-        match self.start_upscaling_mode(
-            capture_target,
-            upscaling_tech,
-            upscaling_quality,
-            self.profile.fps as u32, // Convert from f32 to u32
-            upscaling_algorithm
-        ) {
-            Ok(_) => {
-                log::info!("Started upscaling mode successfully");
-            },
-            Err(e) => {
-                log::error!("Failed to start upscaling mode: {}", e);
-                self.status_message = format!("Failed to start upscaling: {}", e);
-                self.status_message_type = StatusMessageType::Error;
-                
-                // Stop the capture thread if upscaling failed
-                if let Some(stop_signal) = &self.upscaling_stop_signal {
-                    stop_signal.store(true, Ordering::SeqCst);
-                }
-            }
+        ctx.send_viewport_cmd(ViewportCommand::Title(display_title)); // Ensure ctx is passed and used
+        if self.is_capturing {
+            log::warn!("Capture target changed while capturing is active. Restart capture to apply.");
         }
     }
+
+    // ... show_source_window_list needs ctx passed to set_capture_target_window_title ...
+    fn show_source_window_list(&mut self, ctx: &Context, ui: &mut Ui) {
+         // ... existing code ...
+         if ui.button("Set Capture Window")...clicked() {
+             if let Some(name) = self.available_windows.get(self.selected_window_index).cloned() {
+                 self.set_capture_target_window_title(ctx, &name); // Pass ctx
+             }
+         }
+         if ui.button("Reset Window")...clicked() {
+             self.set_capture_target_window_title(ctx, ""); // Pass ctx
+         }
+         // ... inside loop ...
+         if response.clicked() {
+             self.selected_window_index = index;
+             self.set_capture_target_window_title(ctx, name); // Pass ctx
+         }
+         if response.double_clicked() {
+             self.selected_window_index = index;
+             self.set_capture_target_window_title(ctx, name); // Pass ctx
+         }
+         // ... rest of function ...
+     }
 
     /// Start a scaling process in a separate application instance
     fn start_scaling_process(&mut self) {
@@ -2240,30 +2140,28 @@ impl Drop for TextureCache {
 /// Run the egui application
 pub fn run_app() -> Result<()> {
     let options = eframe::NativeOptions {
-        vsync: true,
-        hardware_acceleration: eframe::HardwareAcceleration::Preferred,
-        renderer: eframe::Renderer::Wgpu,
-        
-        // Configure viewport using ViewportBuilder
-        viewport: egui::ViewportBuilder::default()
+        viewport: ViewportBuilder::default()
             .with_inner_size([1024.0, 768.0])
             .with_min_inner_size([800.0, 600.0])
             .with_decorations(true)
-            .with_title("NU Scale") // Set title here
-            .with_theme(Some(eframe::Theme::Dark)), // Set default theme
-        
+            .with_title("NU Scale"),
+        renderer: eframe::Renderer::Wgpu,
         ..Default::default()
     };
-    
+    // Manually set theme on viewport
+    let mut native_options = options;
+    native_options.viewport.theme = Some(eframe::Theme::Dark); // Corrected theme setting
+
     eframe::run_native(
-        "NU Scale", // Title is now set in ViewportBuilder
-        options,
+        "NU Scale",
+        native_options, // Use modified options
         Box::new(|cc| {
             let mut app_state = AppState::default();
+            app_state.configure_fonts(&cc.egui_ctx);
             Box::new(app_state)
         }),
     )
-    .map_err(|e| anyhow!("Failed to run application: {}", e))?;
+    .map_err(|e| anyhow!("Failed to run eframe: {}", e))?;
 
     Ok(())
 } 
