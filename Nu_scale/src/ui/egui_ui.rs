@@ -2244,19 +2244,23 @@ impl Drop for TextureCache {
 /// Run the egui application
 pub fn run_app() -> Result<()> {
     let options = eframe::NativeOptions {
-        initial_window_size: Some(eframe::egui::vec2(1024.0, 768.0)),
-        min_window_size: Some(eframe::egui::vec2(800.0, 600.0)),
         vsync: true,
-        decorated: true,
-        centered: true,
         hardware_acceleration: eframe::HardwareAcceleration::Preferred,
         renderer: eframe::Renderer::Wgpu,
-        default_theme: eframe::Theme::Dark,
+        
+        // Configure viewport using ViewportBuilder
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([1024.0, 768.0])
+            .with_min_inner_size([800.0, 600.0])
+            .with_decorations(true)
+            .with_title("NU Scale") // Set title here
+            .with_theme(Some(eframe::Theme::Dark)), // Set default theme
+        
         ..Default::default()
     };
     
     eframe::run_native(
-        "NU Scale",
+        "NU Scale", // Title is now set in ViewportBuilder
         options,
         Box::new(|cc| {
             let mut app_state = AppState::default();
