@@ -6,8 +6,21 @@ use nu_scaler::UpscalingAlgorithm;
 use nu_scaler::{init, start_borderless_upscale};
 use nu_scaler::render::VulkanRenderer;
 use log::{debug, info, warn, error};
+use pollster;
+use nu_scaler::capture::platform::windows::WgpuWindowsCapture;
 
 fn main() -> Result<()> {
+    env_logger::init();
+
+    pollster::block_on(async {
+        // Example: create and initialize your capture object
+        let mut capture = WgpuWindowsCapture::new().expect("instance");
+        capture.initialize_wgpu().await.expect("init wgpu");
+        // ...perform a capture to test:
+        // let img = capture.capture_window_wgpu(HWND(...)).await.expect("capture");
+        // println!("Captured image size: {}×{}", img.width(), img.height());
+    });
+
     // Simple CLI app with all needed commands
     let matches = App::new("NU_Scaler")
         .version("0.1.0")
