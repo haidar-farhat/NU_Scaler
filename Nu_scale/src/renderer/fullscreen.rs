@@ -15,7 +15,8 @@ use std::sync::Mutex;
 use egui_wgpu::WgpuConfiguration;
 
 use crate::capture::common::FrameBuffer;
-use crate::upscale::{Upscaler, UpscalingTechnology, UpscalingQuality, UpscalingAlgorithm};
+use crate::upscale::{Upscaler, UpscalingTechnology, UpscalingQuality};
+use crate::upscale::common::UpscalingAlgorithm;
 use crate::capture::CaptureTarget;
 use crate::capture::ScreenCapture;
 use crate::capture::frame_buffer_ext::ArcFrameBufferExt;
