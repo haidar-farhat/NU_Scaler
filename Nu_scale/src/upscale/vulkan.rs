@@ -49,7 +49,9 @@ impl Upscaler for VulkanUpscaler {
         
         // Initialize renderer with our algorithm
         if let Some(renderer) = &mut self.renderer {
-            renderer.init()
+            // Use Bilinear as a default or map from quality if needed
+            let algorithm = UpscalingAlgorithm::Bilinear; // Or map from self.quality
+            renderer.init(algorithm)
                 .map_err(|e| anyhow::anyhow!("Failed to initialize Vulkan renderer: {}", e))?;
         } else {
             return Err(anyhow::anyhow!("Renderer is unexpectedly None after creation"));

@@ -12,12 +12,16 @@ use std::panic::AssertUnwindSafe;
 use rand;
 use std::sync::Mutex;
 use egui_wgpu::WgpuConfiguration;
+use std::path::Path;
+use std::thread;
 
 use crate::capture::common::FrameBuffer;
 use crate::upscale::{Upscaler, UpscalingTechnology, UpscalingQuality};
+use crate::upscale::common::UpscalingAlgorithm;
 use crate::capture::CaptureTarget;
 use crate::capture::ScreenCapture;
 use crate::capture::frame_buffer_ext::ArcFrameBufferExt;
+use image::imageops::{self, FilterType};
 
 // Constants for texture size limits
 const MAX_TEXTURE_SIZE: u32 = 16384; // Maximum dimension for a texture (width or height)
