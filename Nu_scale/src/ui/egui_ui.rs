@@ -1408,151 +1408,109 @@ impl AppState {
     /// Update the application upscaling mode state
     /// Renders the captured frames with the upscaler
     fn update_upscaling_mode(&mut self, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
-        log::debug!("Entering update_upscaling_mode function");
+        // Fix remaining UI functions
+        let ui = &mut egui::containers::Frame::default().show(ctx, |ui| ui.scope(|_| {})).inner;
         
-        // Check for ESC key to exit fullscreen mode
-        if ctx.input(|i| i.key_pressed(eframe::egui::Key::Escape)) {
-            log::info!("ESC pressed, exiting fullscreen mode");
+        // Fix borrowing issues by cloning buffer before using it
+        let buffer_option = self.upscaling_buffer.clone();
+        if let Some(buffer) = buffer_option {
+            log::debug!("Upscaling buffer exists, trying to get latest frame");
             
-            // Exit fullscreen mode
-            if self.is_fullscreen {
-                if let Err(e) = self.toggle_fullscreen_mode(frame) {
-                    log::error!("Failed to exit fullscreen mode: {}", e);
+            // Check if we already have a pending upscaled frame
+            let have_pending_frame = match self.pending_upscaled_frame.lock() {
+                Ok(guard) => guard.is_some(),
+                Err(_) => false,
+            };
+            
+            // First, check if there's an upscale in progress
+            let upscale_in_progress = self.upscale_in_progress.load(Ordering::SeqCst);
+            
+            if have_pending_frame {
+                // We have a ready frame from a previous upscale operation
+                let upscaled_frame = match self.pending_upscaled_frame.lock() {
+                    Ok(mut guard) => guard.take(),
+                    Err(_) => None,
+                };
+                
+                if let Some(upscaled) = upscaled_frame {
+                    // We have an upscaled frame ready to display
+                    log::info!("Using previously upscaled frame: {}x{}", 
+                             upscaled.width(), upscaled.height());
+                    
+                    let size = [upscaled.width() as usize, upscaled.height() as usize];
+                    let pixels = upscaled.as_raw();
+                    let available_size = ui.available_size();
+                    
+                    self.render_frame_to_screen(ui, available_size, size, pixels);
+                    
+                    // Track frame processing
+                    self.frames_processed += 1;
+                    log::debug!("Frames processed: {}", self.frames_processed);
+                    
+                    // Schedule next upscale operation if not already in progress
+                    if !upscale_in_progress {
+                        // Clone the buffer to avoid borrowing issues
+                        self.schedule_next_upscale(buffer.clone());
+                    }
                 }
-            }
-            
-            // Stop upscaling
-            if let Some(stop_signal) = &self.upscaling_stop_signal {
-                stop_signal.store(true, std::sync::atomic::Ordering::SeqCst);
-            }
-            
-            return;
-        }
-        
-        // Clear the entire screen and ensure we paint over everything with a solid background
-        ctx.set_visuals(eframe::egui::Visuals::dark());
-        
-        // Create a full-screen frame with black background that stretches to fill the window
-        eframe::egui::CentralPanel::default()
-            .frame(eframe::egui::Frame::none()
-                .fill(eframe::egui::Color32::BLACK)
-                .stroke(eframe::egui::Stroke::NONE))
-            .show(ctx, |ui| {
-                let available_size = ui.available_size();
-                log::debug!("Available UI size: {}x{}", available_size.x, available_size.y);
-                
-                // Force opaque painting
-                ui.set_clip_rect(ui.max_rect());
-                
-                if let Some(buffer) = &self.upscaling_buffer {
-                    log::debug!("Upscaling buffer exists, trying to get latest frame");
+            } else if !upscale_in_progress {
+                // No upscaling in progress and no pending frame, schedule a new upscale
+                self.schedule_next_upscale(buffer.clone());
+            } else {
+                // Upscaling is in progress, render the last frame if available
+                if let Some(texture) = &self.frame_texture {
+                    log::debug!("Upscaling in progress, rendering last frame");
                     
-                    // Check if we already have a pending upscaled frame
-                    let mut have_pending_frame = false;
-                    if let Ok(pending_frame_guard) = self.pending_upscaled_frame.lock() {
-                        have_pending_frame = pending_frame_guard.is_some();
-                    }
+                    // Calculate dimensions to fit the screen
+                    let texture_size = texture.size_vec2();
+                    let aspect_ratio = texture_size.x / texture_size.y;
+                    let max_width = ui.available_size().x;
+                    let max_height = ui.available_size().y;
                     
-                    // First, check if there's an upscale in progress
-                    let upscale_in_progress = self.upscale_in_progress.load(Ordering::SeqCst);
-                    
-                    if have_pending_frame {
-                        // We have a ready frame from a previous upscale operation
-                        if let Ok(mut pending_frame_guard) = self.pending_upscaled_frame.lock() {
-                            if let Some(upscaled) = pending_frame_guard.take() {
-                                // We have an upscaled frame ready to display
-                                log::info!("Using previously upscaled frame: {}x{}", 
-                                         upscaled.width(), upscaled.height());
-                                
-                                let size = [upscaled.width() as _, upscaled.height() as _];
-                                let pixels = upscaled.as_raw();
-                                
-                                self.render_frame_to_screen(ui, available_size, size, pixels);
-                                
-                                // Track frame processing
-                                self.frames_processed += 1;
-                                log::debug!("Frames processed: {}", self.frames_processed);
-                                
-                                // Schedule next upscale operation if not already in progress
-                                if !upscale_in_progress {
-                                    self.schedule_next_upscale(buffer);
-                                }
-                            }
-                        }
-                    } else if !upscale_in_progress {
-                        // No upscaling in progress and no pending frame, schedule a new upscale
-                        self.schedule_next_upscale(buffer);
+                    let (width, height) = if aspect_ratio > max_width / max_height {
+                        (max_width, max_width / aspect_ratio)
                     } else {
-                        // Upscaling is in progress, render the last frame if available
-                        if let Some(texture) = &self.frame_texture {
-                            log::debug!("Upscaling in progress, rendering last frame");
-                            
-                            // Calculate dimensions to fit the screen
-                            let texture_size = texture.size_vec2();
-                            let aspect_ratio = texture_size.x / texture_size.y;
-                            let max_width = available_size.x;
-                            let max_height = available_size.y;
-                            
-                            let (width, height) = if aspect_ratio > max_width / max_height {
-                                (max_width, max_width / aspect_ratio)
-                            } else {
-                                (max_height * aspect_ratio, max_height)
-                            };
-                            
-                            // Create a centered rectangle
-                            let rect = eframe::egui::Rect::from_min_size(
-                                eframe::egui::pos2((max_width - width) * 0.5, (max_height - height) * 0.5),
-                                eframe::egui::vec2(width, height)
-                            );
-                            
-                            ui.put(rect, eframe::egui::Image::new(texture.id(), eframe::egui::vec2(width, height)));
-                            
-                            // Show a loading indicator during upscaling
-                            let loading_rect = eframe::egui::Rect::from_min_size(
-                                eframe::egui::pos2(max_width - 120.0, 10.0),
-                                eframe::egui::vec2(110.0, 24.0)
-                            );
-                            
-                            ui.put(
-                                loading_rect,
-                                eframe::egui::Label::new(
-                                    eframe::egui::RichText::new("Processing...")
-                                        .size(16.0)
-                                        .color(eframe::egui::Color32::from_rgb(255, 170, 0))
-                                )
-                            );
-                        } else {
-                            // First frame or waiting for upscale operation to complete
-                            ui.centered_and_justified(|ui| {
-                                ui.heading("Processing first frame...");
-                                ui.label("Please wait while the upscaler initializes.");
-                            });
-                        }
-                    }
+                        (max_height * aspect_ratio, max_height)
+                    };
+                    
+                    // Create a centered rectangle
+                    let rect = eframe::egui::Rect::from_min_size(
+                        eframe::egui::pos2((max_width - width) * 0.5, (max_height - height) * 0.5),
+                        eframe::egui::vec2(width, height)
+                    );
+                    
+                    ui.put(rect, eframe::egui::Image::new(texture.id(), eframe::egui::vec2(width, height)));
+                    
+                    // Show a loading indicator during upscaling
+                    let loading_rect = eframe::egui::Rect::from_min_size(
+                        eframe::egui::pos2(max_width - 120.0, 10.0),
+                        eframe::egui::vec2(110.0, 24.0)
+                    );
+                    
+                    ui.put(
+                        loading_rect,
+                        eframe::egui::Label::new(
+                            eframe::egui::RichText::new("Processing...")
+                                .size(16.0)
+                                .color(eframe::egui::Color32::from_rgb(255, 170, 0))
+                        )
+                    );
                 } else {
-                    log::warn!("No upscaling buffer available");
+                    // First frame or waiting for upscale operation to complete
                     ui.centered_and_justified(|ui| {
-                        ui.heading("No upscaling buffer");
-                        ui.label("Upscaling mode is active but no frame buffer is available.");
-                        ui.label("This is likely a bug in the application.");
+                        ui.heading("Processing first frame...");
+                        ui.label("Please wait while the upscaler initializes.");
                     });
                 }
-            });
-        
-        // Use smarter repaint strategy based on frame state and upscaling status
-        let repaint_after = if self.upscale_in_progress.load(Ordering::SeqCst) {
-            // If upscaling is in progress, check more often
-            Duration::from_millis(8)  // ~120 fps check rate 
-        } else if self.frames_processed < 5 {
-            // During startup, check frequently
-            Duration::from_millis(16) // ~60 fps
+            }
         } else {
-            // Normal operation, based on target FPS
-            let target_fps = self.profile.fps.max(30.0);
-            Duration::from_secs_f32(1.0 / target_fps)
-        };
-        
-        ctx.request_repaint_after(repaint_after);
+            log::warn!("No upscaling buffer available");
+            ui.centered_and_justified(|ui| {
+                ui.heading("No upscaling buffer");
+                ui.label("Upscaling mode is active but no frame buffer is available.");
+                ui.label("This is likely a bug in the application.");
+            });
+        }
     }
     
     /// Schedule the next upscale operation on the thread pool
@@ -2271,23 +2229,26 @@ pub fn run_app() -> Result<()> {
 // Fix the duplicate helper function with a proper implementation
 fn frame_buffer_to_rgba_image(frame: &Arc<FrameBuffer>) -> Result<image::RgbaImage> {
     // We need to extract the width, height, and data from the FrameBuffer
-    // Adjust these calls to match your actual FrameBuffer API
-    let fb = frame.get_latest_frame().map_err(|e| anyhow::anyhow!("Failed to get frame: {}", e))?;
+    // First, get the frame data - adjust these calls based on your FrameBuffer API
+    let frame_data = match frame.get_latest_frame() {
+        Ok(data) => data,
+        Err(e) => return Err(anyhow::anyhow!("Failed to get latest frame: {}", e)),
+    };
     
-    // Get dimensions
-    let width = fb.width as u32;
-    let height = fb.height as u32;
+    // The frame_data is an Option, so unwrap it
+    let image = match frame_data {
+        Some(img) => img,
+        None => return Err(anyhow::anyhow!("No frame data available")),
+    };
+    
+    // Now access properties on the actual image
+    let width = image.width();
+    let height = image.height();
     
     if width == 0 || height == 0 {
         return Err(anyhow::anyhow!("Invalid frame dimensions"));
     }
     
-    // Convert data to Vec<u8> if not already in that format
-    let data = fb.data.clone();
-    
-    // Create RgbaImage
-    match image::RgbaImage::from_raw(width, height, data) {
-        Some(img) => Ok(img),
-        None => Err(anyhow::anyhow!("Failed to create RgbaImage from frame buffer")),
-    }
+    // Get raw pixel data - image is already an RgbaImage, so just clone it
+    Ok(image.clone())
 }
