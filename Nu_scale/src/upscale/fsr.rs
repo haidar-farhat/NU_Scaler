@@ -2,6 +2,9 @@ use anyhow::{Result, anyhow};
 use image::RgbaImage;
 use std::sync::atomic::{AtomicBool, Ordering};
 use crate::upscale::{Upscaler, UpscalingQuality};
+use std::env;
+use std::path::Path;
+use std::fs;
 
 // Static check for FSR support to avoid repeated checks
 static FSR_SUPPORTED: AtomicBool = AtomicBool::new(false);
@@ -187,7 +190,7 @@ impl FsrUpscaler {
         };
         
         // Temporal stability from context
-        let temporal_stability = context.temporal_stability;
+        let _temporal_stability = context.temporal_stability;
         
         // Create a working buffer for the first pass (EASU - Edge Adaptive Spatial Upsampling)
         let mut easu_pass = RgbaImage::new(self.output_width, self.output_height);
@@ -222,7 +225,7 @@ impl FsrUpscaler {
                 let mut color = [0.0f32; 4];
                 
                 // Edge detection - calculate gradients for adaptive sampling
-                let mut edge_strength = 0.0;
+                let mut _edge_strength = 0.0;
                 
                 // If we have enough pixels to detect edges
                 if input_x > 0 && input_x < self.input_width - 2 && 
@@ -240,11 +243,11 @@ impl FsrUpscaler {
                         let grad_y = (p_bottom.0[i] as i32 - p_top.0[i] as i32).abs() as f32 / 255.0;
                         
                         // Update edge strength
-                        edge_strength += grad_x.max(grad_y);
+                        _edge_strength += grad_x.max(grad_y);
                     }
                     
                     // Normalize edge strength
-                    edge_strength /= 3.0;
+                    _edge_strength /= 3.0;
                 }
                 
                 // Bilinear interpolation with edge-aware weights
@@ -327,7 +330,7 @@ impl FsrUpscaler {
         
         // Apply temporal AA if we have previous frame data
         if let Some(context) = &self.context {
-            if let Some(prev_frame_data) = &context.previous_frame {
+            if let Some(_prev_frame_data) = &context.previous_frame {
                 // In a real implementation, this would use motion vectors to apply temporal AA
                 // For now, we'll just do a simple blend with the previous frame
                 
