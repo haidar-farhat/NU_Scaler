@@ -250,7 +250,7 @@ impl TextureCache {
         }
         
         for size in to_remove {
-            if let Some(texture) = self.textures.remove(&size) {
+            if let Some(_texture) = self.textures.remove(&size) {
                 // Just remove from maps - egui manages texture lifetime automatically
                 self.last_used.remove(&size);
                 self.texture_memory_usage -= (size.0 * size.1 * 4) as usize;
@@ -1431,7 +1431,7 @@ impl AppState {
     
     /// Update the application upscaling mode state
     /// Renders the captured frames with the upscaler
-    fn update_upscaling_mode(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+    fn update_upscaling_mode(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Check for ESC key to exit fullscreen mode
         if ctx.input(|i| i.key_pressed(eframe::egui::Key::Escape)) {
             log::info!("ESC pressed, exiting fullscreen mode");
@@ -2173,7 +2173,7 @@ pub fn run_app() -> Result<()> {
         ..Default::default()
     };
     // Manually set theme on viewport
-    let mut native_options = options;
+    let native_options = options;
     // Fix: Use .with_theme() method correctly
     // Remove viewport theme setting here, will be set via context later
     // native_options.viewport = native_options.viewport.with_theme(Some(eframe::Theme::Dark.into())); 
