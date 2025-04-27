@@ -12,8 +12,7 @@ use once_cell::sync::Lazy;
 use std::sync::Mutex;
 
 // For WGPU implementation
-use wgpu::{self, Instance, Adapter, Device, Queue, Surface, SurfaceConfiguration};
-use raw_window_handle::{HasRawWindowHandle, RawWindowHandle, Win32WindowHandle, HandleError};
+use wgpu::{self, Instance, Adapter, Device, Queue};
 
 /// Windows implementation of screen capture
 pub struct PlatformScreenCapture {
@@ -522,7 +521,9 @@ impl PlatformScreenCapture {
         unsafe {
             WINDOW_LIST.lock().unwrap().clear();
             EnumWindows(Some(enum_windows_callback), LPARAM(0));
-            self.cached_windows = WINDOW_LIST.lock().unwrap().clone();
+            if let Ok(list) = WINDOW_LIST.lock() {
+                self.cached_windows = list.clone();
+            }
         }
         Ok(())
     }
