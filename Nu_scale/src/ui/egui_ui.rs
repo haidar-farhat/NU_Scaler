@@ -1336,11 +1336,11 @@ impl AppState {
     }
 
     /// Toggle fullscreen mode
-    pub fn toggle_fullscreen_mode(&mut self, frame: &mut eframe::Frame) -> Result<()> {
+    pub fn toggle_fullscreen_mode(&mut self, ctx: &egui::Context) -> Result<()> {
         self.is_fullscreen = !self.is_fullscreen;
         
         // Use eframe's API to toggle fullscreen mode
-        frame.set_fullscreen(self.is_fullscreen);
+        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.is_fullscreen));
         
         #[cfg(target_arch = "wasm32")]
         {
@@ -1417,7 +1417,7 @@ impl AppState {
             
             // Exit fullscreen mode if active
             if self.is_fullscreen {
-                if let Err(e) = self.toggle_fullscreen_mode(frame) {
+                if let Err(e) = self.toggle_fullscreen_mode(ctx) {
                     log::error!("Failed to exit fullscreen mode: {}", e);
                 }
             }
@@ -1779,10 +1779,11 @@ impl AppState {
         frame.set_maximized(true);
         
         // Set window title to indicate upscaling mode
-        frame.set_window_title(&format!(
+        let title = format!(
             "NU_Scaler - Upscaling with {:?} at {:?} quality", 
             upscaling_tech, upscaling_quality
-        ));
+        );
+        ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
         
         // Choose the capture target based on profile
         let capture_target = match self.profile.capture_source {
