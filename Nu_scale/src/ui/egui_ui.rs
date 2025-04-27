@@ -66,23 +66,19 @@ use windows::{
 };
 
 // Use crate:: for lib modules
-use crate::capture::{CaptureError, CaptureTarget, ScreenCapture};
-use crate::capture::common::{FrameBuffer, run_capture_thread};
+use crate::capture::{CaptureTarget, ScreenCapture};
+use crate::capture::common::{FrameBuffer};
 use crate::upscale::{
     create_upscaler, Upscaler, UpscalingQuality, UpscalingTechnology,
     common::UpscalingAlgorithm,
 };
-use crate::renderer;
 
 // UI-internal imports (using super::)
-use super::profile::{Profile, CaptureSource, UpscalingTechnology as ProfileUpscalingTechnology, UpscalingQuality as ProfileUpscalingQuality};
+use super::profile::{Profile, UpscalingTechnology as ProfileUpscalingTechnology, UpscalingQuality as ProfileUpscalingQuality};
 use super::settings::AppSettings;
-use super::hotkeys::{register_global_hotkey, KEY_TOGGLE_CAPTURE, KEY_CAPTURE_FRAME, KEY_TOGGLE_OVERLAY};
-use super::components::{self, StatusBar, StatusMessageType};
+use super::components::{StatusBar, StatusMessageType};
 use super::region_dialog::RegionDialog;
-use super::tabs::{self, TabState};
-
-// External crate imports were removed
+use super::tabs::{TabState};
 
 const ACCENT_COLOR: Color32 = Color32::from_rgb(0, 120, 215); // Blue accent
 const SUCCESS_COLOR: Color32 = Color32::from_rgb(25, 170, 88); // Green
