@@ -434,7 +434,10 @@ impl eframe::App for AppState {
                 if let Some(texture_id) = crate::ui::get_upscaled_texture(ctx, None) {
                     // Render the upscaled texture to fill the window
                     let available_size = upscale_ui.available_size();
-                    upscale_ui.image(texture_id, available_size);
+                    upscale_ui.add(
+                        egui::Image::new(texture_id)
+                            .fit_to_exact_size(available_size)
+                    );
                 } else {
                     // Show waiting message
                     upscale_ui.centered_and_justified(|ui| {
