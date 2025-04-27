@@ -38,6 +38,7 @@ ash = "0.37"
 
 egui = { version = "0.27", optional = true }
 eframe = { version = "0.27", optional = true, features = ["wgpu", "glow"] }
+egui_plot = "0.27"
 opencv = { version = "0.75", optional = true }
 
 [features]

@@ -5,6 +5,8 @@ use std::io::{Error as IoError, ErrorKind};
 use anyhow::Result;
 use eframe::{self, egui};
 use egui::{Vec2, ColorImage, TextureOptions, TextureId};
+use egui::plot::Plot;
+use egui_plot::*;
 use image::RgbaImage;
 use std::path::Path;
 use std::time::{Instant, Duration};
@@ -1391,7 +1393,7 @@ impl FullscreenUpscalerUi {
                         ));
                         
                         let height = 40.0;
-                        let graph = egui::plot::Plot::new("fps_history")
+                        let graph = egui_plot::Plot::new("fps_history")
                             .height(height)
                             .show_background(false)
                             .allow_zoom(false)
@@ -1406,7 +1408,7 @@ impl FullscreenUpscalerUi {
                                 .map(|(i, &fps)| [i as f64, fps as f64])
                                 .collect();
                             
-                            let line = egui::plot::Line::new(egui::plot::PlotPoints::from(fps_points))
+                            let line = egui_plot::Line::new(egui_plot::PlotPoints::from(fps_points))
                                 .color(egui::Color32::from_rgb(120, 220, 120))
                                 .width(1.5);
                                 
