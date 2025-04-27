@@ -53,4 +53,13 @@ impl WindowGeometry {
     pub fn new(x: i32, y: i32, width: u32, height: u32) -> Self {
         Self { x, y, width, height }
     }
+}
+
+/// Trait for capture backend implementations
+pub trait CaptureBackend: Send + Sync {
+    /// Process a captured frame, possibly applying transformations
+    fn process_frame(&mut self, frame: &Option<RgbaImage>) -> Option<RgbaImage>;
+    
+    /// Get the name of this capture backend
+    fn backend_name(&self) -> String;
 } 
