@@ -212,23 +212,20 @@ impl SettingsTab {
     }
     
     /// Save the current settings
-    fn save_settings(&mut self) -> Result<()> {
-        // Update current profile from selection
-        if !self.available_profiles.is_empty() && self.current_profile_index < self.available_profiles.len() {
-            self.settings.current_profile = self.available_profiles[self.current_profile_index].clone();
+    pub fn save_settings(&mut self) -> Result<()> {
+        if !self.available_profiles.is_empty() {
+            if let Some(profile) = self.available_profiles.get(self.current_profile_index) {
+                self.settings.current_profile = profile.clone();
+            }
         }
         
-        // Save settings
         self.settings.save()?;
-        
-        // Reset modified flag
         self.modified = false;
-        
         Ok(())
     }
     
     /// Reset settings to defaults
-    fn reset_settings(&mut self) {
+    pub fn reset_settings(&mut self) {
         self.settings = AppSettings::default();
         self.modified = true;
     }
