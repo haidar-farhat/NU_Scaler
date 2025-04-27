@@ -1,6 +1,7 @@
 use anyhow::{Result, anyhow};
+use image::imageops;
+use image::imageops::FilterType;
 use image::{DynamicImage, RgbaImage};
-use image::imageops::{self, FilterType};
 use std::sync::atomic::{AtomicBool, Ordering};
 use log;
 use std::time::Instant;
@@ -295,7 +296,7 @@ pub fn start_live_capture_thread(
 
             // Calculate time until next frame and sleep
             next_frame_time += frame_duration;
-            let elapsed = frame_start_time.elapsed();
+            let _elapsed = frame_start_time.elapsed();
             let now = std::time::Instant::now();
 
             if next_frame_time > now {
@@ -512,15 +513,15 @@ pub fn resize_image(
 ) -> Result<RgbaImage, String> {
     let filter_type = match algorithm {
         // Use fully qualified path for enum variants
-        crate::upscale::common::UpscalingAlgorithm::Nearest => image::imageops::FilterType::Nearest,
-        crate::upscale::common::UpscalingAlgorithm::Bilinear => image::imageops::FilterType::Triangle, // Triangle is often used for Bilinear
-        crate::upscale::common::UpscalingAlgorithm::Bicubic => image::imageops::FilterType::CatmullRom, // CatmullRom is often used for Bicubic
-        crate::upscale::common::UpscalingAlgorithm::Lanczos3 => image::imageops::FilterType::Lanczos3,
+        crate::upscale::common::UpscalingAlgorithm::Nearest => FilterType::Nearest,
+        crate::upscale::common::UpscalingAlgorithm::Bilinear => FilterType::Triangle, // Triangle is often used for Bilinear
+        crate::upscale::common::UpscalingAlgorithm::Bicubic => FilterType::CatmullRom, // CatmullRom is often used for Bicubic
+        crate::upscale::common::UpscalingAlgorithm::Lanczos3 => FilterType::Lanczos3,
         // Add other variants if they exist in UpscalingAlgorithm
         // Handle potential unknown or unmapped algorithms gracefully
-        _ => image::imageops::FilterType::Lanczos3, // Default fallback
+        _ => FilterType::Lanczos3, // Default fallback
     };
-    let _elapsed = frame_start_time.elapsed(); // Prefix unused variable
+    let _elapsed = frame_start_time.elapsed();
     Ok(imageops::resize(input, width, height, filter_type))
 }
 
