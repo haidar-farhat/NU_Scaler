@@ -404,7 +404,7 @@ pub fn run_capture_thread(
     
     // Main capture loop
     while !stop_signal.load(std::sync::atomic::Ordering::SeqCst) {
-        let frame_start_time = std::time::Instant::now();
+        let _frame_start_time = std::time::Instant::now(); // Prefix unused
         
         // Try to capture a frame
         match capturer.capture_frame(&target) {
@@ -515,9 +515,12 @@ pub fn resize_image(
         crate::upscale::common::UpscalingAlgorithm::Bicubic => imageops::FilterType::CatmullRom,
         crate::upscale::common::UpscalingAlgorithm::Lanczos3 => imageops::FilterType::Lanczos3,
         crate::upscale::common::UpscalingAlgorithm::Lanczos2 => imageops::FilterType::Lanczos3, // Fallback
-        crate::upscale::common::UpscalingAlgorithm::Nearest => imageops::FilterType::Nearest,
+        // Fix: Use the index corresponding to Nearest-Neighbor from the UI (assuming it's 3)
+        // crate::upscale::common::UpscalingAlgorithm::Nearest => imageops::FilterType::Nearest,
+        3 => imageops::FilterType::Nearest, // Assuming index 3 is Nearest
+        _ => imageops::FilterType::Lanczos3, // Default fallback algorithm
     };
-    let _elapsed = frame_start_time.elapsed(); // Keep for now, prefix unused
+    let _elapsed = frame_start_time.elapsed(); // Prefix unused
     Ok(imageops::resize(input, width, height, filter_type))
 }
 

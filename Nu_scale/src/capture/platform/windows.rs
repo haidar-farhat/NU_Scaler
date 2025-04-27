@@ -597,11 +597,11 @@ impl WgpuWindowsCapture {
         });
         
         // Initialize cached windows
-        let mut cached_windows = Vec::new();
+        let mut _cached_windows = Vec::new();
         unsafe {
             WINDOW_LIST.lock().unwrap().clear();
             EnumWindows(Some(enum_windows_callback), LPARAM(0));
-            cached_windows = WINDOW_LIST.lock().unwrap().clone();
+            _cached_windows = WINDOW_LIST.lock().unwrap().clone();
         }
         
         // We'll initialize adapter, device, queue when needed
@@ -610,7 +610,7 @@ impl WgpuWindowsCapture {
             adapter: None,
             device: None,
             queue: None,
-            cached_windows,
+            cached_windows: _cached_windows,
             last_frame: None,
         })
     }
@@ -662,7 +662,7 @@ impl WgpuWindowsCapture {
         
         // First capture with GDI
         let gdi_capture = unsafe {
-            let mut capture = PlatformScreenCapture::new()?;
+            let capture = PlatformScreenCapture::new()?;
             capture.capture_window(hwnd)
         }?;
         
