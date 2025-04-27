@@ -3,6 +3,8 @@ pub mod windows;
 #[cfg(unix)]
 pub mod linux;
 
+use image::RgbaImage;
+
 /// Common platform-agnostic window identifier
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum WindowId {

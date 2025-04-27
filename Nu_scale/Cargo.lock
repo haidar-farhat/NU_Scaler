@@ -2369,6 +2369,7 @@ dependencies = [
  "once_cell",
  "opencv",
  "rand",
+ "raw-window-handle",
  "serde",
  "serde_json",
  "thiserror",
