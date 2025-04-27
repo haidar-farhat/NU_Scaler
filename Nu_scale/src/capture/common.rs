@@ -1,5 +1,6 @@
 use anyhow::{Result, anyhow};
-use image::{DynamicImage, RgbaImage, imageops::{self, FilterType}};
+use image::{DynamicImage, RgbaImage};
+use image::imageops::{self, FilterType};
 use std::sync::atomic::{AtomicBool, Ordering};
 use log;
 use std::time::Instant;
@@ -9,7 +10,6 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use crate::capture::CaptureTarget;
 use crate::upscale::{UpscalingTechnology, UpscalingQuality};
-use image::imageops;
 
 /// Type aliases for upscaling functionality to avoid import issues
 #[allow(dead_code)]

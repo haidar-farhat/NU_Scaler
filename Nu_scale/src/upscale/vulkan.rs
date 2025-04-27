@@ -104,7 +104,7 @@ impl Upscaler for VulkanUpscaler {
         warn!("Changing algorithm requires reinitializing Vulkan upscaler, which may be inefficient");
         let mut new_upscaler = VulkanUpscaler::new(self.quality)?;
         new_upscaler.initialize(self.input_width, self.input_height, self.output_width, self.output_height)?;
-        let result = new_upscaler.upscale(self.input_width, self.input_height);
+        let result = new_upscaler.upscale(_input);
         new_upscaler.cleanup()?;
         result
     }
