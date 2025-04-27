@@ -4,8 +4,9 @@ use std::fs::{File, OpenOptions};
 use std::io::{Error as IoError, ErrorKind};
 use anyhow::Result;
 use eframe::{self, egui};
-use egui::{Vec2, TextureOptions}; // Add TextureOptions
-use image::RgbaImage;
+use egui::{Vec2, TextureOptions};
+use image::{DynamicImage, RgbaImage};
+use image::imageops::{self, FilterType};
 use std::time::{Instant, Duration};
 use log::{warn, error, trace, info};
 use std::panic::AssertUnwindSafe;
@@ -21,7 +22,6 @@ use crate::upscale::common::UpscalingAlgorithm;
 use crate::capture::CaptureTarget;
 use crate::capture::ScreenCapture;
 use crate::capture::frame_buffer_ext::ArcFrameBufferExt;
-use image::imageops::{self, FilterType};
 
 // Constants for texture size limits
 const MAX_TEXTURE_SIZE: u32 = 16384; // Maximum dimension for a texture (width or height)
