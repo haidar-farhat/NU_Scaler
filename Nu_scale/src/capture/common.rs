@@ -1,16 +1,9 @@
 use anyhow::{Result, anyhow};
 use image::{DynamicImage, RgbaImage, imageops};
-use image::imageops::FilterType;
-use std::path::Path;
-use std::sync::{Arc, Mutex};
-use std::thread;
-use super::{CaptureTarget, ScreenCapture};
-use crate::ui::profile::{UpscalingTechnology, UpscalingQuality};
 use std::sync::atomic::{AtomicBool, Ordering};
 use log;
-use crate::upscale::common::UpscalingAlgorithm;
-use chrono;
 use std::time::Instant;
+use crate::capture::ScreenCapture;
 
 /// Type aliases for upscaling functionality to avoid import issues
 #[allow(dead_code)]

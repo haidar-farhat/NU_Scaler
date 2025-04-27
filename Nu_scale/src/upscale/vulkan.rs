@@ -4,12 +4,11 @@ use log::{debug, info, warn};
 
 use crate::render::VulkanRenderer;
 use super::{Upscaler, UpscalingQuality};
-use super::common::UpscalingAlgorithm;
+use crate::UpscalingAlgorithm;
 
 pub struct VulkanUpscaler {
     renderer: Option<VulkanRenderer>,
     quality: UpscalingQuality,
-    algorithm: UpscalingAlgorithm,
     input_width: u32,
     input_height: u32,
     output_width: u32,
@@ -18,12 +17,11 @@ pub struct VulkanUpscaler {
 }
 
 impl VulkanUpscaler {
-    pub fn new(quality: UpscalingQuality, algorithm: UpscalingAlgorithm) -> Result<Self> {
-        debug!("Creating new VulkanUpscaler with quality {:?} and algorithm {:?}", quality, algorithm);
+    pub fn new(quality: UpscalingQuality) -> Result<Self> {
+        debug!("Creating new VulkanUpscaler with quality {:?}", quality);
         Ok(Self {
             renderer: None,
             quality,
-            algorithm,
             input_width: 0,
             input_height: 0,
             output_width: 0,
@@ -51,7 +49,7 @@ impl Upscaler for VulkanUpscaler {
         
         // Initialize renderer with our algorithm
         if let Some(renderer) = &mut self.renderer {
-            renderer.init(self.algorithm)
+            renderer.init()
                 .map_err(|e| anyhow::anyhow!("Failed to initialize Vulkan renderer: {}", e))?;
         } else {
             return Err(anyhow::anyhow!("Renderer is unexpectedly None after creation"));
@@ -100,14 +98,9 @@ impl Upscaler for VulkanUpscaler {
     }
     
     fn upscale_with_algorithm(&self, input: &RgbaImage, algorithm: UpscalingAlgorithm) -> Result<RgbaImage> {
-        // If the algorithm is the same as our current one, just use the standard upscale
-        if algorithm == self.algorithm {
-            return self.upscale(input);
-        }
-        
         // Otherwise, create a new upscaler with the requested algorithm
         warn!("Changing algorithm requires reinitializing Vulkan upscaler, which may be inefficient");
-        let mut new_upscaler = VulkanUpscaler::new(self.quality, algorithm)?;
+        let mut new_upscaler = VulkanUpscaler::new(self.quality)?;
         new_upscaler.initialize(self.input_width, self.input_height, self.output_width, self.output_height)?;
         let result = new_upscaler.upscale(input);
         new_upscaler.cleanup()?;

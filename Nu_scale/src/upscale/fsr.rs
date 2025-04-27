@@ -3,8 +3,8 @@ use image::RgbaImage;
 use std::sync::atomic::{AtomicBool, Ordering};
 use crate::upscale::{Upscaler, UpscalingQuality};
 use std::env;
-use std::path::Path;
 use std::fs;
+use std::path::Path;
 
 // Static check for FSR support to avoid repeated checks
 static FSR_SUPPORTED: AtomicBool = AtomicBool::new(false);
