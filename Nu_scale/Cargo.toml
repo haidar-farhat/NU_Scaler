@@ -6,7 +6,7 @@ authors = ["Your Name <you@example.com>"]
 
 [dependencies]
 # Pin wgpu to a single version to avoid linking conflicts
-wgpu = "=0.15.1"
+wgpu = "0.19"
 image = "0.24"
 anyhow = "1.0"
 thiserror = "1.0"
@@ -29,13 +29,7 @@ vulkano-shaders = "0.34"
 bytemuck = "1.15"
 ash = "0.37"
 
-# CUDA dependencies removed
-# rustacuda = { version = "0.1", optional = true }
-# rustacuda_core = { version = "0.1", optional = true }
-# rustacuda_derive = { version = "0.1", optional = true }
-# cuda-runtime-sys = { version = "0.3.0-alpha.1", optional = true }
-# lazy_static = "1.4"
-
+# Optional GUI and other features
 egui = { version = "0.27", optional = true }
 eframe = { version = "0.27", optional = true, features = ["wgpu", "glow"] }
 egui_plot = "0.27"
@@ -48,11 +42,9 @@ capture_opencv = ["opencv"]
 fsr = []
 dlss = []
 disable_gui = []
-# cuda feature removed
-# cuda = ["rustacuda", "rustacuda_core", "rustacuda_derive", "cuda-runtime-sys"]
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.48", features = [
+windows = { version = "0.48", default-features = false, features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
     "Win32_UI_WindowsAndMessaging",
