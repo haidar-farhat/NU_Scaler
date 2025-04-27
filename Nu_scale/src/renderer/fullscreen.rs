@@ -6,7 +6,7 @@ use anyhow::Result;
 use eframe::{self, egui};
 use egui::{Vec2, TextureOptions};
 use image::{DynamicImage, RgbaImage};
-use image::imageops::{self, FilterType};
+use image::imageops::{resize, FilterType};
 use std::time::{Instant, Duration};
 use log::{warn, error, trace, info};
 use std::panic::AssertUnwindSafe;
@@ -670,11 +670,11 @@ impl FullscreenUpscalerUi {
                 let output_height = (frame.height() as f32 * 1.5) as u32;
                 
                 // Simple nearest-neighbor scaling as emergency fallback
-                image::imageops::resize(
+                resize(
                     &frame, 
                     output_width, 
                     output_height, 
-                    image::imageops::FilterType::Nearest
+                    FilterType::Nearest
                 )
             }
         };
@@ -1100,11 +1100,11 @@ impl FullscreenUpscalerUi {
                     Ok(upscaled) => Some(upscaled),
                     Err(_) => {
                         // Fallback to basic resize
-                        Some(image::imageops::resize(
+                        Some(resize(
                             &frame, 
                             reduced_width, 
                             reduced_height, 
-                            image::imageops::FilterType::Lanczos3 // Better quality for gaming PCs
+                            FilterType::Lanczos3 // Better quality for gaming PCs
                         ))
                     }
                 };
@@ -1191,11 +1191,11 @@ impl FullscreenUpscalerUi {
                         let max_width = actual_width.min(MAX_TEXTURE_SIZE);
                         let max_height = actual_height.min(MAX_TEXTURE_SIZE);
                         
-                        let resized = image::imageops::resize(
+                        let resized = resize(
                             &upscaled,
                             max_width,
                             max_height,
-                            image::imageops::FilterType::Lanczos3 // Better quality for gaming PCs
+                            FilterType::Lanczos3 // Better quality for gaming PCs
                         );
                         
                         return Some(resized);
@@ -1215,11 +1215,11 @@ impl FullscreenUpscalerUi {
                     let fallback_width = target_width.min(MAX_TEXTURE_SIZE).min(7680);
                     let fallback_height = target_height.min(MAX_TEXTURE_SIZE).min(4320);
                     
-                    let fallback_result = image::imageops::resize(
+                    let fallback_result = resize(
                         &frame, 
                         fallback_width, 
                         fallback_height, 
-                        image::imageops::FilterType::Lanczos3 // Higher quality fallback for gaming PCs
+                        FilterType::Lanczos3 // Higher quality fallback for gaming PCs
                     );
                     
                     // Track error count for potential recovery
