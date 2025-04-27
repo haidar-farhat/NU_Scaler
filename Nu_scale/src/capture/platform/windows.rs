@@ -7,9 +7,13 @@ use windows::{
     Win32::UI::WindowsAndMessaging::*,
 };
 use crate::capture::{ScreenCapture, CaptureTarget, CaptureError};
-use super::{WindowId, WindowInfo, WindowGeometry};
+use super::{WindowId, WindowInfo, WindowGeometry, CaptureBackend};
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
+
+// For WGPU implementation
+use wgpu::{self, Instance, Adapter, Device, Queue, Surface, SurfaceConfiguration};
+use raw_window_handle::{HasRawWindowHandle, RawWindowHandle, Win32WindowHandle, HandleError};
 
 /// Windows implementation of screen capture
 pub struct PlatformScreenCapture {
@@ -17,6 +21,22 @@ pub struct PlatformScreenCapture {
     screen_dc: HDC,
     /// List of windows cached from last enumeration
     cached_windows: Vec<WindowInfo>,
+}
+
+/// WGPU-based Windows capture implementation
+pub struct WgpuWindowsCapture {
+    /// WGPU instance
+    instance: Instance,
+    /// WGPU adapter
+    adapter: Option<Adapter>,
+    /// WGPU device
+    device: Option<Device>,
+    /// WGPU queue
+    queue: Option<Queue>,
+    /// List of windows cached from last enumeration
+    cached_windows: Vec<WindowInfo>,
+    /// Last captured frame for debugging
+    last_frame: Option<RgbaImage>,
 }
 
 // Thread-safe window list for enumerator callback
@@ -562,5 +582,174 @@ impl ScreenCapture for PlatformScreenCapture {
             let height = GetSystemMetrics(SM_CYSCREEN) as u32;
             Ok((width, height))
         }
+    }
+}
+
+// WGPU implementation
+impl WgpuWindowsCapture {
+    /// Creates a new WGPU Windows capture
+    pub fn new() -> Result<Self> {
+        // Create WGPU instance
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::all(),
+            dx12_shader_compiler: Default::default(),
+            flags: wgpu::InstanceFlags::default(),
+            gles_minor_version: Default::default(),
+        });
+        
+        // Initialize cached windows
+        let mut cached_windows = Vec::new();
+        unsafe {
+            WINDOW_LIST.lock().unwrap().clear();
+            EnumWindows(Some(enum_windows_callback), LPARAM(0));
+            cached_windows = WINDOW_LIST.lock().unwrap().clone();
+        }
+        
+        // We'll initialize adapter, device, queue when needed
+        Ok(Self {
+            instance,
+            adapter: None,
+            device: None,
+            queue: None,
+            cached_windows,
+            last_frame: None,
+        })
+    }
+    
+    /// Initialize WGPU resources
+    async fn initialize_wgpu(&mut self) -> Result<()> {
+        if self.adapter.is_none() {
+            // Request adapter
+            self.adapter = self.instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: None,
+                force_fallback_adapter: false,
+            }).await;
+            
+            if let Some(adapter) = &self.adapter {
+                // Request device
+                let (device, queue) = adapter.request_device(
+                    &wgpu::DeviceDescriptor {
+                        features: wgpu::Features::empty(),
+                        limits: wgpu::Limits::default(),
+                        label: Some("NU_Scaler Capture Device"),
+                    },
+                    None,
+                ).await?;
+                
+                self.device = Some(device);
+                self.queue = Some(queue);
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Capture a window with WGPU
+    async fn capture_window_wgpu(&mut self, hwnd: HWND) -> Result<RgbaImage> {
+        // Initialize WGPU if not already done
+        self.initialize_wgpu().await?;
+        
+        if self.device.is_none() || self.queue.is_none() {
+            return Err(anyhow!("WGPU not initialized"));
+        }
+        
+        let device = self.device.as_ref().unwrap();
+        let queue = self.queue.as_ref().unwrap();
+        
+        // Create a surface for the window
+        // In a real implementation, this would use the Windows HWND to create a surface
+        // But for simplicity, we'll capture using GDI and then use WGPU for processing
+        
+        // First capture with GDI
+        let gdi_capture = unsafe {
+            let mut capture = PlatformScreenCapture::new()?;
+            capture.capture_window(hwnd)
+        }?;
+        
+        // Process with WGPU (in a real implementation)
+        // This is a placeholder that just returns the GDI capture
+        // A real implementation would upload to a texture, process with shaders, and download
+        
+        // Create a texture
+        let texture_size = wgpu::Extent3d {
+            width: gdi_capture.width(),
+            height: gdi_capture.height(),
+            depth_or_array_layers: 1,
+        };
+        
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            size: texture_size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING 
+                | wgpu::TextureUsages::COPY_DST 
+                | wgpu::TextureUsages::COPY_SRC,
+            label: Some("capture_texture"),
+            view_formats: &[],
+        });
+        
+        // Upload data to texture
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            gdi_capture.as_raw(),
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * gdi_capture.width()),
+                rows_per_image: Some(gdi_capture.height()),
+            },
+            texture_size,
+        );
+        
+        // In a real implementation, we would now apply shaders for processing
+        // But for this example, we just return the original image
+        
+        self.last_frame = Some(gdi_capture.clone());
+        Ok(gdi_capture)
+    }
+    
+    /// Find a window by title
+    fn find_window_by_title(&self, title: &str) -> Result<WindowInfo> {
+        let title_lower = title.to_lowercase();
+        self.cached_windows.iter()
+            .find(|w| w.title.to_lowercase().contains(&title_lower))
+            .cloned()
+            .ok_or_else(|| anyhow!(CaptureError::WindowNotFound))
+    }
+    
+    /// Update the cached window list
+    fn update_window_list(&mut self) -> Result<()> {
+        unsafe {
+            WINDOW_LIST.lock().unwrap().clear();
+            EnumWindows(Some(enum_windows_callback), LPARAM(0));
+            self.cached_windows = WINDOW_LIST.lock().unwrap().clone();
+        }
+        Ok(())
+    }
+}
+
+impl CaptureBackend for WgpuWindowsCapture {
+    fn process_frame(&mut self, frame: &Option<RgbaImage>) -> Option<RgbaImage> {
+        // If we have a frame, just return it
+        // In a real implementation, we would process it with WGPU
+        if let Some(image) = frame {
+            // Store a copy for debugging
+            self.last_frame = Some(image.clone());
+            Some(image.clone())
+        } else {
+            // Return the last frame if available
+            self.last_frame.clone()
+        }
+    }
+    
+    fn backend_name(&self) -> String {
+        "WGPU Windows".to_string()
     }
 } 
