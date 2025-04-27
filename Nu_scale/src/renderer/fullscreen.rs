@@ -1,11 +1,11 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::fs::{File, OpenOptions};
-use std::io::{Error as IoError, ErrorKind};
+use std::io::ErrorKind;
 use anyhow::Result;
 use eframe::{self, egui};
 use egui::{Vec2, TextureOptions};
-use image::{DynamicImage, RgbaImage};
+use image::RgbaImage;
 use image::imageops::{resize, FilterType};
 use std::time::{Instant, Duration};
 use log::{warn, error, trace, info};
@@ -13,12 +13,9 @@ use std::panic::AssertUnwindSafe;
 use rand;
 use std::sync::Mutex;
 use egui_wgpu::WgpuConfiguration;
-use std::path::Path;
-use std::thread;
 
 use crate::capture::common::FrameBuffer;
-use crate::upscale::{Upscaler, UpscalingTechnology, UpscalingQuality};
-use crate::upscale::common::UpscalingAlgorithm;
+use crate::upscale::{Upscaler, UpscalingTechnology, UpscalingQuality, UpscalingAlgorithm};
 use crate::capture::CaptureTarget;
 use crate::capture::ScreenCapture;
 use crate::capture::frame_buffer_ext::ArcFrameBufferExt;
