@@ -1879,17 +1879,23 @@ pub fn run_fullscreen_upscaler(
 
     // Create window options
     let native_options = eframe::NativeOptions {
-        initial_window_pos: Some(egui::pos2(win_x as f32, win_y as f32)),
-        initial_window_size: Some(egui::vec2(win_width as f32, win_height as f32)),
-        resizable: false,
-        transparent: false,
-        fullscreen: true,
         vsync: true,
         multisampling: 0, // Disable multisampling for performance
         depth_buffer: 0, // No depth buffer needed
         stencil_buffer: 0, // No stencil buffer needed
         hardware_acceleration: eframe::HardwareAcceleration::Required,
         renderer: eframe::Renderer::Wgpu,
+        
+        // Configure viewport using ViewportBuilder
+        viewport: egui::ViewportBuilder::default()
+            .with_title("NU_Scaler Fullscreen")
+            .with_position(egui::pos2(win_x as f32, win_y as f32))
+            .with_inner_size([win_width as f32, win_height as f32])
+            .with_resizable(false)
+            .with_decorations(false) // No decorations for fullscreen
+            .with_fullscreen(true)
+            .with_transparent(false),
+        
         ..Default::default()
     };
     
@@ -1903,7 +1909,7 @@ pub fn run_fullscreen_upscaler(
     
     // Run the fullscreen upscaler
     eframe::run_native(
-        "NU_Scaler Fullscreen",
+        "NU_Scaler Fullscreen", // Title set in ViewportBuilder
         native_options,
         Box::new(move |cc| {
             // Configure the wgpu renderer if available
