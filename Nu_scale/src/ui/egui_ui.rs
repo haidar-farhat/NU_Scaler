@@ -820,7 +820,7 @@ impl AppState {
     }
     
     /// Show the capture tab
-    fn show_capture_tab(&mut self, ui: &mut Ui) {
+    fn show_capture_tab(&mut self, ctx: &Context, ui: &mut Ui) {
         ui.vertical(|ui| {
             ui.add_space(8.0);
             ui.heading("Capture Settings");
@@ -1628,7 +1628,7 @@ impl AppState {
     }
     
     /// Render a frame to the screen with proper texture management
-    fn render_frame_to_screen(&mut self, ui: &mut eframe::egui::Ui, available_size: eframe::egui::Vec2, size: [usize; 2], pixels: &[u8]) {
+    fn render_frame_to_screen(&mut self, ui: &mut Ui, available_size: Vec2, size: [usize; 2], pixels: &[u8]) {
         // Use our texture cache instead of storing directly in self.frame_texture
         let texture = self.texture_cache.get_texture(
             ui.ctx(), 
@@ -1660,7 +1660,10 @@ impl AppState {
                  rect.min.x, rect.min.y, rect.width(), rect.height());
         
         // Draw the image
-        ui.put(rect, eframe::egui::Image::new(texture.id(), eframe::egui::vec2(width, height)));
+        let tex_id = texture.id();
+        let tex_size = texture.size_vec2();
+        let img_widget = egui::Image::new((tex_id, tex_size));
+        ui.put(rect, img_widget);
         
         // Display performance counter in the corner if enabled
         if self.settings.show_fps_counter {
@@ -1744,7 +1747,7 @@ impl AppState {
     fn show_source_window_list(&mut self, ctx: &Context, ui: &mut Ui) {
          // ... existing code ...
          if ui.button("Set Capture Window")...clicked() {
-             if let Some(name) = self.available_windows.get(self.selected_window_index).cloned() {
+             if let Some(name) = self.available_windows.get(self.selected_window_index) {
                  self.set_capture_target_window_title(ctx, &name); // Pass ctx
              }
          }
@@ -1764,7 +1767,7 @@ impl AppState {
      }
 
     /// Start a scaling process in a separate application instance
-    fn start_scaling_process(&mut self) {
+    fn start_scaling_process(&mut self) -> Result<()> {
         // First, kill any existing scaling process
         self.kill_scaling_process();
 
@@ -2047,36 +2050,19 @@ impl AppState {
     }
     
     fn load_image(&mut self, path: &Path) {
-        if let Ok(img) = image::open(path) {
-            // Convert to RGBA
-            let rgba = img.to_rgba8();
-            let width = rgba.width() as usize;
-            let height = rgba.height() as usize;
-            let raw_data = rgba.into_raw();
-            
-            // Look at the actual FrameBuffer implementation and use appropriate constructor
-            // For example, FrameBuffer might have a constructor that takes dimensions and data
-            // This is a guess based on the error messages - adjust as needed
-            let frame_buffer = match FrameBuffer::new(width * height * 4) {
-                buffer => {
-                    // Since we don't have push_frame, we might need to manually insert data
-                    // Call appropriate FrameBuffer methods here to set up the buffer
-                    // For example:
-                    // buffer.set_dimensions(width, height);
-                    // buffer.set_data(raw_data);
-                    buffer
-                }
-            };
-            
-            // Set as current frame
-            self.current_frame = Some(Arc::new(frame_buffer));
-            
-            // Update UI
-            self.status_message = format!("Loaded image: {}", path.display());
-            self.status_message_type = StatusMessageType::Success;
-        } else {
-            self.status_message = format!("Failed to load image: {}", path.display());
-            self.status_message_type = StatusMessageType::Error;
+        match image::open(path) {
+            Ok(img) => {
+                let rgba = img.to_rgba8();
+                let width = rgba.width() as usize;
+                let height = rgba.height() as usize;
+                let _raw_data = rgba.into_raw(); // Prefixed raw_data
+                log::info!("Loaded image {} ({}x{})", path.display(), width, height);
+                // TODO: Use raw_data
+            }
+            Err(e) => {
+                self.status_message = format!("Failed to load image: {}", e);
+                self.status_message_type = StatusMessageType::Error;
+            }
         }
     }
     
