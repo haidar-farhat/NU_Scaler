@@ -23,7 +23,7 @@ struct ThreadPool {
 }
 
 impl ThreadPool {
-    fn new(size: usize) -> Self {
+    pub fn new(size: usize) -> Self {
         let (sender, receiver) = std::sync::mpsc::channel();
         let receiver = Arc::new(Mutex::new(receiver));
 
@@ -32,29 +32,21 @@ impl ThreadPool {
         for _ in 0..size {
             let receiver = Arc::clone(&receiver);
             let thread = thread::spawn(move || {
-                loop {
-                    // Fix: Add type annotation for job
-                    let job: Box<dyn FnOnce() + Send + 'static> = match receiver.lock().unwrap().recv() {
-                        Ok(job) => job,
-                        Err(_) => break, // Channel closed
-                    };
-
+                while let Ok(job) = receiver.lock().unwrap().recv() {
                     job();
                 }
             });
-
             workers.push(thread);
         }
 
         ThreadPool { workers, sender }
     }
 
-    fn execute<F>(&self, f: F)
+    pub fn execute<F>(&self, f: F)
     where
         F: FnOnce() + Send + 'static,
     {
-        let job = Box::new(f);
-        self.sender.send(job).unwrap();
+        self.sender.send(Box::new(f)).unwrap();
     }
 }
 
@@ -203,7 +195,7 @@ struct TextureCache {
 }
 
 impl TextureCache {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             textures: AHashMap::new(),
             last_used: AHashMap::new(),

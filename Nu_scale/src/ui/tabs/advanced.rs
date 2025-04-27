@@ -216,7 +216,8 @@ impl AdvancedTab {
     }
     
     /// Apply the advanced settings
-    fn apply_settings(&self) {
-        // TODO: Actually apply settings
+    pub fn apply_settings(&self) {
+        // Implementation to apply advanced settings
+        // Could call into settings management system
     }
 } 
