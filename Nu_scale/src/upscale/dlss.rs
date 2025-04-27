@@ -265,7 +265,7 @@ impl DlssUpscaler {
         };
         
         // Create output image
-        let mut output = RgbaImage::new(self.output_width, self.output_height);
+        let _output = RgbaImage::new(self.output_width, self.output_height);
         
         // For simulation purposes, we'll implement different stages of DLSS processing:
         // 1. Initial upscaling (similar to bilinear but with edge detection)
@@ -461,7 +461,7 @@ impl DlssUpscaler {
         // For our simulation, we'll blend with the previous frame if available
         
         // Start with the detail recovery output
-        output = detail_recovery_pass;
+        let output = detail_recovery_pass;
         
         // If we have a previous frame, apply temporal stabilization
         // In real DLSS, motion vectors would be used for better temporal reprojection

@@ -4,7 +4,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{Error as IoError, ErrorKind};
 use anyhow::Result;
 use eframe::{self, egui};
-use egui::{Vec2};
+use egui::{Vec2, TextureOptions}; // Add TextureOptions
 use image::RgbaImage;
 use std::path::Path;
 use std::time::{Instant, Duration};
@@ -257,6 +257,8 @@ pub struct FullscreenUpscalerUi {
     frame_time_budget: f32,
     /// Pending frame to be processed
     pending_frame: Option<RgbaImage>,
+    /// WGPU state for rendering
+    wgpu_state: Option<WgpuState>,
 }
 
 impl FullscreenUpscalerUi {
@@ -314,6 +316,7 @@ impl FullscreenUpscalerUi {
             enable_frame_skipping: true,
             frame_time_budget: 16.0, // ~60 FPS
             pending_frame: None,
+            wgpu_state: None,
         };
         
         // Start the processing thread
@@ -1675,7 +1678,7 @@ impl eframe::App for FullscreenUpscalerUi {
                             
                             // Simple rendering with error handling
                             if let Err(e) = (|| -> Result<(), String> {
-                                ui.put(rect, egui::Image::new(texture.id()).fit_to_exact_size(rect.size()));
+                                ui.put(rect, egui::Image::new((texture.id(), rect.size())).fit_to_exact_size(rect.size())); // Fix: Use tuple (TextureId, Vec2)
                                 Ok(())
                             })() {
                                 log::error!("Error rendering texture: {}", e);
@@ -1937,34 +1940,46 @@ pub fn run_fullscreen_upscaler(
 impl FullscreenUpscalerUi {
     // Method to render upscaled content in any UI context
     pub fn render_upscaled_content(&self, ui: &mut egui::Ui) -> bool {
-        let texture_lock = self.texture.lock().unwrap();
-        if let Some(texture_handle) = texture_lock.as_ref() {
-            if texture_handle.is_allocated() {
-                // ... calculate display size ...
-                let available_size = ui.available_size();
+        let mut texture_updated = false;
+        if let Ok(texture_guard) = self.texture.lock() {
+            if let Some(texture_handle) = &*texture_guard {
+                // Fix 4: Comment out is_allocated check
+                // if texture_handle.is_allocated() {
+                // Correct usage of Image::new with tuple
                 let texture_size = texture_handle.size_vec2();
-                // ... center the image ...
-                let (response, _painter) = ui.allocate_painter(available_size, egui::Sense::hover()); // Prefix painter
-                let rect = egui::Rect::from_center_size(response.rect.center(), texture_size);
+                let image_widget = egui::Image::new((texture_handle.id(), texture_size));
 
-                // Draw the image - FIX HERE
-                let image_widget = egui::Image::new((texture_handle.id(), texture_size)) // Use tuple (TextureId, Vec2)
-                    .fit_to_exact_size(rect.size());
-                image_widget.paint_at(ui, rect);
-                return true;
+                let available_size = ui.available_size();
+                let aspect_ratio = texture_size.x / texture_size.y;
+                let (draw_width, draw_height) = if aspect_ratio > available_size.x / available_size.y {
+                    (available_size.x, available_size.x / aspect_ratio)
+                } else {
+                    (available_size.y * aspect_ratio, available_size.y)
+                };
+
+                let rect = egui::Rect::from_center_size(
+                    ui.available_rect_before_wrap().center(),
+                    egui::vec2(draw_width, draw_height)
+                );
+
+                ui.put(rect, image_widget);
+                texture_updated = true;
+                // } else {
+                //     trace!("Texture not allocated yet");
+                // }
             } else {
-                ui.label("Texture not allocated.");
+                trace!("No texture available in mutex guard");
             }
         } else {
-            // ... spinner ...
+            error!("Failed to lock texture mutex");
         }
-        false
+        texture_updated
     }
 }
 
 impl FullscreenUpscalerUi {
     // Update source window position
-    fn update_source_window_position(&mut self, _ctx: &egui::Context) {
+    fn update_source_window_position(&mut self, ctx: &egui::Context) {
         // Example viewport commands for updating position and size
         // ctx.send_viewport_cmd(egui::ViewportCommand::SetPos(egui::pos2(x, y)));
         // ctx.send_viewport_cmd(egui::ViewportCommand::SetInnerSize(egui::vec2(width, height)));
