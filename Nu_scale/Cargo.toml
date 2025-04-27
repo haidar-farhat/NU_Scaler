@@ -20,6 +20,7 @@ log = "0.4"
 env_logger = "0.10"
 chrono = "0.4"
 rand = "0.8.5"
+raw-window-handle = "0.5"
 
 # Vulkan dependencies
 vulkano = "0.34"
