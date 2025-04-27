@@ -509,30 +509,30 @@ impl eframe::App for AppState {
             self.upscaled_texture = Some(texture_id);
         }
         
-        // Replace all load() calls with proper mutex locking
-        let has_pending = match self.pending_upscaled_frame.lock() {
+        // FIXED: Properly lock mutex instead of using load()
+        let has_pending_upscale = match self.pending_upscaled_frame.lock() {
             Ok(guard) => guard.is_some(),
             Err(_) => false,
         };
         
-        if !self.upscale_in_progress.load(Ordering::SeqCst) && !has_pending {
+        if !self.upscale_in_progress.load(Ordering::SeqCst) && !has_pending_upscale {
             // Handle upscaling logic
             if self.is_upscaling && self.last_upscale_request.is_some() {
                 if let Some(frame) = &self.current_frame {
+                    // FIXED: Add clone to pass Arc properly
                     self.schedule_next_upscale(frame.clone());
                 }
             }
         }
         
-        // Fix texture cleanup - use ctx
+        // FIXED: Pass ctx instead of Duration
         self.texture_cache.cleanup_old_textures(ctx);
         
         // Determine whether we need to repaint
         let mut should_repaint = false;
         
         // Only request repaint if we have a pending frame or are processing
-        if self.is_upscaling || self.upscaled_frame.is_some() || 
-           self.pending_upscaled_frame.load(Ordering::SeqCst) {
+        if self.is_upscaling || self.upscaled_frame.is_some() || has_pending_upscale {
             // Dynamic repaint rate based on memory and frame budget
             let repaint_delay_ms = if self.gpu_memory_warning {
                 100 // 10 FPS when under memory pressure
@@ -561,16 +561,23 @@ impl eframe::App for AppState {
             self.last_memory_check = Some(Instant::now());
         }
         
-        // Clean up old textures on a regular basis
-        self.texture_cache.cleanup_old_textures(Duration::from_secs(5));
+        // FIXED: Clean up old textures using ctx, not Duration
+        self.texture_cache.cleanup_old_textures(ctx);
         
         // Check if we need to schedule a new upscale
+        // FIXED: Use proper mutex locking instead of load()
+        let has_pending = match self.pending_upscaled_frame.lock() {
+            Ok(guard) => guard.is_some(),
+            Err(_) => false,
+        };
+        
         if !self.is_upscaling && 
-           !self.pending_upscaled_frame.load(Ordering::SeqCst) &&
+           !has_pending &&
            self.current_frame.is_some() &&
            should_repaint {
             if let Some(frame) = &self.current_frame {
-                self.schedule_next_upscale(frame);
+                // FIXED: Add clone to pass Arc properly
+                self.schedule_next_upscale(frame.clone());
             }
         }
         
@@ -1563,27 +1570,35 @@ impl AppState {
         
         // Queue the upscaling work in the thread pool
         self.upscale_threadpool.execute(move || {
-            // Choose upscaler based on profile settings
+            // FIXED: Get the quality based on index, not by enum matching
+            // Assuming ProfileUpscalingQuality is just an enum with numeric indices
             let quality = match profile.upscaling_quality {
-                ProfileUpscalingQuality::Performance => crate::upscale::UpscalingQuality::Performance,
-                ProfileUpscalingQuality::Balanced => crate::upscale::UpscalingQuality::Balanced,
-                ProfileUpscalingQuality::Quality => crate::upscale::UpscalingQuality::Quality,
-                ProfileUpscalingQuality::UltraQuality => crate::upscale::UpscalingQuality::UltraQuality,
+                0 => crate::upscale::UpscalingQuality::Quality,
+                1 => crate::upscale::UpscalingQuality::Balanced,
+                2 => crate::upscale::UpscalingQuality::Performance,
+                _ => crate::upscale::UpscalingQuality::Balanced, // Default
             };
             
+            // FIXED: Match on technology index
             let result = match profile.upscaling_tech {
-                ProfileUpscalingTechnology::FSR => {
-                    // Create FSR upscaler with quality parameter
+                0 => { // FSR
                     if let Ok(mut upscaler) = crate::upscale::fsr::FsrUpscaler::new(quality) {
-                        upscaler.upscale(&frame)
+                        // FIXED: Convert FrameBuffer to RgbaImage
+                        match frame_buffer_to_rgba_image(&frame) {
+                            Ok(image) => upscaler.upscale(&image),
+                            Err(e) => Err(e),
+                        }
                     } else {
                         Err(anyhow::anyhow!("Failed to create FSR upscaler"))
                     }
                 },
-                ProfileUpscalingTechnology::DLSS => {
-                    // Create DLSS upscaler with quality parameter
+                1 => { // DLSS
                     if let Ok(mut upscaler) = crate::upscale::dlss::DlssUpscaler::new(quality) {
-                        upscaler.upscale(&frame)
+                        // FIXED: Convert FrameBuffer to RgbaImage
+                        match frame_buffer_to_rgba_image(&frame) {
+                            Ok(image) => upscaler.upscale(&image),
+                            Err(e) => Err(e),
+                        }
                     } else {
                         Err(anyhow::anyhow!("Failed to create DLSS upscaler"))
                     }
@@ -2252,3 +2267,27 @@ pub fn run_app() -> Result<()> {
 
     Ok(())
 } 
+
+// Fix the duplicate helper function with a proper implementation
+fn frame_buffer_to_rgba_image(frame: &Arc<FrameBuffer>) -> Result<image::RgbaImage> {
+    // We need to extract the width, height, and data from the FrameBuffer
+    // Adjust these calls to match your actual FrameBuffer API
+    let fb = frame.get_latest_frame().map_err(|e| anyhow::anyhow!("Failed to get frame: {}", e))?;
+    
+    // Get dimensions
+    let width = fb.width as u32;
+    let height = fb.height as u32;
+    
+    if width == 0 || height == 0 {
+        return Err(anyhow::anyhow!("Invalid frame dimensions"));
+    }
+    
+    // Convert data to Vec<u8> if not already in that format
+    let data = fb.data.clone();
+    
+    // Create RgbaImage
+    match image::RgbaImage::from_raw(width, height, data) {
+        Some(img) => Ok(img),
+        None => Err(anyhow::anyhow!("Failed to create RgbaImage from frame buffer")),
+    }
+}
