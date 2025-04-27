@@ -239,7 +239,7 @@ impl TextureCache {
     }
     
     /// Clean up old unused textures to prevent memory leaks
-    fn cleanup_old_textures(&mut self, ctx: &egui::Context) {
+    fn cleanup_old_textures(&mut self, _ctx: &egui::Context) {
         let now = Instant::now();
         let mut to_remove = Vec::new();
         
@@ -2182,7 +2182,7 @@ pub fn run_app() -> Result<()> {
         "NU Scale",
         native_options, // Use native options without theme
         Box::new(|cc| {
-            let mut app_state = AppState::default();
+            let app_state = AppState::default();
             app_state.configure_fonts(&cc.egui_ctx);
             // Apply theme from settings using context visuals
             let theme = match app_state.settings.theme.as_str() {

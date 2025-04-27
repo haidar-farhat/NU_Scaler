@@ -1,7 +1,6 @@
 use anyhow::{Result, anyhow};
 use image::{DynamicImage, RgbaImage};
-use image::imageops;
-use image::imageops::FilterType;
+use image::imageops::{self, FilterType};
 use std::sync::atomic::{AtomicBool, Ordering};
 use log;
 use std::time::Instant;
