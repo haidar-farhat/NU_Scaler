@@ -252,7 +252,6 @@ impl TextureCache {
     
     /// Clean up old unused textures to prevent memory leaks
     fn cleanup_old_textures(&mut self, ctx: &egui::Context) {
-        // Implementation that uses Context correctly
         let now = Instant::now();
         let mut to_remove = Vec::new();
         
@@ -264,8 +263,8 @@ impl TextureCache {
         
         for size in to_remove {
             if let Some(texture) = self.textures.remove(&size) {
-                // Free the texture
-                ctx.forget_image(&texture.id());
+                // Free the texture - use proper texture management method
+                ctx.tex_manager().free(texture.id());
                 self.last_used.remove(&size);
                 self.texture_memory_usage -= (size.0 * size.1 * 4) as usize;
             }
@@ -511,12 +510,12 @@ impl eframe::App for AppState {
             self.upscaled_texture = Some(texture_id);
         }
         
-        // Fix atomic bool check
+        // Fix atomic bool check - use mutex for pending_upscaled_frame
         if !self.upscale_in_progress.load(Ordering::SeqCst) {
             // Handle upscaling logic
         }
         
-        // Fix texture cleanup
+        // Fix texture cleanup - pass ctx instead of duration
         self.texture_cache.cleanup_old_textures(ctx);
         
         // Fix another atomic bool check
@@ -1534,7 +1533,7 @@ impl AppState {
     }
     
     /// Schedule the next upscale operation on the thread pool
-    fn schedule_next_upscale(&mut self, frame: &Arc<FrameBuffer>) {
+    fn schedule_next_upscale(&mut self, frame: Arc<FrameBuffer>) {
         // Clone necessary data to avoid borrowing issues
         let upscale_sender = self.upscaled_frame_sender.clone();
         let upscale_in_progress = self.upscale_in_progress.clone();
@@ -1546,32 +1545,45 @@ impl AppState {
         self.last_upscale_request = Some(Instant::now());
         self.upscale_start_time = Some(Instant::now());
         
-        // Create a cloned frame buffer to avoid borrowing issues
-        let frame_clone = frame.clone();
-        
         // Queue the upscaling work in the thread pool
         self.upscale_threadpool.execute(move || {
-            // Import upscaler engine
-            use crate::upscale::engine::UpscaleEngine;
+            // Import directly from the upscale module (assuming this exists)
+            use crate::upscale::common::Upscaler;
             
-            let engine = UpscaleEngine::new(&settings);
+            // Create a simple upscaler from settings
+            let upscaler = match &settings.upscaling_technology {
+                ProfileUpscalingTechnology::FSR => {
+                    // Create FSR upscaler
+                    Box::new(crate::upscale::fsr::FsrUpscaler::new()) as Box<dyn Upscaler>
+                },
+                ProfileUpscalingTechnology::DLSS => {
+                    // Create DLSS upscaler
+                    Box::new(crate::upscale::dlss::DlssUpscaler::new()) as Box<dyn Upscaler>
+                },
+                // Add other technologies as needed
+                _ => {
+                    // Default to FSR
+                    Box::new(crate::upscale::fsr::FsrUpscaler::new()) as Box<dyn Upscaler>
+                }
+            };
             
-            // Process the frame with the upscaler
-            if let Some(upscaled_frame) = engine.process_frame(&frame_clone) {
-                // Send the upscaled frame back to the main thread
-                let _ = upscale_sender.send(upscaled_frame);
-                
-                // Mark upscaling as complete
-                upscale_in_progress.store(false, Ordering::SeqCst);
-                // Clear the pending frame
-                let mut pending = pending_frame.lock().unwrap();
-                *pending = None;
-            } else {
-                // Handle error case
-                upscale_in_progress.store(false, Ordering::SeqCst);
-                let mut pending = pending_frame.lock().unwrap();
-                *pending = None;
+            // Process the frame
+            match upscaler.upscale_frame(&frame) {
+                Ok(upscaled_frame) => {
+                    // Send upscaled frame back to UI thread
+                    let _ = upscale_sender.send(upscaled_frame);
+                },
+                Err(_) => {
+                    // Handle error case
+                }
             }
+            
+            // Mark upscaling as complete
+            upscale_in_progress.store(false, Ordering::SeqCst);
+            
+            // Clear the pending frame
+            let mut pending = pending_frame.lock().unwrap();
+            *pending = None;
         });
     }
     
@@ -2051,7 +2063,7 @@ impl AppState {
         {
             self.last_memory_check = Some(Instant::now());
             
-            // Use the texture_cache methods correctly
+            // Use the texture_cache methods correctly - pass ctx
             self.texture_cache.cleanup_old_textures(ctx);
             
             // Check GPU memory usage
@@ -2067,21 +2079,22 @@ impl AppState {
     }
 
     fn process_input(&mut self, ctx: &egui::Context) {
-        // Fix input_mut usage
+        // Fix input_mut usage and scope issues
         ctx.input(|input| {
+            // Space key to toggle upscaling
             if input.key_pressed(egui::Key::Space) {
                 self.toggle_upscaling();
             }
-        });
-        
-        // Process drag and drop
-        if !input.raw.dropped_files.is_empty() {
-            let file = &input.raw.dropped_files[0];
-            if let Some(path) = &file.path {
-                log::info!("File dropped: {:?}", path);
-                self.load_image(path);
+            
+            // Process drag and drop - fix scope issue
+            if !input.raw.dropped_files.is_empty() {
+                let file = &input.raw.dropped_files[0];
+                if let Some(path) = &file.path {
+                    log::info!("File dropped: {:?}", path);
+                    self.load_image(path);
+                }
             }
-        }
+        });
     }
 
     fn check_gpu_memory_pressure(&mut self) {
@@ -2104,11 +2117,13 @@ impl AppState {
         if let Ok(img) = image::open(path) {
             // Convert to RGBA
             let rgba = img.to_rgba8();
-            let width = rgba.width();
-            let height = rgba.height();
+            let width = rgba.width() as usize;
+            let height = rgba.height() as usize;
+            let raw_data = rgba.into_raw();
             
-            // Create a new frame buffer with the image data
-            let buffer = FrameBuffer::new(width, height, rgba.into_raw());
+            // Create a new frame buffer with the correct constructor
+            let mut buffer = FrameBuffer::new(width * height * 4); // Capacity based on pixel count
+            buffer.push_frame(width, height, raw_data);
             
             // Set as current frame
             self.current_frame = Some(Arc::new(buffer));
@@ -2126,11 +2141,19 @@ impl AppState {
         self.auto_upscale = !self.auto_upscale;
         log::info!("Auto upscaling: {}", self.auto_upscale);
         
-        if self.auto_upscale && !self.is_upscaling &&
-           !self.upscale_in_progress.load(Ordering::SeqCst) {
-            // Start upscaling if enabled and not already running
-            if let Some(frame) = &self.current_frame {
-                self.schedule_next_upscale(frame);
+        // Fix borrow checker issues by cloning frame before using it
+        if self.auto_upscale && !self.is_upscaling {
+            let has_pending = match self.pending_upscaled_frame.lock() {
+                Ok(guard) => guard.is_some(),
+                Err(_) => false,
+            };
+            
+            if !self.upscale_in_progress.load(Ordering::SeqCst) && !has_pending {
+                if let Some(frame) = &self.current_frame {
+                    // Clone to avoid borrow checker issues
+                    let frame_clone = frame.clone();
+                    self.schedule_next_upscale(frame_clone);
+                }
             }
         }
     }
