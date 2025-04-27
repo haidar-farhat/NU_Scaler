@@ -630,7 +630,7 @@ impl AppState {
                 self.status_message = "New profile created".to_string();
                 self.status_message_type = StatusMessageType::Success;
             }
-            
+            // test
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(8.0);
                 
