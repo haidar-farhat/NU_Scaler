@@ -192,6 +192,8 @@ struct TextureCache {
     last_used: AHashMap<(u32, u32), Instant>,
     /// Total texture memory usage in bytes
     texture_memory_usage: usize,
+    /// Maximum allowed memory usage in MB
+    max_memory_mb: f32,
 }
 
 impl TextureCache {
@@ -200,13 +202,14 @@ impl TextureCache {
             textures: AHashMap::new(),
             last_used: AHashMap::new(),
             texture_memory_usage: 0,
+            max_memory_mb: 512.0, // Default to 512MB, can be made configurable
         }
     }
     
-    /// Get a texture of the specified size, reusing if possible
+    /// Get a texture of the specified size, reusing if possible, with LRU eviction
     fn get_texture(&mut self, ctx: &egui::Context, size: (u32, u32), pixels: &[u8]) -> TextureHandle {
         if let Some(texture) = self.textures.get_mut(&size) {
-            // Update existing texture (fixed borrowing issue)
+            // Update existing texture
             texture.set(
                 egui::ColorImage::from_rgba_unmultiplied(
                     [size.0 as usize, size.1 as usize],
@@ -217,6 +220,18 @@ impl TextureCache {
             self.last_used.insert(size, Instant::now());
             texture.clone()
         } else {
+            // LRU eviction if over memory budget
+            let mem_size = (size.0 * size.1 * 4) as usize;
+            while self.get_memory_usage_mb() + (mem_size as f32 / (1024.0 * 1024.0)) > self.max_memory_mb {
+                // Find the least recently used texture
+                if let Some((&oldest_size, _)) = self.last_used.iter().min_by_key(|(_, &t)| t) {
+                    self.textures.remove(&oldest_size);
+                    self.last_used.remove(&oldest_size);
+                    self.texture_memory_usage -= (oldest_size.0 * oldest_size.1 * 4) as usize;
+                } else {
+                    break;
+                }
+            }
             // Create new texture
             let image = egui::ColorImage::from_rgba_unmultiplied(
                 [size.0 as usize, size.1 as usize],
@@ -227,13 +242,9 @@ impl TextureCache {
                 image,
                 egui::TextureOptions::NEAREST,
             );
-            
-            let mem_size = (size.0 * size.1 * 4) as usize;
             self.texture_memory_usage += mem_size;
-            
             self.textures.insert(size, texture.clone());
             self.last_used.insert(size, Instant::now());
-            
             texture
         }
     }
@@ -289,10 +300,7 @@ impl TextureCache {
 
     // Placeholder for where line 434 might be, applying the tuple fix assuming texture_id is TextureId
     fn example_usage_line_434(&mut self, ui: &mut Ui, texture_id: TextureId, size: Vec2) {
-         // Assuming texture_id is a TextureId and size is Vec2
-         // The original error E0277 suggests `texture_id` is `TextureId`
-         // The fix is to provide the size tuple.
-         ui.add(egui::Image::new((texture_id, size))); // Use tuple (TextureId, Vec2)
+         ui.add(egui::Image::new((texture_id, size)));
     }
 }
 
