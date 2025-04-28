@@ -321,7 +321,7 @@ impl<'a> WgpuState<'a> {
                         ty: wgpu::BindingType::Texture {
                             multisampled: false,
                             view_dimension: wgpu::TextureViewDimension::D2,
-                            sample_type: wgpu::BindingType::TextureSampleType::Float { filterable: true },
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
                         },
                         count: None,
                     },
@@ -414,15 +414,18 @@ impl<'a> WgpuState<'a> {
 
     /// Update texture with new frame data
     fn update_texture(&mut self, frame: &RgbaImage) -> Result<()> {
-        if let Some(resources) = &mut self.render_resources {
-            let (width, height) = frame.dimensions();
-            
-            // Check if we need to resize the texture
-            if resources.texture_size != (width, height) {
-                self.create_render_resources(width, height)?;
+        let (width, height) = frame.dimensions();
+        let needs_resize = {
+            if let Some(resources) = &self.render_resources {
+                resources.texture_size != (width, height)
+            } else {
+                true
             }
-
-            // Update texture data
+        };
+        if needs_resize {
+            self.create_render_resources(width, height)?;
+        }
+        if let Some(resources) = &mut self.render_resources {
             self.queue.write_texture(
                 wgpu::ImageCopyTexture {
                     texture: &resources.texture,
@@ -443,7 +446,6 @@ impl<'a> WgpuState<'a> {
                 },
             );
         }
-
         Ok(())
     }
 
@@ -566,7 +568,8 @@ impl<'a> FullscreenUpscalerUi<'a> {
         algorithm: Option<UpscalingAlgorithm>,
         capture_target: CaptureTarget,
     ) -> Self {
-        let window = cc.viewport_rect().window();
+        let wgpu_render_state = cc.wgpu_render_state.as_ref().expect("WGPU render state missing");
+        let window = &wgpu_render_state.window;
         let wgpu_state = pollster::block_on(WgpuState::new(window)).ok();
         let egui_wgpu_renderer = if let Some(ref state) = wgpu_state {
             Some(egui_wgpu::Renderer::new(
@@ -701,7 +704,7 @@ impl<'a> FullscreenUpscalerUi<'a> {
     }
 
     fn update_source_window_info(&mut self, ctx: &egui::Context) {
-        let rect = ctx.frame().rect;
+        let rect = ctx.input(|i| i.viewport().inner_rect);
         self.source_window_info = Some((
             rect.left() as i32,
             rect.top() as i32,
