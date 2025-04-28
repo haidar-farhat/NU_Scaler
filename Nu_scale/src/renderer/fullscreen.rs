@@ -6,8 +6,7 @@ use eframe::{self, egui};
 use egui::Vec2;
 use image::RgbaImage;
 use std::time::{Instant, Duration};
-use log::{error, trace};
-use wgpu::Surface;
+use log::{info, warn};
 use egui_wgpu::WgpuConfiguration;
 
 use crate::capture::common::FrameBuffer;
@@ -567,6 +566,10 @@ pub struct FullscreenUpscalerUi<'a> {
     current_buffer_index: AtomicUsize,
     /// Surface for WGPU rendering
     surface: Option<&'a wgpu::Surface<'a>>,
+    /// Window reference
+    window: Option<Arc<winit::window::Window>>,
+    /// egui::TextureId for the WGPU texture
+    egui_texture_id: Option<egui::TextureId>,
 }
 
 impl<'a> FullscreenUpscalerUi<'a> {
@@ -579,17 +582,11 @@ impl<'a> FullscreenUpscalerUi<'a> {
         algorithm: Option<UpscalingAlgorithm>,
         capture_target: CaptureTarget,
     ) -> Result<Self> {
+        let window = cc.native_window.clone();
+        let surface = cc.wgpu_render_state.as_ref().map(|ctx| ctx.surface.clone());
         let mut wgpu_state = None;
-        let mut surface = None;
-        if let Some(ctx) = &cc.wgpu_render_state {
-            if let Some(viewport) = cc.egui_ctx.viewport() {
-                if let Some(window) = viewport.window() {
-                    surface = ctx.surface();
-                    if let Some(surf) = surface {
-                        wgpu_state = Some(WgpuState::new(surf, window).await?);
-                    }
-                }
-            }
+        if let (Some(surf), Some(win)) = (surface, &window) {
+            wgpu_state = Some(WgpuState::new(surf, win).await?);
         }
         
         let mut ui = Self {
@@ -627,6 +624,8 @@ impl<'a> FullscreenUpscalerUi<'a> {
             ],
             current_buffer_index: AtomicUsize::new(0),
             surface,
+            window,
+            egui_texture_id: None,
         };
         
         // Start the processing thread
@@ -655,12 +654,19 @@ impl<'a> FullscreenUpscalerUi<'a> {
     }
     
     /// Update the texture with a new frame
-    fn update_texture(&mut self, frame: &RgbaImage) -> Result<()> {
+    fn update_texture(&mut self, frame: &RgbaImage, egui_wgpu_backend: &mut egui_wgpu::Renderer) -> Result<()> {
         if let Some(wgpu_state) = &mut self.wgpu_state {
-            wgpu_state.update_texture(frame)
-        } else {
-            Ok(())
+            wgpu_state.update_texture(frame)?;
+            if let Some(resources) = &wgpu_state.render_resources {
+                // Register the WGPU texture with egui_wgpu and store the TextureId
+                let texture_id = egui_wgpu_backend.register_native_texture(
+                    &resources.texture_view,
+                    egui_wgpu::TextureOptions::default(),
+                );
+                self.egui_texture_id = Some(texture_id);
+            }
         }
+        Ok(())
     }
     
     /// Render the current frame
@@ -790,7 +796,7 @@ impl eframe::App for FullscreenUpscalerUi<'_> {
         
         // Safe error handling to avoid crashes
         if !skip_processing {
-            match self.update_texture(_ctx) {
+            match self.update_texture(_ctx, _frame.egui_wgpu_backend()) {
                 Ok(_) => {
                     // Measure frame processing time and check if we're lagging
                     let frame_time = update_start.elapsed();
@@ -1214,13 +1220,10 @@ pub fn run_fullscreen_upscaler(
 impl FullscreenUpscalerUi<'_> {
     // Method to render upscaled content in any UI context
     pub fn render_upscaled_content(&self, ui: &mut egui::Ui) -> bool {
-        if let Some(wgpu_state) = &self.wgpu_state {
-            if let Some(resources) = &wgpu_state.render_resources {
-                let image = egui::Image::new(resources.texture_view.id())
-                    .uv(egui::Rect::from_min_max(egui::Pos2::ZERO, egui::Pos2::new(1.0, 1.0)));
-                ui.add(image);
-                return true;
-            }
+        if let Some(texture_id) = self.egui_texture_id {
+            let image = egui::Image::new(texture_id);
+            ui.add(image);
+            return true;
         }
         false
     }
