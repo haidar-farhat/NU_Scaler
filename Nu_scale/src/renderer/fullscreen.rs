@@ -568,8 +568,7 @@ impl<'a> FullscreenUpscalerUi<'a> {
         algorithm: Option<UpscalingAlgorithm>,
         capture_target: CaptureTarget,
     ) -> Self {
-        let wgpu_render_state = cc.wgpu_render_state.as_ref().expect("WGPU render state missing");
-        let window = &wgpu_render_state.window;
+        let window = cc.viewport().window();
         let wgpu_state = pollster::block_on(WgpuState::new(window)).ok();
         let egui_wgpu_renderer = if let Some(ref state) = wgpu_state {
             Some(egui_wgpu::Renderer::new(
@@ -704,13 +703,17 @@ impl<'a> FullscreenUpscalerUi<'a> {
     }
 
     fn update_source_window_info(&mut self, ctx: &egui::Context) {
-        let rect = ctx.input(|i| i.viewport().inner_rect);
-        self.source_window_info = Some((
-            rect.left() as i32,
-            rect.top() as i32,
-            rect.width() as u32,
-            rect.height() as u32,
-        ));
+        if let Some(rect) = ctx.input(|i| i.viewport().inner_rect) {
+            self.source_window_info = Some((
+                rect.left() as i32,
+                rect.top() as i32,
+                rect.width() as u32,
+                rect.height() as u32,
+            ));
+        } else {
+            log::warn!("Could not get viewport rectangle");
+            self.source_window_info = Some((0, 0, 1280, 720));
+        }
     }
 
     fn cleanup(&mut self) {
