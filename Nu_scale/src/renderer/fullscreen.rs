@@ -13,7 +13,8 @@ use std::panic::AssertUnwindSafe;
 use rand;
 use std::sync::Mutex;
 use egui_wgpu::WgpuConfiguration;
-use wgpu::{ShaderModule, BindGroup, BindGroupLayout, Buffer, Texture, TextureView, Sampler};
+use wgpu::{ShaderModule, BindGroup, BindGroupLayout, Buffer, Texture, TextureView, Sampler, Surface};
+use winit::window::Window;
 
 use crate::capture::common::FrameBuffer;
 use crate::upscale::{Upscaler, UpscalingTechnology, UpscalingQuality};
@@ -245,7 +246,9 @@ impl WgpuState {
     async fn new(surface: &wgpu::Surface, window: &winit::window::Window) -> Result<Self> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
+            flags: wgpu::InstanceFlags::default(),
             dx12_shader_compiler: Default::default(),
+            gles_minor_version: wgpu::Gles3MinorVersion::Automatic,
         });
 
         let surface = unsafe { instance.create_surface(window) }?;
@@ -257,9 +260,9 @@ impl WgpuState {
 
         let (device, queue) = adapter.request_device(
             &wgpu::DeviceDescriptor {
-                features: wgpu::Features::empty(),
-                limits: wgpu::Limits::default(),
                 label: None,
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::default(),
             },
             None,
         ).await?;
@@ -278,6 +281,7 @@ impl WgpuState {
             present_mode: wgpu::PresentMode::Fifo,
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
+            desired_maximum_frame_latency: 2,
         };
 
         surface.configure(&device, &config);
@@ -502,7 +506,7 @@ impl WgpuState {
 }
 
 /// Fullscreen upscaler UI
-pub struct FullscreenUpscalerUi {
+pub struct FullscreenUpscalerUi<'a> {
     /// Frame buffer for capturing frames
     frame_buffer: Arc<FrameBuffer>,
     /// Stop signal for capture thread
@@ -562,10 +566,10 @@ pub struct FullscreenUpscalerUi {
     /// Current buffer index
     current_buffer_index: AtomicUsize,
     /// Surface for WGPU rendering
-    surface: Option<wgpu::Surface>,
+    surface: Option<Surface<'a>>,
 }
 
-impl FullscreenUpscalerUi {
+impl<'a> FullscreenUpscalerUi<'a> {
     /// Create a new fullscreen upscaler UI
     async fn new(
         cc: &eframe::CreationContext<'_>,
@@ -673,9 +677,50 @@ impl FullscreenUpscalerUi {
         }
         Ok(())
     }
+
+    fn create_texture(&self, device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture {
+        device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Input Texture"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        })
+    }
+
+    fn update_texture(&self, device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture, frame: &[u8], width: u32, height: u32) {
+        let texture_size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            frame,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+            texture_size,
+        );
+    }
 }
 
-impl eframe::App for FullscreenUpscalerUi {
+impl eframe::App for FullscreenUpscalerUi<'_> {
     fn update(&mut self, _ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Check if upscaler needs to be reinitialized
         if self.requires_reinitialization {
@@ -1127,7 +1172,7 @@ pub fn run_fullscreen_upscaler(
 }
 
 /// Integration method for the main window to use this upscaler
-impl FullscreenUpscalerUi {
+impl FullscreenUpscalerUi<'_> {
     // Method to render upscaled content in any UI context
     pub fn render_upscaled_content(&self, ui: &mut egui::Ui) -> bool {
         let mut texture_updated = false;
