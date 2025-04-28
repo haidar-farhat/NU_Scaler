@@ -232,47 +232,19 @@ struct WgpuState<'a> {
 }
 
 impl<'a> WgpuState<'a> {
-    async fn new(window: &'a Window) -> Result<Self> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all(),
-            flags: wgpu::InstanceFlags::default(),
-            dx12_shader_compiler: Default::default(),
-            gles_minor_version: wgpu::Gles3MinorVersion::Automatic,
-        });
-        let surface = instance.create_surface(window)?;
-        let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: Some(&surface),
-            force_fallback_adapter: false,
-        }).await.ok_or_else(|| anyhow::anyhow!("Failed to find suitable GPU adapter"))?;
-        let (device, queue) = adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                label: None,
-                required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
-            },
-            None,
-        ).await?;
-        let surface_caps = surface.get_capabilities(&adapter);
-        let surface_format = surface_caps.formats.iter().copied().find(|f| f.is_srgb()).unwrap_or(surface_caps.formats[0]);
-        let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: surface_format,
-            width: window.inner_size().width,
-            height: window.inner_size().height,
-            present_mode: wgpu::PresentMode::Fifo,
-            alpha_mode: surface_caps.alpha_modes[0],
-            view_formats: vec![],
-            desired_maximum_frame_latency: 2,
-        };
-        surface.configure(&device, &config);
-        Ok(Self {
+    fn from_render_state(
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        config: wgpu::SurfaceConfiguration,
+        surface: wgpu::Surface<'a>,
+    ) -> Self {
+        Self {
             device,
             queue,
             config,
             render_resources: None,
             surface,
-        })
+        }
     }
 
     /// Create render resources for direct rendering
@@ -568,8 +540,14 @@ impl<'a> FullscreenUpscalerUi<'a> {
         algorithm: Option<UpscalingAlgorithm>,
         capture_target: CaptureTarget,
     ) -> Self {
-        let window = cc.viewport().window();
-        let wgpu_state = pollster::block_on(WgpuState::new(window)).ok();
+        let wgpu_state = cc.wgpu_render_state.as_ref().map(|rs| {
+            WgpuState::from_render_state(
+                rs.device.clone(),
+                rs.queue.clone(),
+                rs.target_config.clone(),
+                rs.surface.clone(),
+            )
+        });
         let egui_wgpu_renderer = if let Some(ref state) = wgpu_state {
             Some(egui_wgpu::Renderer::new(
                 &state.device,
