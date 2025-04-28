@@ -571,8 +571,8 @@ impl<'a> FullscreenUpscalerUi<'a> {
         algorithm: Option<UpscalingAlgorithm>,
         capture_target: CaptureTarget,
     ) -> Self {
-        let window = cc.viewport().window().clone();
-        let wgpu_state = pollster::block_on(WgpuState::new(&window)).ok();
+        let window = cc.native_window();
+        let wgpu_state = pollster::block_on(WgpuState::new(window)).ok();
         let egui_wgpu_renderer = if let Some(ref state) = wgpu_state {
             Some(egui_wgpu::Renderer::new(
                 &state.device,
@@ -618,7 +618,7 @@ impl<'a> FullscreenUpscalerUi<'a> {
             ],
             current_buffer_index: AtomicUsize::new(0),
             surface: None, // Not used directly
-            window: Some(Arc::new(window)),
+            window: None, // Not used directly
             egui_texture_id: None,
             egui_wgpu_renderer,
         }
@@ -706,8 +706,8 @@ impl<'a> FullscreenUpscalerUi<'a> {
     }
 
     fn update_source_window_info(&mut self, ctx: &egui::Context) {
-        if let Some(viewport) = ctx.viewport() {
-            let rect = viewport.rect();
+        if let Some(viewport_id) = ctx.viewport_id() {
+            let rect = ctx.viewport(viewport_id).rect;
             self.source_window_info = Some((
                 rect.left() as i32,
                 rect.top() as i32,
