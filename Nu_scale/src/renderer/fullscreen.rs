@@ -593,10 +593,15 @@ impl<'a> FullscreenUpscalerUi<'a> {
         
         // Create WGPU state if available
         let mut wgpu_state = None;
+        let mut surface = None;
         
         if let Some(ctx) = &cc.wgpu_render_state {
-            let surface = unsafe { ctx.adapter.create_surface(&cc.window) }?;
-            wgpu_state = Some(WgpuState::new(&surface, &cc.window).await?);
+            if let Some(window) = cc.gl.window() {
+                surface = Some(unsafe { ctx.instance.create_surface(window) }?);
+                if let Some(surface) = &surface {
+                    wgpu_state = Some(WgpuState::new(surface, window).await?);
+                }
+            }
         }
         
         let mut ui = Self {
@@ -629,6 +634,7 @@ impl<'a> FullscreenUpscalerUi<'a> {
             wgpu_state,
             triple_buffer,
             current_buffer_index: AtomicUsize::new(0),
+            surface,
         };
         
         // Start the processing thread
@@ -661,17 +667,19 @@ impl<'a> FullscreenUpscalerUi<'a> {
         if let Some(wgpu_state) = &mut self.wgpu_state {
             let (width, height) = frame.dimensions();
             
-            // Check if we need to resize the texture
-            if let Some(resources) = &mut wgpu_state.render_resources {
-                if resources.texture_size != (width, height) {
+            // Fix borrow checker issue
+            let resources = match &mut wgpu_state.render_resources {
+                Some(r) => r,
+                None => {
                     wgpu_state.create_render_resources(width, height)?;
+                    wgpu_state.render_resources.as_mut().unwrap()
                 }
-            }
+            };
 
             // Update texture data
             wgpu_state.queue.write_texture(
                 wgpu::ImageCopyTexture {
-                    texture: &wgpu_state.render_resources.as_ref().unwrap().texture,
+                    texture: &resources.texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d::ZERO,
                     aspect: wgpu::TextureAspect::All,
@@ -718,30 +726,6 @@ impl<'a> FullscreenUpscalerUi<'a> {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         })
-    }
-
-    fn update_texture(&self, device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture, frame: &[u8], width: u32, height: u32) {
-        let texture_size = wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        };
-
-        queue.write_texture(
-            wgpu::ImageCopyTexture {
-                texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            frame,
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(width * 4),
-                rows_per_image: Some(height),
-            },
-            texture_size,
-        );
     }
 
     fn check_and_reinitialize_upscaler(&mut self) {
@@ -1209,28 +1193,29 @@ pub fn run_fullscreen_upscaler(
     
     // Run the fullscreen upscaler
     eframe::run_native(
-        "NU_Scaler Fullscreen", // Title set in ViewportBuilder
+        "NU_Scaler Fullscreen",
         native_options,
         Box::new(move |cc| {
-            // Configure the wgpu renderer if available
-            if let Some(ctx) = &cc.wgpu_render_state {
-                // Additional wgpu configuration can be done here
-                log::info!("Using wgpu renderer with features: {:?}", ctx.adapter.features());
-            }
-            
-            // Create the UI
-            let mut ui = FullscreenUpscalerUi::new(
-                cc,
-                frame_buffer_clone,
-                stop_signal_clone,
-                upscaler,
-                algorithm_copy,
-            ).await.unwrap();
-            
-            // Set the capture target
-            ui.set_capture_target(capture_target_clone);
-            
-            Box::new(ui)
+            Box::new(async move {
+                // Configure the wgpu renderer if available
+                if let Some(ctx) = &cc.wgpu_render_state {
+                    log::info!("Using wgpu renderer with features: {:?}", ctx.adapter.features());
+                }
+                
+                // Create the UI
+                let mut ui = FullscreenUpscalerUi::new(
+                    cc,
+                    frame_buffer_clone,
+                    stop_signal_clone,
+                    upscaler,
+                    algorithm_copy,
+                ).await.unwrap();
+                
+                // Set the capture target
+                ui.set_capture_target(capture_target_clone);
+                
+                ui
+            })
         }),
     ).map_err(|e| e.to_string())
 }
@@ -1240,16 +1225,13 @@ impl FullscreenUpscalerUi<'_> {
     // Method to render upscaled content in any UI context
     pub fn render_upscaled_content(&self, ui: &mut egui::Ui) -> bool {
         let mut texture_updated = false;
-        if let Ok(texture_guard) = self.texture.lock() {
-            if let Some(texture_handle) = &*texture_guard {
-                // Fix 4: Comment out is_allocated check
-                // if texture_handle.is_allocated() {
-                // Correct usage of Image::new with tuple
-                let texture_size = texture_handle.size_vec2();
-                let image_widget = egui::Image::new(texture_handle);
+        if let Some(wgpu_state) = &self.wgpu_state {
+            if let Some(resources) = &wgpu_state.render_resources {
+                let texture_size = resources.texture_size;
+                let image_widget = egui::Image::new(resources.texture_view.clone());
 
                 let available_size = ui.available_size();
-                let aspect_ratio = texture_size.x / texture_size.y;
+                let aspect_ratio = texture_size.0 as f32 / texture_size.1 as f32;
                 let (draw_width, draw_height) = if aspect_ratio > available_size.x / available_size.y {
                     (available_size.x, available_size.x / aspect_ratio)
                 } else {
@@ -1263,14 +1245,7 @@ impl FullscreenUpscalerUi<'_> {
 
                 ui.put(rect, image_widget);
                 texture_updated = true;
-                // } else {
-                //     trace!("Texture not allocated yet");
-                // }
-            } else {
-                trace!("No texture available in mutex guard");
             }
-        } else {
-            error!("Failed to lock texture mutex");
         }
         texture_updated
     }
