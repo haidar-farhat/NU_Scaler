@@ -486,10 +486,12 @@ impl WgpuState {
                         resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                            store: true,
+                            store: wgpu::StoreOp::Store,
                         },
                     })],
                     depth_stencil_attachment: None,
+                    occlusion_query_set: None,
+                    timestamp_writes: None,
                 });
 
                 render_pass.set_pipeline(&resources.render_pipeline);
@@ -591,15 +593,10 @@ impl<'a> FullscreenUpscalerUi<'a> {
         
         // Create WGPU state if available
         let mut wgpu_state = None;
-        let mut surface = None;
         
         if let Some(ctx) = &cc.wgpu_render_state {
-            if let Some(window) = cc.window {
-                surface = Some(unsafe { ctx.instance.create_surface(window) }?);
-                if let Some(surface) = &surface {
-                    wgpu_state = Some(WgpuState::new(surface, window).await?);
-                }
-            }
+            let surface = unsafe { ctx.adapter.create_surface(&cc.window) }?;
+            wgpu_state = Some(WgpuState::new(&surface, &cc.window).await?);
         }
         
         let mut ui = Self {
@@ -632,7 +629,6 @@ impl<'a> FullscreenUpscalerUi<'a> {
             wgpu_state,
             triple_buffer,
             current_buffer_index: AtomicUsize::new(0),
-            surface,
         };
         
         // Start the processing thread
@@ -663,8 +659,37 @@ impl<'a> FullscreenUpscalerUi<'a> {
     /// Update the texture with a new frame
     fn update_texture(&mut self, frame: &RgbaImage) -> Result<()> {
         if let Some(wgpu_state) = &mut self.wgpu_state {
-            wgpu_state.update_texture(frame)?;
+            let (width, height) = frame.dimensions();
+            
+            // Check if we need to resize the texture
+            if let Some(resources) = &mut wgpu_state.render_resources {
+                if resources.texture_size != (width, height) {
+                    wgpu_state.create_render_resources(width, height)?;
+                }
+            }
+
+            // Update texture data
+            wgpu_state.queue.write_texture(
+                wgpu::ImageCopyTexture {
+                    texture: &wgpu_state.render_resources.as_ref().unwrap().texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                frame.as_raw(),
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(width * 4),
+                    rows_per_image: Some(height),
+                },
+                wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+            );
         }
+
         Ok(())
     }
     
@@ -718,6 +743,45 @@ impl<'a> FullscreenUpscalerUi<'a> {
             texture_size,
         );
     }
+
+    fn check_and_reinitialize_upscaler(&mut self) {
+        // Implementation for reinitializing the upscaler
+        if let Some(wgpu_state) = &mut self.wgpu_state {
+            if let Err(e) = wgpu_state.create_render_resources(self.input_size.0, self.input_size.1) {
+                log::error!("Failed to reinitialize upscaler: {}", e);
+            }
+        }
+    }
+
+    fn draw_performance_overlay(&mut self, ui: &mut egui::Ui) {
+        // Implementation for drawing performance metrics
+        ui.vertical(|ui| {
+            ui.label(format!("FPS: {:.1}", self.fps));
+            ui.label(format!("Frame Time: {:.1}ms", self.last_upscale_time));
+            ui.label(format!("Input: {}x{}", self.input_size.0, self.input_size.1));
+            ui.label(format!("Output: {}x{}", self.output_size.0, self.output_size.1));
+        });
+    }
+
+    fn update_source_window_info(&mut self, ctx: &egui::Context) {
+        // Implementation for updating window information
+        if let Some(window) = ctx.window() {
+            self.source_window_info = Some((
+                window.rect.left() as i32,
+                window.rect.top() as i32,
+                window.rect.width() as u32,
+                window.rect.height() as u32,
+            ));
+        }
+    }
+
+    fn cleanup(&mut self) {
+        // Implementation for cleanup
+        if let Some(wgpu_state) = &mut self.wgpu_state {
+            wgpu_state.render_resources = None;
+        }
+        self.upscaler.cleanup();
+    }
 }
 
 impl eframe::App for FullscreenUpscalerUi<'_> {
@@ -725,7 +789,7 @@ impl eframe::App for FullscreenUpscalerUi<'_> {
         // Check if upscaler needs to be reinitialized
         if self.requires_reinitialization {
             // Clean up existing resources
-            self.cleanup_textures();
+            self.cleanup();
             // Reinitialize the upscaler
             self.check_and_reinitialize_upscaler();
         }
@@ -829,7 +893,7 @@ impl eframe::App for FullscreenUpscalerUi<'_> {
                     self.performance_metrics.error_count += 1;
                     if self.performance_metrics.error_count > 5 {
                         log::warn!("Multiple texture update errors, triggering recovery");
-                        self.cleanup_textures();
+                        self.cleanup();
                         self.requires_reinitialization = true;
                         self.performance_metrics.error_count = 0;
                     }
