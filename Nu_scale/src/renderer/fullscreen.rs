@@ -1194,6 +1194,9 @@ pub fn run_fullscreen_upscaler(
     // Store any algorithm for the closure
     let algorithm_copy = algorithm.clone();
     
+    // Clone capture_target_clone for use inside closure
+    let capture_target_clone2 = capture_target_clone.clone();
+    
     // Run the fullscreen upscaler
     eframe::run_native(
         "NU_Scaler Fullscreen",
@@ -1205,7 +1208,7 @@ pub fn run_fullscreen_upscaler(
                 stop_signal_clone,
                 upscaler,
                 algorithm_copy,
-                capture_target_clone,
+                capture_target_clone2,
             );
             ui.set_capture_target(capture_target_clone);
             Box::new(ui)
