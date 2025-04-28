@@ -223,40 +223,33 @@ impl PerformanceMetrics {
 }
 
 /// State for WGPU rendering
-struct WgpuState<'a> {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    config: wgpu::SurfaceConfiguration,
+struct WgpuState {
+    device: Arc<wgpu::Device>,
+    queue: Arc<wgpu::Queue>,
+    format: wgpu::TextureFormat,
     render_resources: Option<WgpuRenderResources>,
-    surface: wgpu::Surface<'a>,
 }
 
-impl<'a> WgpuState<'a> {
+impl WgpuState {
     fn from_render_state(
-        device: wgpu::Device,
-        queue: wgpu::Queue,
-        config: wgpu::SurfaceConfiguration,
-        surface: wgpu::Surface<'a>,
+        device: Arc<wgpu::Device>,
+        queue: Arc<wgpu::Queue>,
+        format: wgpu::TextureFormat,
     ) -> Self {
         Self {
             device,
             queue,
-            config,
+            format,
             render_resources: None,
-            surface,
         }
     }
 
-    /// Create render resources for direct rendering
     fn create_render_resources(&mut self, width: u32, height: u32) -> Result<()> {
         if self.render_resources.is_none() {
-            // Create shader module
             let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Fullscreen Shader"),
                 source: wgpu::ShaderSource::Wgsl(FULLSCREEN_SHADER.into()),
             });
-
-            // Create texture
             let texture = self.device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("Upscaled Frame Texture"),
                 size: wgpu::Extent3d {
@@ -271,7 +264,6 @@ impl<'a> WgpuState<'a> {
                 usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                 view_formats: &[],
             });
-
             let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
             let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
                 label: Some("Frame Sampler"),
@@ -283,7 +275,6 @@ impl<'a> WgpuState<'a> {
                 mipmap_filter: wgpu::FilterMode::Linear,
                 ..Default::default()
             });
-
             let bind_group_layout = self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("Frame Bind Group Layout"),
                 entries: &[
@@ -305,7 +296,6 @@ impl<'a> WgpuState<'a> {
                     },
                 ],
             });
-
             let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Frame Bind Group"),
                 layout: &bind_group_layout,
@@ -320,13 +310,11 @@ impl<'a> WgpuState<'a> {
                     },
                 ],
             });
-
             let render_pipeline_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Fullscreen Pipeline Layout"),
                 bind_group_layouts: &[&bind_group_layout],
                 push_constant_ranges: &[],
             });
-
             let render_pipeline = self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("Fullscreen Pipeline"),
                 layout: Some(&render_pipeline_layout),
@@ -339,7 +327,7 @@ impl<'a> WgpuState<'a> {
                     module: &shader,
                     entry_point: "fs_main",
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: self.config.format,
+                        format: self.format,
                         blend: Some(wgpu::BlendState::REPLACE),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
@@ -361,14 +349,12 @@ impl<'a> WgpuState<'a> {
                 },
                 multiview: None,
             });
-
             let vertex_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Vertex Buffer"),
                 size: 0,
                 usage: wgpu::BufferUsages::VERTEX,
                 mapped_at_creation: false,
             });
-
             let new_resources = WgpuRenderResources {
                 render_pipeline,
                 bind_group,
@@ -384,7 +370,6 @@ impl<'a> WgpuState<'a> {
         Ok(())
     }
 
-    /// Update texture with new frame data
     fn update_texture(&mut self, frame: &RgbaImage) -> Result<()> {
         let (width, height) = frame.dimensions();
         let needs_resize = {
@@ -418,44 +403,6 @@ impl<'a> WgpuState<'a> {
                 },
             );
         }
-        Ok(())
-    }
-
-    /// Render the current frame
-    fn render(&mut self, surface: &wgpu::Surface) -> Result<()> {
-        if let Some(resources) = &self.render_resources {
-            let frame = surface.get_current_texture()?;
-            let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-            let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Render Encoder"),
-            });
-
-            {
-                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("Render Pass"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
-                    depth_stencil_attachment: None,
-                    occlusion_query_set: None,
-                    timestamp_writes: None,
-                });
-
-                render_pass.set_pipeline(&resources.render_pipeline);
-                render_pass.set_bind_group(0, &resources.bind_group, &[]);
-                render_pass.draw(0..3, 0..1);
-            }
-
-            self.queue.submit(std::iter::once(encoder.finish()));
-            frame.present();
-        }
-
         Ok(())
     }
 }
@@ -515,7 +462,7 @@ pub struct FullscreenUpscalerUi<'a> {
     /// Pending frame to be processed
     pending_frame: Option<RgbaImage>,
     /// WGPU state for rendering
-    wgpu_state: Option<WgpuState<'a>>,
+    wgpu_state: Option<WgpuState>,
     /// Triple buffer for frame data
     triple_buffer: [Arc<Mutex<Option<RgbaImage>>>; 3],
     /// Current buffer index
@@ -544,14 +491,13 @@ impl<'a> FullscreenUpscalerUi<'a> {
             WgpuState::from_render_state(
                 rs.device.clone(),
                 rs.queue.clone(),
-                rs.target_config.clone(),
-                rs.surface.clone(),
+                rs.target_format,
             )
         });
         let egui_wgpu_renderer = if let Some(ref state) = wgpu_state {
             Some(egui_wgpu::Renderer::new(
                 &state.device,
-                state.config.format,
+                state.format,
                 None,
                 1,
             ))
@@ -638,7 +584,7 @@ impl<'a> FullscreenUpscalerUi<'a> {
     fn render(&mut self) -> Result<()> {
         if let Some(wgpu_state) = &mut self.wgpu_state {
             if let Some(surface) = &self.surface {
-                wgpu_state.render(surface)?;
+                wgpu_state.update_texture(self.read_frame()?)?;
             }
         }
         Ok(())
