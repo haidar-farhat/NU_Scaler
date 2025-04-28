@@ -856,7 +856,8 @@ impl<'a> eframe::App for FullscreenUpscalerUi<'a> {
                         self.frames_processed += 1;
                         
                         // Update input/output size for display
-                        if let Ok(texture_guard) = self.texture.lock() {
+                        let index = self.current_buffer_index.load(Ordering::Acquire);
+                        if let Ok(texture_guard) = self.triple_buffer[index].lock() {
                             if let Some(texture) = texture_guard.as_ref() {
                                 let size = texture.size();
                                 self.output_size = (size[0] as u32, size[1] as u32);
@@ -916,7 +917,7 @@ impl<'a> eframe::App for FullscreenUpscalerUi<'a> {
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(egui::Color32::from_rgb(10, 10, 10)))
             .show(ctx, |ui| {
-                let texture_available = if let Ok(texture_guard) = self.texture.lock() {
+                let texture_available = if let Ok(texture_guard) = self.triple_buffer[self.current_buffer_index.load(Ordering::Acquire)].lock() {
                     texture_guard.is_some()
                 } else {
                     false
@@ -924,7 +925,7 @@ impl<'a> eframe::App for FullscreenUpscalerUi<'a> {
                 
                 if texture_available {
                     // Get the texture under lock
-                    if let Ok(texture_guard) = self.texture.lock() {
+                    if let Ok(texture_guard) = self.triple_buffer[self.current_buffer_index.load(Ordering::Acquire)].lock() {
                         if let Some(texture) = texture_guard.as_ref() {
                             // Get available size
                             let available_size = ui.available_size();
