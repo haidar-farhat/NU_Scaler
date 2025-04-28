@@ -754,10 +754,9 @@ impl<'a> FullscreenUpscalerUi<'a> {
 
     pub fn render_upscaled_content(&self, ui: &mut egui::Ui) -> bool {
         if let Some(texture_id) = self.egui_texture_id {
-            ui.image(egui::Image::new(egui::ImageSource::Texture {
-                id: texture_id,
-                size: Some(ui.available_size()),
-            }));
+            ui.image(egui::Image::new(egui::ImageSource::Texture(
+                egui::SizedTexture::new(texture_id, ui.available_size())
+            )));
             true
         } else {
             false
