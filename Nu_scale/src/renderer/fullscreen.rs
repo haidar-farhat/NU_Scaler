@@ -645,8 +645,10 @@ impl FullscreenUpscalerUi {
     /// Update the texture with a new frame
     fn update_texture(&mut self, frame: &RgbaImage) -> Result<()> {
         if let Some(wgpu_state) = &mut self.wgpu_state {
+            // Update the WGPU texture with the new frame
             wgpu_state.update_texture(frame)?;
             if let Some(resources) = &wgpu_state.render_resources {
+                // Register the WGPU texture with egui_wgpu and store the TextureId
                 let texture_id = self.egui_wgpu_renderer.register_native_texture(
                     &wgpu_state.device,
                     &resources.texture_view,
@@ -750,10 +752,20 @@ impl FullscreenUpscalerUi {
             wgpu_state.render_resources = None;
         }
     }
+
+    pub fn render_upscaled_content(&self, ui: &mut egui::Ui) -> bool {
+        if let Some(texture_id) = self.egui_texture_id {
+            let size = ui.available_size();
+            ui.image(texture_id, size);
+            true
+        } else {
+            false
+        }
+    }
 }
 
 impl eframe::App for FullscreenUpscalerUi {
-    fn update(&mut self, _ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Check if upscaler needs to be reinitialized
         if self.requires_reinitialization {
             // Clean up existing resources
