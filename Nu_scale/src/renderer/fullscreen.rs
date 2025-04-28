@@ -505,6 +505,8 @@ impl<'a> FullscreenUpscalerUi<'a> {
         } else {
             None
         };
+        let upscaler_name = upscaler.name().to_string();
+        let upscaler_quality = upscaler.quality();
         Self {
             frame_buffer: frame_buffer.clone(),
             stop_signal: stop_signal.clone(),
@@ -514,8 +516,8 @@ impl<'a> FullscreenUpscalerUi<'a> {
             last_frame_time: std::time::Instant::now(),
             fps: 0.0,
             frames_processed: 0,
-            upscaler_name: upscaler.name().to_string(),
-            upscaler_quality: upscaler.quality(),
+            upscaler_name,
+            upscaler_quality,
             show_overlay: true,
             fps_history: Vec::with_capacity(120),
             upscale_time_history: Vec::with_capacity(120),
