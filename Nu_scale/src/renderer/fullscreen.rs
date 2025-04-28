@@ -9,6 +9,7 @@ use std::time::{Instant, Duration};
 use log;
 use egui_wgpu::WgpuConfiguration;
 use winit::window::Window;
+use egui::load::SizedTexture;
 
 use crate::capture::common::FrameBuffer;
 use crate::upscale::{Upscaler, UpscalingTechnology, UpscalingQuality};
