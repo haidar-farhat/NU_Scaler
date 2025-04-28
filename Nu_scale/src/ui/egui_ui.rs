@@ -17,28 +17,28 @@ use std::{
 
 // Import from local crate instead of external threadpool
 // Create a small internal thread pool implementation
+use crossbeam_channel::{unbounded, Sender, Receiver};
+
 struct ThreadPool {
     workers: Vec<thread::JoinHandle<()>>,
-    sender: std::sync::mpsc::Sender<Box<dyn FnOnce() + Send + 'static>>,
+    sender: Sender<Box<dyn FnOnce() + Send + 'static>>,
 }
 
 impl ThreadPool {
     pub fn new(size: usize) -> Self {
-        let (sender, receiver) = std::sync::mpsc::channel::<Box<dyn FnOnce() + Send + 'static>>();
-        let receiver = Arc::new(Mutex::new(receiver));
+        let (sender, receiver): (Sender<Box<dyn FnOnce() + Send + 'static>>, Receiver<Box<dyn FnOnce() + Send + 'static>>) = unbounded();
+        let receiver = Arc::new(receiver);
 
         let mut workers = Vec::with_capacity(size);
-
         for _ in 0..size {
-            let receiver = Arc::clone(&receiver);
+            let rx = Arc::clone(&receiver);
             let thread = thread::spawn(move || {
-                while let Ok(job) = receiver.lock().unwrap().recv() {
+                while let Ok(job) = rx.recv() {
                     job();
                 }
             });
             workers.push(thread);
         }
-
         ThreadPool { workers, sender }
     }
 
