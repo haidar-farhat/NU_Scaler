@@ -3,8 +3,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use anyhow::Result;
-use wgpu::{ShaderModule, BindGroup, BindGroupLayout, Buffer, Texture, TextureView, Sampler};
+use wgpu::{ShaderModule, BindGroup, BindGroupLayout, Buffer, Texture, TextureView, Sampler, Adapter, Backends, Device, DeviceDescriptor, Features, Instance, Limits, PresentMode, Queue, RequestAdapterOptions, Surface, SurfaceConfiguration, TextureFormat, TextureUsages};
 use image::RgbaImage;
+use winit::window::Window;
 
 const STATS_WINDOW_SIZE: usize = 120;
 
@@ -122,69 +123,89 @@ impl TripleBuffer {
 
 /// WGPU renderer implementation
 pub struct WgpuRenderer {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    surface: wgpu::Surface,
-    config: wgpu::SurfaceConfiguration,
+    instance: Instance,
+    surface: Surface,
+    adapter: Adapter,
+    device: Device,
+    queue: Queue,
+    config: SurfaceConfiguration,
+    size: winit::dpi::PhysicalSize<u32>,
     render_resources: Option<WgpuRenderResources>,
     stats: RenderStats,
     vsync: bool,
 }
 
 impl WgpuRenderer {
-    pub async fn new(window: &winit::window::Window, vsync: bool) -> Result<Self> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all(),
-            dx12_shader_compiler: Default::default(),
+    pub async fn new(window: &Window) -> Result<Self, Box<dyn std::error::Error>> {
+        let size = window.inner_size();
+        let instance = Instance::new(InstanceDescriptor {
+            backends: Backends::all(),
+            ..Default::default()
         });
 
         let surface = unsafe { instance.create_surface(window) }?;
-        let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: Some(&surface),
-            force_fallback_adapter: false,
-        }).await.ok_or_else(|| anyhow::anyhow!("Failed to find suitable GPU adapter"))?;
+        let adapter = instance
+            .request_adapter(&RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::default(),
+                compatible_surface: Some(&surface),
+                force_fallback_adapter: false,
+            })
+            .await
+            .ok_or("Failed to find an appropriate adapter")?;
 
-        let (device, queue) = adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                features: wgpu::Features::empty(),
-                limits: wgpu::Limits::default(),
-                label: None,
-            },
-            None,
-        ).await?;
+        let (device, queue) = adapter
+            .request_device(
+                &DeviceDescriptor {
+                    label: None,
+                    features: Features::empty(),
+                    limits: Limits::default(),
+                },
+                None,
+            )
+            .await?;
 
         let surface_caps = surface.get_capabilities(&adapter);
-        let surface_format = surface_caps.formats.iter()
+        let surface_format = surface_caps
+            .formats
+            .iter()
             .copied()
             .find(|f| f.is_srgb())
             .unwrap_or(surface_caps.formats[0]);
 
-        let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        let config = SurfaceConfiguration {
+            usage: TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
-            width: window.inner_size().width,
-            height: window.inner_size().height,
-            present_mode: if vsync {
-                wgpu::PresentMode::Fifo
-            } else {
-                wgpu::PresentMode::Immediate
-            },
+            width: size.width,
+            height: size.height,
+            present_mode: PresentMode::Fifo,
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
+            desired_maximum_frame_latency: 2,
         };
 
         surface.configure(&device, &config);
 
         Ok(Self {
+            instance,
+            surface,
+            adapter,
             device,
             queue,
-            surface,
             config,
+            size,
             render_resources: None,
             stats: RenderStats::new(),
-            vsync,
+            vsync: true,
         })
+    }
+
+    pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
+        if new_size.width > 0 && new_size.height > 0 {
+            self.size = new_size;
+            self.config.width = new_size.width;
+            self.config.height = new_size.height;
+            self.surface.configure(&self.device, &self.config);
+        }
     }
 
     pub fn create_render_resources(&mut self, width: u32, height: u32) -> Result<()> {
@@ -359,40 +380,40 @@ impl WgpuRenderer {
         Ok(())
     }
 
-    pub fn render(&mut self) -> Result<()> {
-        if let Some(resources) = &self.render_resources {
-            let frame = self.surface.get_current_texture()?;
-            let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+    pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+        let output = self.surface.get_current_texture()?;
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
 
-            let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Render Encoder"),
             });
 
-            {
-                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("Render Pass"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                            store: true,
-                        },
-                    })],
-                    depth_stencil_attachment: None,
-                });
-
-                render_pass.set_pipeline(&resources.render_pipeline);
-                render_pass.set_bind_group(0, &resources.bind_group, &[]);
-                render_pass.draw(0..3, 0..1);
-            }
-
-            self.queue.submit(std::iter::once(encoder.finish()));
-            frame.present();
-
-            // Update performance stats
-            self.stats.add_frame();
+        {
+            let _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+            });
         }
+
+        self.queue.submit(std::iter::once(encoder.finish()));
+        output.present();
+
+        // Update performance stats
+        self.stats.add_frame();
 
         Ok(())
     }
