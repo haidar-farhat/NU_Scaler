@@ -1,14 +1,14 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use anyhow::Result;
 use image::RgbaImage;
 use winit::window::Window;
-use crate::renderer::wgpu_renderer::{WgpuRenderer, TripleBuffer};
+use crate::renderer::wgpu_renderer::{WgpuRenderer, TripleBuffer, RenderStats};
 use eframe::{self, egui};
-use egui::{Vec2, ColorImage, TextureOptions};
+use egui::{Vec2, ColorImage, TextureOptions, Context};
 
 use crate::capture::common::FrameBuffer;
 use crate::upscale::Upscaler;
@@ -20,33 +20,31 @@ pub struct FullscreenUpscalerUi {
     window: Arc<Window>,
     wgpu_renderer: Option<WgpuRenderer>,
     triple_buffer: TripleBuffer,
-    stop_signal: Arc<Mutex<bool>>,
-    upscaler: Arc<Mutex<Option<Box<dyn crate::upscaler::Upscaler>>>>,
-    algorithm: Arc<Mutex<String>>,
-    performance_metrics: Arc<Mutex<PerformanceMetrics>>,
-}
-
-#[derive(Default)]
-struct PerformanceMetrics {
-    frame_count: u64,
-    total_frame_time: Duration,
-    min_frame_time: Duration,
-    max_frame_time: Duration,
-    last_frame_time: Instant,
+    stop_signal: Arc<AtomicBool>,
+    upscaler: Arc<Mutex<Option<Box<dyn Upscaler>>>>,
+    algorithm: Arc<Mutex<Option<UpscalingAlgorithm>>>,
+    show_stats: bool,
+    vsync: bool,
 }
 
 impl FullscreenUpscalerUi {
-    pub async fn new(window: Arc<Window>) -> Result<Self> {
-        let wgpu_renderer = WgpuRenderer::new(&window).await?;
+    pub async fn new(
+        window: Arc<Window>,
+        upscaler: Box<dyn Upscaler>,
+        algorithm: Option<UpscalingAlgorithm>,
+        vsync: bool,
+    ) -> Result<Self> {
+        let wgpu_renderer = WgpuRenderer::new(&window, vsync).await?;
         
         Ok(Self {
             window,
             wgpu_renderer: Some(wgpu_renderer),
             triple_buffer: TripleBuffer::new(),
-            stop_signal: Arc::new(Mutex::new(false)),
-            upscaler: Arc::new(Mutex::new(None)),
-            algorithm: Arc::new(Mutex::new("default".to_string())),
-            performance_metrics: Arc::new(Mutex::new(PerformanceMetrics::default())),
+            stop_signal: Arc::new(AtomicBool::new(false)),
+            upscaler: Arc::new(Mutex::new(Some(upscaler))),
+            algorithm: Arc::new(Mutex::new(algorithm)),
+            show_stats: true,
+            vsync,
         })
     }
 
@@ -57,7 +55,18 @@ impl FullscreenUpscalerUi {
     pub fn update(&mut self) -> Result<()> {
         if let Some(frame) = self.triple_buffer.read() {
             if let Some(renderer) = &mut self.wgpu_renderer {
-                renderer.update_texture(&frame)?;
+                // Upscale the frame if we have an upscaler
+                let upscaled = if let Ok(Some(upscaler)) = self.upscaler.lock() {
+                    if let Ok(Some(algorithm)) = self.algorithm.lock() {
+                        upscaler.upscale(&frame, Some(algorithm.clone())).unwrap_or(frame)
+                    } else {
+                        upscaler.upscale(&frame, None).unwrap_or(frame)
+                    }
+                } else {
+                    frame
+                };
+
+                renderer.update_texture(&upscaled)?;
                 renderer.render()?;
             }
         }
@@ -65,30 +74,102 @@ impl FullscreenUpscalerUi {
         Ok(())
     }
 
-    pub fn set_upscaler(&self, upscaler: Box<dyn crate::upscaler::Upscaler>) {
+    pub fn set_upscaler(&self, upscaler: Box<dyn Upscaler>) {
         if let Ok(mut current) = self.upscaler.lock() {
             *current = Some(upscaler);
         }
     }
 
-    pub fn set_algorithm(&self, algorithm: String) {
+    pub fn set_algorithm(&self, algorithm: Option<UpscalingAlgorithm>) {
         if let Ok(mut current) = self.algorithm.lock() {
             *current = algorithm;
         }
     }
 
     pub fn stop(&self) {
-        if let Ok(mut signal) = self.stop_signal.lock() {
-            *signal = true;
-        }
+        self.stop_signal.store(true, Ordering::Relaxed);
     }
 
     pub fn is_stopped(&self) -> bool {
-        if let Ok(signal) = self.stop_signal.lock() {
-            *signal
-        } else {
-            true
+        self.stop_signal.load(Ordering::Relaxed)
+    }
+
+    pub fn toggle_stats(&mut self) {
+        self.show_stats = !self.show_stats;
+    }
+
+    pub fn toggle_vsync(&mut self) {
+        self.vsync = !self.vsync;
+        if let Some(renderer) = &mut self.wgpu_renderer {
+            renderer.set_vsync(self.vsync);
         }
+    }
+
+    fn render_stats_overlay(&self, ctx: &Context) {
+        if !self.show_stats { return; }
+
+        if let Some(renderer) = &self.wgpu_renderer {
+            let stats = renderer.stats();
+            
+            egui::Window::new("Performance")
+                .title_bar(false)
+                .resizable(false)
+                .anchor(egui::Align2::RIGHT_TOP, [-10.0, 10.0])
+                .show(ctx, |ui| {
+                    ui.label(format!("FPS: {:.1}", stats.average_fps()));
+                    ui.label(format!("Frame Time: {:.2}ms", stats.average_frame_time()));
+                    
+                    if let Some(resources) = &renderer.render_resources {
+                        ui.label(format!("Resolution: {}x{}", 
+                            resources.texture_size.0,
+                            resources.texture_size.1
+                        ));
+                    }
+                    
+                    egui::CollapsingHeader::new("Advanced")
+                        .show(ui, |ui| {
+                            ui.label(format!("Total Frames: {}", stats.total_frames()));
+                            ui.label(format!("VSync: {}", self.vsync));
+                        });
+                });
+        }
+    }
+}
+
+impl eframe::App for FullscreenUpscalerUi {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // Handle exit
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.stop();
+            frame.close();
+        }
+
+        // Toggle stats overlay
+        if ctx.input(|i| i.key_pressed(egui::Key::F1)) {
+            self.toggle_stats();
+        }
+
+        // Toggle vsync
+        if ctx.input(|i| i.key_pressed(egui::Key::F2)) {
+            self.toggle_vsync();
+        }
+
+        // Process frame
+        if let Err(e) = self.update() {
+            log::error!("Error updating frame: {}", e);
+        }
+
+        // Render stats overlay
+        self.render_stats_overlay(ctx);
+
+        // Request repaint based on vsync setting
+        ctx.request_repaint_after(Duration::from_secs_f32(
+            if self.vsync { 1.0 / 60.0 } else { 0.0 }
+        ));
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.stop();
     }
 }
 
