@@ -8,13 +8,13 @@ use image::RgbaImage;
 use std::time::{Instant, Duration};
 use log::{error, trace};
 use wgpu::Surface;
+use egui_wgpu::WgpuConfiguration;
 
 use crate::capture::common::FrameBuffer;
 use crate::upscale::{Upscaler, UpscalingTechnology, UpscalingQuality};
 use crate::upscale::common::UpscalingAlgorithm;
 use crate::capture::CaptureTarget;
 use crate::capture::ScreenCapture;
-use crate::capture::frame_buffer_ext::ArcFrameBufferExt;
 
 // Constants for texture size limits
 const MAX_TEXTURE_SIZE: u32 = 16384; // Maximum dimension for a texture (width or height)
@@ -223,7 +223,7 @@ impl PerformanceMetrics {
 }
 
 /// State for WGPU rendering
-struct WgpuState {
+struct WgpuState<'a> {
     /// WGPU device
     device: wgpu::Device,
     /// WGPU queue
@@ -232,11 +232,13 @@ struct WgpuState {
     config: wgpu::SurfaceConfiguration,
     /// Render resources for direct rendering
     render_resources: Option<WgpuRenderResources>,
+    /// Surface for WGPU rendering
+    surface: &'a wgpu::Surface<'a>,
 }
 
-impl WgpuState {
+impl<'a> WgpuState<'a> {
     /// Create a new WGPU state with render resources
-    async fn new(surface: &wgpu::Surface, window: &winit::window::Window) -> Result<Self> {
+    async fn new(surface: &'a wgpu::Surface<'a>, window: &winit::window::Window) -> Result<Self> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
             flags: wgpu::InstanceFlags::default(),
@@ -244,10 +246,9 @@ impl WgpuState {
             gles_minor_version: wgpu::Gles3MinorVersion::Automatic,
         });
 
-        let surface = unsafe { instance.create_surface(window) }?;
         let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: Some(&surface),
+            compatible_surface: Some(surface),
             force_fallback_adapter: false,
         }).await.ok_or_else(|| anyhow::anyhow!("Failed to find suitable GPU adapter"))?;
 
@@ -284,145 +285,149 @@ impl WgpuState {
             queue,
             config,
             render_resources: None,
+            surface,
         })
     }
 
     /// Create render resources for direct rendering
     fn create_render_resources(&mut self, width: u32, height: u32) -> Result<()> {
-        // Create shader module
-        let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Fullscreen Shader"),
-            source: wgpu::ShaderSource::Wgsl(FULLSCREEN_SHADER.into()),
-        });
+        if self.render_resources.is_none() ||
+            self.render_resources.as_ref().unwrap().texture_size != (width, height) {
+            // Create shader module
+            let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("Fullscreen Shader"),
+                source: wgpu::ShaderSource::Wgsl(FULLSCREEN_SHADER.into()),
+            });
 
-        // Create texture
-        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Upscaled Frame Texture"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+            // Create texture
+            let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("Upscaled Frame Texture"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
 
-        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("Frame Sampler"),
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Linear,
-            ..Default::default()
-        });
+            let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("Frame Sampler"),
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::FilterMode::Linear,
+                ..Default::default()
+            });
 
-        // Create bind group layout
-        let bind_group_layout = self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Frame Bind Group Layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        multisampled: false,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+            // Create bind group layout
+            let bind_group_layout = self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Frame Bind Group Layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
                     },
-                    count: None,
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+
+            // Create bind group
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Frame Bind Group"),
+                layout: &bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&texture_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&sampler),
+                    },
+                ],
+            });
+
+            // Create render pipeline
+            let render_pipeline_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Fullscreen Pipeline Layout"),
+                bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+            let render_pipeline = self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Fullscreen Pipeline"),
+                layout: Some(&render_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: "vs_main",
+                    buffers: &[],
                 },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: self.config.format,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: Some(wgpu::Face::Back),
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
                 },
-            ],
-        });
-
-        // Create bind group
-        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Frame Bind Group"),
-            layout: &bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&texture_view),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
                 },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
-                },
-            ],
-        });
+                multiview: None,
+            });
 
-        // Create render pipeline
-        let render_pipeline_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Fullscreen Pipeline Layout"),
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
-        });
+            // Create vertex buffer (empty since we use vertex shader to generate vertices)
+            let vertex_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Vertex Buffer"),
+                size: 0,
+                usage: wgpu::BufferUsages::VERTEX,
+                mapped_at_creation: false,
+            });
 
-        let render_pipeline = self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Fullscreen Pipeline"),
-            layout: Some(&render_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_main",
-                buffers: &[],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: self.config.format,
-                    blend: Some(wgpu::BlendState::REPLACE),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview: None,
-        });
-
-        // Create vertex buffer (empty since we use vertex shader to generate vertices)
-        let vertex_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Vertex Buffer"),
-            size: 0,
-            usage: wgpu::BufferUsages::VERTEX,
-            mapped_at_creation: false,
-        });
-
-        self.render_resources = Some(WgpuRenderResources {
-            render_pipeline,
-            bind_group,
-            bind_group_layout,
-            vertex_buffer,
-            texture,
-            texture_view,
-            sampler,
-            texture_size: (width, height),
-        });
-
+            let new_resources = WgpuRenderResources {
+                render_pipeline,
+                bind_group,
+                bind_group_layout,
+                vertex_buffer,
+                texture,
+                texture_view,
+                sampler,
+                texture_size: (width, height),
+            };
+            self.render_resources = Some(new_resources);
+        }
         Ok(())
     }
 
@@ -555,13 +560,13 @@ pub struct FullscreenUpscalerUi<'a> {
     /// Pending frame to be processed
     pending_frame: Option<RgbaImage>,
     /// WGPU state for rendering
-    wgpu_state: Option<WgpuState>,
+    wgpu_state: Option<WgpuState<'a>>,
     /// Triple buffer for frame data
     triple_buffer: [Arc<Mutex<Option<RgbaImage>>>; 3],
     /// Current buffer index
     current_buffer_index: AtomicUsize,
     /// Surface for WGPU rendering
-    surface: Option<Surface<'a>>,
+    surface: Option<&'a wgpu::Surface<'a>>,
 }
 
 impl<'a> FullscreenUpscalerUi<'a> {
@@ -572,27 +577,17 @@ impl<'a> FullscreenUpscalerUi<'a> {
         stop_signal: Arc<AtomicBool>,
         upscaler: Box<dyn Upscaler + Send + Sync>,
         algorithm: Option<UpscalingAlgorithm>,
+        capture_target: CaptureTarget,
     ) -> Result<Self> {
-        // Get upscaler information
-        let upscaler_name = upscaler.name().to_string();
-        let upscaler_quality = upscaler.quality();
-        
-        // Initialize triple buffer
-        let triple_buffer = [
-            Arc::new(Mutex::new(None)),
-            Arc::new(Mutex::new(None)),
-            Arc::new(Mutex::new(None)),
-        ];
-        
-        // Create WGPU state if available
         let mut wgpu_state = None;
         let mut surface = None;
-        
         if let Some(ctx) = &cc.wgpu_render_state {
-            if let Some(window) = cc.gl.window() {
-                surface = Some(unsafe { ctx.instance.create_surface(window) }?);
-                if let Some(surface) = &surface {
-                    wgpu_state = Some(WgpuState::new(surface, window).await?);
+            if let Some(viewport) = cc.egui_ctx.viewport() {
+                if let Some(window) = viewport.window() {
+                    surface = ctx.surface();
+                    if let Some(surf) = surface {
+                        wgpu_state = Some(WgpuState::new(surf, window).await?);
+                    }
                 }
             }
         }
@@ -606,8 +601,8 @@ impl<'a> FullscreenUpscalerUi<'a> {
             last_frame_time: std::time::Instant::now(),
             fps: 0.0,
             frames_processed: 0,
-            upscaler_name,
-            upscaler_quality,
+            upscaler_name: upscaler.name().to_string(),
+            upscaler_quality: upscaler.quality(),
             show_overlay: true,
             fps_history: Vec::with_capacity(120),
             upscale_time_history: Vec::with_capacity(120),
@@ -615,7 +610,7 @@ impl<'a> FullscreenUpscalerUi<'a> {
             input_size: (0, 0),
             output_size: (0, 0),
             source_window_info: None,
-            capture_target: None,
+            capture_target: Some(capture_target),
             performance_metrics: PerformanceMetrics::new(),
             last_update_time: None,
             memory_pressure_counter: None,
@@ -625,7 +620,11 @@ impl<'a> FullscreenUpscalerUi<'a> {
             frame_time_budget: 16.0, // ~60 FPS
             pending_frame: None,
             wgpu_state,
-            triple_buffer,
+            triple_buffer: [
+                Arc::new(Mutex::new(None)),
+                Arc::new(Mutex::new(None)),
+                Arc::new(Mutex::new(None)),
+            ],
             current_buffer_index: AtomicUsize::new(0),
             surface,
         };
@@ -658,40 +657,10 @@ impl<'a> FullscreenUpscalerUi<'a> {
     /// Update the texture with a new frame
     fn update_texture(&mut self, frame: &RgbaImage) -> Result<()> {
         if let Some(wgpu_state) = &mut self.wgpu_state {
-            let (width, height) = frame.dimensions();
-            
-            // Fix borrow checker issue
-            let resources = match &mut wgpu_state.render_resources {
-                Some(r) => r,
-                None => {
-                    wgpu_state.create_render_resources(width, height)?;
-                    wgpu_state.render_resources.as_mut().unwrap()
-                }
-            };
-
-            // Update texture data
-            wgpu_state.queue.write_texture(
-                wgpu::ImageCopyTexture {
-                    texture: &resources.texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                frame.as_raw(),
-                wgpu::ImageDataLayout {
-                    offset: 0,
-                    bytes_per_row: Some(width * 4),
-                    rows_per_image: Some(height),
-                },
-                wgpu::Extent3d {
-                    width,
-                    height,
-                    depth_or_array_layers: 1,
-                },
-            );
+            wgpu_state.update_texture(frame)
+        } else {
+            Ok(())
         }
-
-        Ok(())
     }
     
     /// Render the current frame
@@ -758,6 +727,33 @@ impl<'a> FullscreenUpscalerUi<'a> {
             wgpu_state.render_resources = None;
         }
         self.upscaler.cleanup();
+    }
+
+    fn start_processing_thread(&mut self) {
+        let frame_buffer = self.frame_buffer.clone();
+        let stop_signal = self.stop_signal.clone();
+        let sender = self.triple_buffer.clone();
+        self.processing_thread = Some(std::thread::spawn(move || {
+            while !stop_signal.load(Ordering::SeqCst) {
+                if let Ok(Some(frame)) = frame_buffer.get_latest_frame() {
+                    let next_index = 0; // Replace with correct index logic
+                    if let Ok(mut buf) = sender[next_index].lock() {
+                        *buf = Some(frame);
+                    }
+                }
+            }
+        }));
+    }
+
+    fn set_capture_target(&mut self, target: CaptureTarget) {
+        self.capture_target = Some(target);
+        // Additional logic if needed
+    }
+
+    fn cleanup_textures(&mut self) {
+        if let Some(wgpu_state) = &mut self.wgpu_state {
+            wgpu_state.render_resources = None;
+        }
     }
 }
 
@@ -1202,6 +1198,7 @@ pub fn run_fullscreen_upscaler(
                     stop_signal_clone,
                     upscaler,
                     algorithm_copy,
+                    capture_target_clone,
                 ).await.unwrap();
                 
                 // Set the capture target
@@ -1217,29 +1214,14 @@ pub fn run_fullscreen_upscaler(
 impl FullscreenUpscalerUi<'_> {
     // Method to render upscaled content in any UI context
     pub fn render_upscaled_content(&self, ui: &mut egui::Ui) -> bool {
-        let mut texture_updated = false;
         if let Some(wgpu_state) = &self.wgpu_state {
             if let Some(resources) = &wgpu_state.render_resources {
-                let texture_size = resources.texture_size;
-                let image_widget = egui::Image::new(resources.texture_view.clone());
-
-                let available_size = ui.available_size();
-                let aspect_ratio = texture_size.0 as f32 / texture_size.1 as f32;
-                let (draw_width, draw_height) = if aspect_ratio > available_size.x / available_size.y {
-                    (available_size.x, available_size.x / aspect_ratio)
-                } else {
-                    (available_size.y * aspect_ratio, available_size.y)
-                };
-
-                let rect = egui::Rect::from_center_size(
-                    ui.available_rect_before_wrap().center(),
-                    egui::vec2(draw_width, draw_height)
-                );
-
-                ui.put(rect, image_widget);
-                texture_updated = true;
+                let image = egui::Image::new(resources.texture_view.id())
+                    .uv(egui::Rect::from_min_max(egui::Pos2::ZERO, egui::Pos2::new(1.0, 1.0)));
+                ui.add(image);
+                return true;
             }
         }
-        texture_updated
+        false
     }
 }
