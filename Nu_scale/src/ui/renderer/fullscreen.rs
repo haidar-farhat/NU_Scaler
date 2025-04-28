@@ -1,17 +1,99 @@
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
 use anyhow::Result;
+use image::RgbaImage;
+use winit::window::Window;
+use crate::renderer::wgpu_renderer::{WgpuRenderer, TripleBuffer};
 use eframe::{self, egui};
 use egui::{Vec2, ColorImage, TextureOptions};
-use image::RgbaImage;
 
 use crate::capture::common::FrameBuffer;
 use crate::upscale::Upscaler;
 use crate::upscale::common::UpscalingAlgorithm;
 use crate::capture::platform::CaptureBackend;
 
-/// Fullscreen upscaler UI
+/// Fullscreen upscaler UI implementation
 pub struct FullscreenUpscalerUi {
+    window: Arc<Window>,
+    wgpu_renderer: Option<WgpuRenderer>,
+    triple_buffer: TripleBuffer,
+    stop_signal: Arc<Mutex<bool>>,
+    upscaler: Arc<Mutex<Option<Box<dyn crate::upscaler::Upscaler>>>>,
+    algorithm: Arc<Mutex<String>>,
+    performance_metrics: Arc<Mutex<PerformanceMetrics>>,
+}
+
+#[derive(Default)]
+struct PerformanceMetrics {
+    frame_count: u64,
+    total_frame_time: Duration,
+    min_frame_time: Duration,
+    max_frame_time: Duration,
+    last_frame_time: Instant,
+}
+
+impl FullscreenUpscalerUi {
+    pub async fn new(window: Arc<Window>) -> Result<Self> {
+        let wgpu_renderer = WgpuRenderer::new(&window).await?;
+        
+        Ok(Self {
+            window,
+            wgpu_renderer: Some(wgpu_renderer),
+            triple_buffer: TripleBuffer::new(),
+            stop_signal: Arc::new(Mutex::new(false)),
+            upscaler: Arc::new(Mutex::new(None)),
+            algorithm: Arc::new(Mutex::new("default".to_string())),
+            performance_metrics: Arc::new(Mutex::new(PerformanceMetrics::default())),
+        })
+    }
+
+    pub fn write_frame(&self, frame: RgbaImage) {
+        self.triple_buffer.write(frame);
+    }
+
+    pub fn update(&mut self) -> Result<()> {
+        if let Some(frame) = self.triple_buffer.read() {
+            if let Some(renderer) = &mut self.wgpu_renderer {
+                renderer.update_texture(&frame)?;
+                renderer.render()?;
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn set_upscaler(&self, upscaler: Box<dyn crate::upscaler::Upscaler>) {
+        if let Ok(mut current) = self.upscaler.lock() {
+            *current = Some(upscaler);
+        }
+    }
+
+    pub fn set_algorithm(&self, algorithm: String) {
+        if let Ok(mut current) = self.algorithm.lock() {
+            *current = algorithm;
+        }
+    }
+
+    pub fn stop(&self) {
+        if let Ok(mut signal) = self.stop_signal.lock() {
+            *signal = true;
+        }
+    }
+
+    pub fn is_stopped(&self) -> bool {
+        if let Ok(signal) = self.stop_signal.lock() {
+            *signal
+        } else {
+            true
+        }
+    }
+}
+
+/// Fullscreen upscaler UI
+pub struct FullscreenUpscalerUiOld {
     /// Frame buffer for capturing frames
     frame_buffer: Arc<FrameBuffer>,
     /// Stop signal for capture thread
@@ -32,7 +114,7 @@ pub struct FullscreenUpscalerUi {
     capture_backend: Box<dyn CaptureBackend>,
 }
 
-impl FullscreenUpscalerUi {
+impl FullscreenUpscalerUiOld {
     /// Create a new fullscreen upscaler UI
     pub fn new(
         cc: &eframe::CreationContext<'_>,
@@ -135,7 +217,7 @@ impl FullscreenUpscalerUi {
     }
 }
 
-impl eframe::App for FullscreenUpscalerUi {
+impl eframe::App for FullscreenUpscalerUiOld {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         // Update the texture with the latest frame
         self.update_texture(ctx);
@@ -248,7 +330,7 @@ pub fn run_fullscreen_upscaler(
     eframe::run_native(
         "NU Scale - Fullscreen Mode",
         options,
-        Box::new(|cc| Box::new(FullscreenUpscalerUi::new(
+        Box::new(|cc| Box::new(FullscreenUpscalerUiOld::new(
             cc,
             frame_buffer,
             stop_signal,

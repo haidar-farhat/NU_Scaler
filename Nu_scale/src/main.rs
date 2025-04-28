@@ -1,24 +1,17 @@
 use anyhow::{Result, anyhow};
 use clap::{Arg, App, SubCommand};
-use nu_scaler::capture::CaptureTarget;
-use nu_scaler::upscale::{UpscalingTechnology, UpscalingQuality};
-use nu_scaler::UpscalingAlgorithm;
-use nu_scaler::{init, start_borderless_upscale};
-use nu_scaler::render::VulkanRenderer;
 use log::{debug, info, warn, error};
-use pollster;
 use nu_scaler::capture::platform::windows::WgpuWindowsCapture;
+use pollster::block_on;
 
 fn main() -> Result<()> {
     env_logger::init();
 
-    pollster::block_on(async {
-        // Example: create and initialize your capture object
+    // Drive your async WGPU init with pollster
+    block_on(async {
         let mut capture = WgpuWindowsCapture::new().expect("instance");
         capture.initialize_wgpu().await.expect("init wgpu");
-        // ...perform a capture to test:
-        // let img = capture.capture_window_wgpu(HWND(...)).await.expect("capture");
-        // println!("Captured image size: {}×{}", img.width(), img.height());
+        // Optional: test a capture here...
     });
 
     // Simple CLI app with all needed commands
@@ -94,7 +87,7 @@ fn main() -> Result<()> {
     }
     
     // Continue with the rest of the initialization
-    if let Err(e) = init() {
+    if let Err(e) = nu_scaler::init() {
         error!("Failed to initialize application: {}", e);
         return Err(anyhow!("Failed to initialize application: {}", e));
     }
@@ -108,20 +101,20 @@ fn main() -> Result<()> {
         // Process technology
         let tech_str = matches.value_of("tech").unwrap_or("fallback");
         let tech = match tech_str {
-            "fsr" => UpscalingTechnology::FSR,
-            "dlss" => UpscalingTechnology::DLSS,
-            "cuda" => UpscalingTechnology::CUDA,
-            "vulkan" => UpscalingTechnology::Vulkan,
-            "fallback" | _ => UpscalingTechnology::Fallback,
+            "fsr" => nu_scaler::upscale::UpscalingTechnology::FSR,
+            "dlss" => nu_scaler::upscale::UpscalingTechnology::DLSS,
+            "cuda" => nu_scaler::upscale::UpscalingTechnology::CUDA,
+            "vulkan" => nu_scaler::upscale::UpscalingTechnology::Vulkan,
+            "fallback" | _ => nu_scaler::upscale::UpscalingTechnology::Fallback,
         };
         
         // Process quality
         let quality_str = matches.value_of("quality").unwrap_or("quality");
         let quality = match quality_str {
-            "ultra" => UpscalingQuality::Ultra,
-            "quality" => UpscalingQuality::Quality,
-            "balanced" => UpscalingQuality::Balanced,
-            "performance" | _ => UpscalingQuality::Performance,
+            "ultra" => nu_scaler::upscale::UpscalingQuality::Ultra,
+            "quality" => nu_scaler::upscale::UpscalingQuality::Quality,
+            "balanced" => nu_scaler::upscale::UpscalingQuality::Balanced,
+            "performance" | _ => nu_scaler::upscale::UpscalingQuality::Performance,
         };
         
         // Process FPS
@@ -148,7 +141,7 @@ fn main() -> Result<()> {
         
         // Measure and log performance
         let start_time = std::time::Instant::now();
-        let result = start_borderless_upscale(source, tech, quality, fps, algorithm);
+        let result = nu_scaler::start_borderless_upscale(source, tech, quality, fps, algorithm);
         let elapsed = start_time.elapsed();
         
         if let Err(ref e) = result {
@@ -179,16 +172,16 @@ fn main() -> Result<()> {
 }
 
 /// Parse the source string into a CaptureTarget
-fn parse_source(source_str: &str) -> Result<CaptureTarget> {
+fn parse_source(source_str: &str) -> Result<nu_scaler::capture::CaptureTarget> {
     if source_str == "fullscreen" {
         debug!("Using fullscreen capture");
-        return Ok(CaptureTarget::FullScreen);
+        return Ok(nu_scaler::capture::CaptureTarget::FullScreen);
     } else if source_str.starts_with("window:") {
         let title = source_str.strip_prefix("window:")
             .unwrap_or("")
             .to_string();
         debug!("Using window capture with title: {}", title);
-        return Ok(CaptureTarget::WindowByTitle(title));
+        return Ok(nu_scaler::capture::CaptureTarget::WindowByTitle(title));
     } else if source_str.starts_with("region:") {
         let coords = source_str.strip_prefix("region:")
             .unwrap_or("")
@@ -198,7 +191,7 @@ fn parse_source(source_str: &str) -> Result<CaptureTarget> {
         
         if coords.len() >= 4 {
             debug!("Using region capture with coords: {:?}", coords);
-            return Ok(CaptureTarget::Region {
+            return Ok(nu_scaler::capture::CaptureTarget::Region {
                 x: coords[0],
                 y: coords[1],
                 width: coords[2] as u32,

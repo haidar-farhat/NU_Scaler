@@ -617,8 +617,8 @@ impl WgpuWindowsCapture {
         })
     }
     
-    /// Initialize WGPU resources
-    async fn initialize_wgpu(&mut self) -> Result<()> {
+    /// Initialize WGPU resources (now public so you can call it from `main`)
+    pub async fn initialize_wgpu(&mut self) -> Result<()> {
         if self.adapter.is_none() {
             // Request adapter
             self.adapter = self.instance.request_adapter(&wgpu::RequestAdapterOptions {
