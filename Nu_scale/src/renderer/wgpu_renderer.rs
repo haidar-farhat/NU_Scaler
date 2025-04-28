@@ -1,9 +1,53 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use anyhow::Result;
 use wgpu::{ShaderModule, BindGroup, BindGroupLayout, Buffer, Texture, TextureView, Sampler};
 use image::RgbaImage;
+
+const STATS_WINDOW_SIZE: usize = 120;
+
+/// Performance statistics for the renderer
+pub struct RenderStats {
+    frame_times: [f32; STATS_WINDOW_SIZE],
+    current_index: usize,
+    total_frames: u64,
+    last_frame_time: Instant,
+}
+
+impl RenderStats {
+    pub fn new() -> Self {
+        Self {
+            frame_times: [0.0; STATS_WINDOW_SIZE],
+            current_index: 0,
+            total_frames: 0,
+            last_frame_time: Instant::now(),
+        }
+    }
+
+    pub fn add_frame(&mut self) {
+        let elapsed = self.last_frame_time.elapsed().as_secs_f32() * 1000.0;
+        self.frame_times[self.current_index] = elapsed;
+        self.current_index = (self.current_index + 1) % STATS_WINDOW_SIZE;
+        self.total_frames += 1;
+        self.last_frame_time = Instant::now();
+    }
+
+    pub fn average_fps(&self) -> f32 {
+        let sum: f32 = self.frame_times.iter().sum();
+        if sum <= 0.0 { 0.0 } else { 1000.0 / (sum / STATS_WINDOW_SIZE as f32) }
+    }
+
+    pub fn average_frame_time(&self) -> f32 {
+        let sum: f32 = self.frame_times.iter().sum();
+        if sum <= 0.0 { 0.0 } else { sum / STATS_WINDOW_SIZE as f32 }
+    }
+
+    pub fn total_frames(&self) -> u64 {
+        self.total_frames
+    }
+}
 
 /// WGPU render resources for direct rendering
 pub struct WgpuRenderResources {
@@ -29,9 +73,14 @@ fn vs_main(@builtin(vertex_index) vert_idx: u32) -> @builtin(position) vec4<f32>
     return vec4(pos[vert_idx], 0.0, 1.0);
 }
 
+@group(0) @binding(0)
+var tex: texture_2d<f32>;
+@group(0) @binding(1)
+var samp: sampler;
+
 @fragment
-fn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
-    return textureSample(tex, sampler, uv);
+fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+    return textureSample(tex, samp, pos.xy / vec2(1920.0, 1080.0));
 }
 "#;
 
@@ -78,10 +127,12 @@ pub struct WgpuRenderer {
     surface: wgpu::Surface,
     config: wgpu::SurfaceConfiguration,
     render_resources: Option<WgpuRenderResources>,
+    stats: RenderStats,
+    vsync: bool,
 }
 
 impl WgpuRenderer {
-    pub async fn new(window: &winit::window::Window) -> Result<Self> {
+    pub async fn new(window: &winit::window::Window, vsync: bool) -> Result<Self> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
             dx12_shader_compiler: Default::default(),
@@ -114,7 +165,11 @@ impl WgpuRenderer {
             format: surface_format,
             width: window.inner_size().width,
             height: window.inner_size().height,
-            present_mode: wgpu::PresentMode::Fifo,
+            present_mode: if vsync {
+                wgpu::PresentMode::Fifo
+            } else {
+                wgpu::PresentMode::Immediate
+            },
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
         };
@@ -127,6 +182,8 @@ impl WgpuRenderer {
             surface,
             config,
             render_resources: None,
+            stats: RenderStats::new(),
+            vsync,
         })
     }
 
@@ -332,8 +389,25 @@ impl WgpuRenderer {
 
             self.queue.submit(std::iter::once(encoder.finish()));
             frame.present();
+
+            // Update performance stats
+            self.stats.add_frame();
         }
 
         Ok(())
+    }
+
+    pub fn stats(&self) -> &RenderStats {
+        &self.stats
+    }
+
+    pub fn set_vsync(&mut self, vsync: bool) {
+        self.vsync = vsync;
+        self.config.present_mode = if vsync {
+            wgpu::PresentMode::Fifo
+        } else {
+            wgpu::PresentMode::Immediate
+        };
+        self.surface.configure(&self.device, &self.config);
     }
 } 
