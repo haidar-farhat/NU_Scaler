@@ -2431,6 +2431,7 @@ dependencies = [
  "log",
  "once_cell",
  "opencv",
+ "pollster",
  "rand",
  "raw-window-handle 0.5.2",
  "serde",
