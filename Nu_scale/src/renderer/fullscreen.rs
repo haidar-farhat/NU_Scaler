@@ -278,10 +278,9 @@ impl<'a> WgpuState<'a> {
 
     /// Create render resources for direct rendering
     fn create_render_resources(&mut self, width: u32, height: u32) -> Result<()> {
-        let needs_creation = match &self.render_resources {
-            Some(r) => r.texture_size != (width, height),
-            None => true,
-        };
+        let needs_creation = self.render_resources
+            .as_ref()
+            .map_or(true, |r| r.texture_size != (width, height));
         if needs_creation {
             // Create shader module
             let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -710,15 +709,14 @@ impl<'a> FullscreenUpscalerUi<'a> {
     }
 
     fn update_source_window_info(&mut self, ctx: &egui::Context) {
-        if let Some(viewport_id) = ctx.viewport_id() {
-            let rect = ctx.viewport(viewport_id).rect;
-            self.source_window_info = Some((
-                rect.left() as i32,
-                rect.top() as i32,
-                rect.width() as u32,
-                rect.height() as u32,
-            ));
-        }
+        let viewport_id = ctx.viewport_id();
+        let rect = ctx.viewport_rect();
+        self.source_window_info = Some((
+            rect.left() as i32,
+            rect.top() as i32,
+            rect.width() as u32,
+            rect.height() as u32,
+        ));
     }
 
     fn cleanup(&mut self) {
@@ -758,9 +756,7 @@ impl<'a> FullscreenUpscalerUi<'a> {
 
     pub fn render_upscaled_content(&self, ui: &mut egui::Ui) -> bool {
         if let Some(texture_id) = self.egui_texture_id {
-            ui.image(egui::Image::new(egui::ImageSource::Texture(
-                egui::SizedTexture::new(texture_id, ui.available_size())
-            )));
+            ui.image(egui::Image::new((texture_id, ui.available_size())));
             true
         } else {
             false
@@ -863,8 +859,8 @@ impl<'a> eframe::App for FullscreenUpscalerUi<'a> {
                         let index = self.current_buffer_index.load(Ordering::Acquire);
                         if let Ok(texture_guard) = self.triple_buffer[index].lock() {
                             if let Some(texture) = texture_guard.as_ref() {
-                                let size = texture.size();
-                                self.output_size = (size[0] as u32, size[1] as u32);
+                                let (w, h) = texture.dimensions();
+                                self.output_size = (w, h);
                             }
                         }
                         
@@ -933,7 +929,8 @@ impl<'a> eframe::App for FullscreenUpscalerUi<'a> {
                         if let Some(texture) = texture_guard.as_ref() {
                             // Get available size
                             let available_size = ui.available_size();
-                            let texture_size = texture.size_vec2();
+                            let (w, h) = texture.dimensions();
+                            let texture_size = egui::Vec2::new(w as f32, h as f32);
                             
                             // Calculate the scaling to fit in the available space
                             // while maintaining aspect ratio
@@ -959,11 +956,8 @@ impl<'a> eframe::App for FullscreenUpscalerUi<'a> {
                             };
                             
                             // Simple rendering with error handling
-                            if let Err(e) = (|| -> Result<(), String> {
-                                ui.put(rect, egui::Image::new(texture));
-                                Ok(())
-                            })() {
-                                log::error!("Error rendering texture: {}", e);
+                            if let Some(texture_id) = self.egui_texture_id {
+                                ui.put(rect, egui::Image::new((texture_id, rect.size())));
                             }
                         }
                     }
