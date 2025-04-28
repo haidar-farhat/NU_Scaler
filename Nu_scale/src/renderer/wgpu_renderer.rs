@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use anyhow::Result;
-use wgpu::{ShaderModule, BindGroup, BindGroupLayout, Buffer, Texture, TextureView, Sampler, Adapter, Backends, Device, DeviceDescriptor, Features, Instance, Limits, PresentMode, Queue, RequestAdapterOptions, Surface, SurfaceConfiguration, TextureFormat, TextureUsages};
+use wgpu::{ShaderModule, BindGroup, BindGroupLayout, Buffer, Texture, TextureView, Sampler, Adapter, Backends, Device, DeviceDescriptor, Features, Instance, InstanceFlags, Limits, PresentMode, Queue, RequestAdapterOptions, Surface, SurfaceConfiguration, TextureFormat, TextureUsages};
 use image::RgbaImage;
 use winit::window::Window;
 
@@ -140,7 +140,9 @@ impl WgpuRenderer {
         let size = window.inner_size();
         let instance = Instance::new(InstanceDescriptor {
             backends: Backends::all(),
-            ..Default::default()
+            flags: InstanceFlags::default(),
+            dx12_shader_compiler: Default::default(),
+            gles_minor_version: wgpu::Gles3MinorVersion::Automatic,
         });
 
         let surface = unsafe { instance.create_surface(window) }?;
@@ -157,8 +159,8 @@ impl WgpuRenderer {
             .request_device(
                 &DeviceDescriptor {
                     label: None,
-                    features: Features::empty(),
-                    limits: Limits::default(),
+                    required_features: Features::empty(),
+                    required_limits: Limits::default(),
                 },
                 None,
             )
@@ -393,7 +395,7 @@ impl WgpuRenderer {
             });
 
         {
-            let _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
@@ -407,6 +409,12 @@ impl WgpuRenderer {
                 occlusion_query_set: None,
                 timestamp_writes: None,
             });
+
+            if let Some(resources) = &self.render_resources {
+                render_pass.set_pipeline(&resources.render_pipeline);
+                render_pass.set_bind_group(0, &resources.bind_group, &[]);
+                render_pass.draw(0..3, 0..1);
+            }
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
