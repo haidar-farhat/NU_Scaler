@@ -2419,6 +2419,7 @@ dependencies = [
  "bytemuck",
  "chrono",
  "clap",
+ "crossbeam-channel",
  "dirs",
  "eframe",
  "egui",

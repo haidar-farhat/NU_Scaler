@@ -4,6 +4,15 @@ use log::{debug, info, warn, error};
 use nu_scaler::capture::platform::windows::WgpuWindowsCapture;
 use pollster::block_on;
 
+struct MyApp;
+impl eframe::App for MyApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.heading("Hello, world! If you see this, eframe/egui is working.");
+        });
+    }
+}
+
 fn main() -> Result<()> {
     env_logger::init();
 
@@ -25,13 +34,13 @@ fn main() -> Result<()> {
                 .long("verbose")
                 .multiple(false)
                 .takes_value(false)
-                .help("Sets the level of verbosity (can be used multiple times)")
+                .help("Sets the level of verbosity"),
         )
         .arg(
             Arg::with_name("log-dir")
                 .long("log-dir")
                 .takes_value(true)
-                .help("Directory to store log files. Default is user data directory.")
+                .help("Directory to store log files. Default is user data directory."),
         )
         .subcommand(
             SubCommand::with_name("fullscreen")
@@ -41,39 +50,39 @@ fn main() -> Result<()> {
                         .long("source")
                         .help("Source to capture: fullscreen, window:<title>, or region:<x>,<y>,<width>,<height>")
                         .takes_value(true)
-                        .default_value("fullscreen")
+                        .default_value("fullscreen"),
                 )
                 .arg(
                     Arg::with_name("tech")
                         .long("tech")
                         .help("Upscaling technology: fsr, dlss, or fallback")
                         .takes_value(true)
-                        .default_value("fallback")
+                        .default_value("fallback"),
                 )
                 .arg(
                     Arg::with_name("quality")
                         .long("quality")
                         .help("Upscaling quality: ultra, quality, balanced, or performance")
                         .takes_value(true)
-                        .default_value("quality")
+                        .default_value("quality"),
                 )
                 .arg(
                     Arg::with_name("fps")
                         .long("fps")
                         .help("Target frame rate")
                         .takes_value(true)
-                        .default_value("60")
+                        .default_value("60"),
                 )
                 .arg(
                     Arg::with_name("algorithm")
                         .long("algorithm")
                         .help("Upscaling algorithm (for fallback tech): lanczos3, bilinear, bicubic, etc.")
-                        .takes_value(true)
-                )
+                        .takes_value(true),
+                ),
         )
         .subcommand(
             SubCommand::with_name("cli")
-                .about("Force CLI mode even if GUI is available")
+                .about("Force CLI mode even if GUI is available"),
         )
         .get_matches();
 
@@ -81,93 +90,35 @@ fn main() -> Result<()> {
     let log_dir = matches.value_of("log-dir");
     let verbose = matches.is_present("verbose");
     
-    // Initialize application (including logging)
+    // Initialize logging
     if let Err(e) = nu_scaler::logger::init_logger(log_dir, verbose) {
         eprintln!("Warning: Failed to initialize logger: {}", e);
     }
     
-    // Continue with the rest of the initialization
-    if let Err(e) = nu_scaler::init() {
-        error!("Failed to initialize application: {}", e);
-        return Err(anyhow!("Failed to initialize application: {}", e));
-    }
-    
-    // If fullscreen command is used, capture the screen and upscale
+    // If fullscreen command is used, handle it
     if let Some(matches) = matches.subcommand_matches("fullscreen") {
-        // Process source
-        let source_str = matches.value_of("source").unwrap_or("fullscreen");
-        let source = parse_source(source_str)?;
-        
-        // Process technology
-        let tech_str = matches.value_of("tech").unwrap_or("fallback");
-        let tech = match tech_str {
-            "fsr" => nu_scaler::upscale::UpscalingTechnology::FSR,
-            "dlss" => nu_scaler::upscale::UpscalingTechnology::DLSS,
-            "cuda" => nu_scaler::upscale::UpscalingTechnology::CUDA,
-            "vulkan" => nu_scaler::upscale::UpscalingTechnology::Vulkan,
-            "fallback" | _ => nu_scaler::upscale::UpscalingTechnology::Fallback,
-        };
-        
-        // Process quality
-        let quality_str = matches.value_of("quality").unwrap_or("quality");
-        let quality = match quality_str {
-            "ultra" => nu_scaler::upscale::UpscalingQuality::Ultra,
-            "quality" => nu_scaler::upscale::UpscalingQuality::Quality,
-            "balanced" => nu_scaler::upscale::UpscalingQuality::Balanced,
-            "performance" | _ => nu_scaler::upscale::UpscalingQuality::Performance,
-        };
-        
-        // Process FPS
-        let fps = matches.value_of("fps")
-            .unwrap_or("60")
-            .parse::<u32>()
-            .unwrap_or(60);
-        
-        // Process algorithm
-        let algorithm = matches.value_of("algorithm")
-            .and_then(|alg| local_string_to_algorithm(alg));
-        
-        // Log the fullscreen upscaling parameters
-        info!("Starting fullscreen upscaling");
-        debug!("  Source: {:?}", source);
-        debug!("  Technology: {:?}", tech);
-        debug!("  Quality: {:?}", quality);
-        debug!("  FPS: {}", fps);
-        debug!("  Algorithm: {:?}", algorithm);
-        
-        // Start fullscreen upscaling
-        println!("Starting fullscreen upscaling with {:?} technology at {:?} quality", tech, quality);
-        println!("Press ESC to exit");
-        
-        // Measure and log performance
-        let start_time = std::time::Instant::now();
-        let result = nu_scaler::start_borderless_upscale(source, tech, quality, fps, algorithm);
-        let elapsed = start_time.elapsed();
-        
-        if let Err(ref e) = result {
-            error!("Fullscreen upscaling failed after {:.2?}: {}", elapsed, e);
-            return result;
-        }
-        
-        info!("Fullscreen upscaling completed after {:.2?}", elapsed);
-        return Ok(());
+        // ... [existing fullscreen subcommand handling code] ...
+        return handle_fullscreen_subcommand(matches);
     }
-    
+
     // Check if "cli" subcommand was explicitly used
     let force_cli = matches.subcommand_matches("cli").is_some();
-    
-    // Launch GUI if available and not forced to CLI mode
-    #[cfg(feature = "gui")]
-    if !force_cli {
+
+    // Launch GUI if no subcommands and not forced to CLI
+    if !force_cli && matches.subcommand_name().is_none() {
         info!("Starting NU_Scaler GUI");
-        return nu_scaler::ui::run_app();
+        eframe::run_native(
+            "NU Scaler",
+            eframe::NativeOptions::default(),
+            Box::new(|_cc| Box::new(MyApp {})),
+        );
+        return Ok(());
     }
-    
-    // Fall back to CLI mode if GUI is not available or if forced
+
+    // Fallback to CLI mode
     info!("Running in CLI mode");
     println!("NU_Scaler CLI");
     println!("Run with 'fullscreen' subcommand to start the upscaler");
-    println!("Example: nu_scaler fullscreen --source fullscreen --tech fallback --quality balanced --fps 60 --algorithm lanczos3");
     Ok(())
 }
 
@@ -215,4 +166,64 @@ fn local_string_to_algorithm(alg_str: &str) -> Option<nu_scaler::UpscalingAlgori
         debug!("Using upscaling algorithm: {}", alg_str);
     }
     result
+}
+
+fn handle_fullscreen_subcommand(matches: &clap::ArgMatches) -> Result<()> {
+    // Process source
+    let source_str = matches.value_of("source").unwrap_or("fullscreen");
+    let source = parse_source(source_str)?;
+    
+    // Process technology
+    let tech_str = matches.value_of("tech").unwrap_or("fallback");
+    let tech = match tech_str {
+        "fsr" => nu_scaler::upscale::UpscalingTechnology::FSR,
+        "dlss" => nu_scaler::upscale::UpscalingTechnology::DLSS,
+        "cuda" => nu_scaler::upscale::UpscalingTechnology::CUDA,
+        "vulkan" => nu_scaler::upscale::UpscalingTechnology::Vulkan,
+        "fallback" | _ => nu_scaler::upscale::UpscalingTechnology::Fallback,
+    };
+    
+    // Process quality
+    let quality_str = matches.value_of("quality").unwrap_or("quality");
+    let quality = match quality_str {
+        "ultra" => nu_scaler::upscale::UpscalingQuality::Ultra,
+        "quality" => nu_scaler::upscale::UpscalingQuality::Quality,
+        "balanced" => nu_scaler::upscale::UpscalingQuality::Balanced,
+        "performance" | _ => nu_scaler::upscale::UpscalingQuality::Performance,
+    };
+    
+    // Process FPS
+    let fps = matches.value_of("fps")
+        .unwrap_or("60")
+        .parse::<u32>()
+        .unwrap_or(60);
+    
+    // Process algorithm
+    let algorithm = matches.value_of("algorithm")
+        .and_then(|alg| local_string_to_algorithm(alg));
+    
+    // Log the fullscreen upscaling parameters
+    info!("Starting fullscreen upscaling");
+    debug!("  Source: {:?}", source);
+    debug!("  Technology: {:?}", tech);
+    debug!("  Quality: {:?}", quality);
+    debug!("  FPS: {}", fps);
+    debug!("  Algorithm: {:?}", algorithm);
+    
+    // Start fullscreen upscaling
+    println!("Starting fullscreen upscaling with {:?} technology at {:?} quality", tech, quality);
+    println!("Press ESC to exit");
+    
+    // Measure and log performance
+    let start_time = std::time::Instant::now();
+    let result = nu_scaler::start_borderless_upscale(source, tech, quality, fps, algorithm);
+    let elapsed = start_time.elapsed();
+    
+    if let Err(ref e) = result {
+        error!("Fullscreen upscaling failed after {:.2?}: {}", elapsed, e);
+        return result;
+    }
+    
+    info!("Fullscreen upscaling completed after {:.2?}", elapsed);
+    return Ok(());
 }
