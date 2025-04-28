@@ -277,8 +277,11 @@ impl<'a> WgpuState<'a> {
 
     /// Create render resources for direct rendering
     fn create_render_resources(&mut self, width: u32, height: u32) -> Result<()> {
-        if self.render_resources.is_none() ||
-            self.render_resources.as_ref().unwrap().texture_size != (width, height) {
+        let needs_creation = match &self.render_resources {
+            Some(r) => r.texture_size != (width, height),
+            None => true,
+        };
+        if needs_creation {
             // Create shader module
             let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Fullscreen Shader"),
