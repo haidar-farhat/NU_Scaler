@@ -1,20 +1,13 @@
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering, AtomicUsize};
+use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering, AtomicUsize}};
 use std::fs::{File, OpenOptions};
 use std::io::ErrorKind;
 use anyhow::Result;
 use eframe::{self, egui};
-use egui::{Vec2, TextureOptions};
+use egui::Vec2;
 use image::RgbaImage;
-use image::imageops::{resize, FilterType};
 use std::time::{Instant, Duration};
-use log::{warn, error, trace, info};
-use std::panic::AssertUnwindSafe;
-use rand;
-use std::sync::Mutex;
-use egui_wgpu::WgpuConfiguration;
-use wgpu::{ShaderModule, BindGroup, BindGroupLayout, Buffer, Texture, TextureView, Sampler, Surface};
-use winit::window::Window;
+use log::{error, trace};
+use wgpu::Surface;
 
 use crate::capture::common::FrameBuffer;
 use crate::upscale::{Upscaler, UpscalingTechnology, UpscalingQuality};

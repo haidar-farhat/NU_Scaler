@@ -28,16 +28,11 @@ pub struct FullscreenUpscalerUi {
 }
 
 impl FullscreenUpscalerUi {
-    pub async fn new(
-        window: Arc<Window>,
-        upscaler: Box<dyn Upscaler>,
-        algorithm: Option<UpscalingAlgorithm>,
-        vsync: bool,
-    ) -> Result<Self> {
-        let wgpu_renderer = WgpuRenderer::new(&window, vsync).await?;
+    pub async fn new(surface: &wgpu::Surface<'_>, window: &Window, upscaler: Box<dyn Upscaler>, algorithm: Option<UpscalingAlgorithm>, vsync: bool) -> Result<Self> {
+        let wgpu_renderer = WgpuRenderer::new(surface, window, vsync).await?;
         
         Ok(Self {
-            window,
+            window: Arc::new(window.clone()),
             wgpu_renderer: Some(wgpu_renderer),
             triple_buffer: TripleBuffer::new(),
             stop_signal: Arc::new(AtomicBool::new(false)),
