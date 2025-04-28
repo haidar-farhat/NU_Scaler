@@ -6,9 +6,9 @@ authors = ["Your Name <you@example.com>"]
 
 [dependencies]
 # Pin wgpu to a single version to avoid linking conflicts
-wgpu = "0.19"
-image = "0.24"
-anyhow = "1.0"
+wgpu = "0.18.0"
+image = "0.24.0"
+anyhow = "1.0.0"
 thiserror = "1.0"
 pollster = "0.3"
 once_cell = "1.17"
@@ -18,7 +18,7 @@ serde_json = "1.0"
 global-hotkey = "0.2"
 hotkey = "0.3"
 clap = "3.2"
-log = "0.4"
+log = "0.4.0"
 env_logger = "0.10"
 chrono = "0.4"
 rand = "0.8.5"
@@ -35,6 +35,9 @@ egui = { version = "0.27", optional = true }
 eframe = { version = "0.27", optional = true, features = ["wgpu", "glow"] }
 egui_plot = "0.27"
 opencv = { version = "0.75", optional = true }
+
+winit = "0.29.0"
+egui-wgpu = "0.24.0"
 
 [features]
 default = ["gui"]
@@ -61,7 +64,3 @@ windows = { version = "0.48", default-features = false, features = [
 x11rb = { version = "0.11", features = ["all-extensions"] }
 wayland-client = "0.30"
 wayland-protocols = { version = "0.30", features = ["client"] }
-
-[dependencies.egui-wgpu]
-version = "0.27"
-default-features = false
