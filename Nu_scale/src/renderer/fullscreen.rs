@@ -9,6 +9,7 @@ use std::time::{Instant, Duration};
 use log;
 use egui_wgpu::WgpuConfiguration;
 use winit::window::Window;
+use anyhow::anyhow;
 
 use crate::capture::common::FrameBuffer;
 use crate::upscale::{Upscaler, UpscalingTechnology, UpscalingQuality};
@@ -582,10 +583,15 @@ impl<'a> FullscreenUpscalerUi<'a> {
     
     /// Render the current frame
     fn render(&mut self) -> Result<()> {
+        // Check for surface and read the frame first
+        let frame = if let Some(_surface) = &self.surface {
+            self.read_frame().ok_or(anyhow!("Frame not available"))?
+        } else {
+            return Ok(());
+        };
+        // Now handle wgpu_state mutably
         if let Some(wgpu_state) = &mut self.wgpu_state {
-            if let Some(surface) = &self.surface {
-                wgpu_state.update_texture(self.read_frame()?)?;
-            }
+            wgpu_state.update_texture(&frame)?;
         }
         Ok(())
     }
