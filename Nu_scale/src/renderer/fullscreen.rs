@@ -222,16 +222,16 @@ impl PerformanceMetrics {
 }
 
 /// State for WGPU rendering
-struct WgpuState {
+struct WgpuState<'a> {
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     render_resources: Option<WgpuRenderResources>,
-    surface: wgpu::Surface,
+    surface: egui_wgpu::wgpu::Surface<'a>,
 }
 
-impl WgpuState {
-    fn new(window: &winit::window::Window) -> Result<Self> {
+impl<'a> WgpuState<'a> {
+    async fn new(window: &winit::window::Window) -> Result<Self> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
             flags: wgpu::InstanceFlags::default(),
@@ -239,19 +239,19 @@ impl WgpuState {
             gles_minor_version: wgpu::Gles3MinorVersion::Automatic,
         });
         let surface = unsafe { instance.create_surface(window) }?;
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: Some(&surface),
             force_fallback_adapter: false,
-        })).ok_or_else(|| anyhow::anyhow!("Failed to find suitable GPU adapter"))?;
-        let (device, queue) = pollster::block_on(adapter.request_device(
+        }).await.ok_or_else(|| anyhow::anyhow!("Failed to find suitable GPU adapter"))?;
+        let (device, queue) = adapter.request_device(
             &wgpu::DeviceDescriptor {
                 label: None,
                 required_features: wgpu::Features::empty(),
                 required_limits: wgpu::Limits::default(),
             },
             None,
-        ))?;
+        ).await?;
         let surface_caps = surface.get_capabilities(&adapter);
         let surface_format = surface_caps.formats.iter().copied().find(|f| f.is_srgb()).unwrap_or(surface_caps.formats[0]);
         let config = wgpu::SurfaceConfiguration {
@@ -491,7 +491,7 @@ impl WgpuState {
 }
 
 /// Fullscreen upscaler UI
-pub struct FullscreenUpscalerUi {
+pub struct FullscreenUpscalerUi<'a> {
     /// Frame buffer for capturing frames
     frame_buffer: Arc<FrameBuffer>,
     /// Stop signal for capture thread
@@ -545,7 +545,7 @@ pub struct FullscreenUpscalerUi {
     /// Pending frame to be processed
     pending_frame: Option<RgbaImage>,
     /// WGPU state for rendering
-    wgpu_state: Option<WgpuState>,
+    wgpu_state: Option<WgpuState<'a>>,
     /// Triple buffer for frame data
     triple_buffer: [Arc<Mutex<Option<RgbaImage>>>; 3],
     /// Current buffer index
@@ -557,10 +557,10 @@ pub struct FullscreenUpscalerUi {
     /// egui::TextureId for the WGPU texture
     egui_texture_id: Option<egui::TextureId>,
     /// egui_wgpu::Renderer for rendering
-    egui_wgpu_renderer: egui_wgpu::Renderer,
+    egui_wgpu_renderer: Option<egui_wgpu::Renderer>,
 }
 
-impl FullscreenUpscalerUi {
+impl<'a> FullscreenUpscalerUi<'a> {
     /// Create a new fullscreen upscaler UI
     fn new(
         cc: &eframe::CreationContext<'_>,
@@ -570,17 +570,17 @@ impl FullscreenUpscalerUi {
         algorithm: Option<UpscalingAlgorithm>,
         capture_target: CaptureTarget,
     ) -> Self {
-        let window = cc.egui_ctx.viewport().unwrap().native_view().clone();
-        let wgpu_state = WgpuState::new(&window).ok();
+        let window = cc.native_window().clone();
+        let wgpu_state = pollster::block_on(WgpuState::new(&window)).ok();
         let egui_wgpu_renderer = if let Some(ref state) = wgpu_state {
-            egui_wgpu::Renderer::new(
+            Some(egui_wgpu::Renderer::new(
                 &state.device,
                 state.config.format,
                 None,
                 1,
-            )
+            ))
         } else {
-            panic!("Failed to create WGPU state");
+            None
         };
         Self {
             frame_buffer: frame_buffer.clone(),
@@ -644,15 +644,13 @@ impl FullscreenUpscalerUi {
     
     /// Update the texture with a new frame
     fn update_texture(&mut self, frame: &RgbaImage) -> Result<()> {
-        if let Some(wgpu_state) = &mut self.wgpu_state {
-            // Update the WGPU texture with the new frame
+        if let (Some(wgpu_state), Some(renderer)) = (&mut self.wgpu_state, &mut self.egui_wgpu_renderer) {
             wgpu_state.update_texture(frame)?;
             if let Some(resources) = &wgpu_state.render_resources {
-                // Register the WGPU texture with egui_wgpu and store the TextureId
-                let texture_id = self.egui_wgpu_renderer.register_native_texture(
+                let texture_id = renderer.register_native_texture(
                     &wgpu_state.device,
                     &resources.texture_view,
-                    wgpu::TextureFormat::Rgba8Unorm,
+                    wgpu::FilterMode::Linear,
                 );
                 self.egui_texture_id = Some(texture_id);
             }
@@ -755,8 +753,7 @@ impl FullscreenUpscalerUi {
 
     pub fn render_upscaled_content(&self, ui: &mut egui::Ui) -> bool {
         if let Some(texture_id) = self.egui_texture_id {
-            let size = ui.available_size();
-            ui.image(texture_id, size);
+            ui.image(texture_id);
             true
         } else {
             false
@@ -764,7 +761,7 @@ impl FullscreenUpscalerUi {
     }
 }
 
-impl eframe::App for FullscreenUpscalerUi {
+impl<'a> eframe::App for FullscreenUpscalerUi<'a> {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Check if upscaler needs to be reinitialized
         if self.requires_reinitialization {
@@ -797,7 +794,7 @@ impl eframe::App for FullscreenUpscalerUi {
         
         // Safe error handling to avoid crashes
         if !skip_processing {
-            match self.update_texture(_ctx, _frame.egui_wgpu_backend()) {
+            match self.update_texture(ctx, _frame.egui_wgpu_backend()) {
                 Ok(_) => {
                     // Measure frame processing time and check if we're lagging
                     let frame_time = update_start.elapsed();
@@ -885,23 +882,23 @@ impl eframe::App for FullscreenUpscalerUi {
         }
         
         // Check for ESC key to exit fullscreen mode
-        if _ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             // Signal the capture thread to stop and clean up resources
             self.stop_signal.store(true, Ordering::SeqCst);
             self.cleanup();
             
             // Close the application
-            _ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             return;
         }
         
         // Check for F1 key to toggle performance overlay
-        if _ctx.input(|i| i.key_pressed(egui::Key::F1)) {
+        if ctx.input(|i| i.key_pressed(egui::Key::F1)) {
             self.show_overlay = !self.show_overlay;
         }
         
         // Check for F2 key to toggle frame skipping
-        if _ctx.input(|i| i.key_pressed(egui::Key::F2)) {
+        if ctx.input(|i| i.key_pressed(egui::Key::F2)) {
             self.enable_frame_skipping = !self.enable_frame_skipping;
             log::info!("Frame skipping {}", if self.enable_frame_skipping { "enabled" } else { "disabled" });
         }
