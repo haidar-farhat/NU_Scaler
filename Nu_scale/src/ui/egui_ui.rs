@@ -2171,6 +2171,7 @@ impl Drop for TextureCache {
 
 /// Run the egui application
 pub fn run_app() -> Result<()> {
+    println!("Launching GUI!");
     let options = eframe::NativeOptions {
         viewport: ViewportBuilder::default()
             .with_inner_size([1024.0, 768.0])
