@@ -6,8 +6,9 @@ use eframe::{self, egui};
 use egui::Vec2;
 use image::RgbaImage;
 use std::time::{Instant, Duration};
-use log::{info, warn};
+use log;
 use egui_wgpu::WgpuConfiguration;
+use winit::window::Window;
 
 use crate::capture::common::FrameBuffer;
 use crate::upscale::{Upscaler, UpscalingTechnology, UpscalingQuality};
@@ -227,11 +228,11 @@ struct WgpuState<'a> {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     render_resources: Option<WgpuRenderResources>,
-    surface: egui_wgpu::wgpu::Surface<'a>,
+    surface: wgpu::Surface<'a>,
 }
 
 impl<'a> WgpuState<'a> {
-    async fn new(window: &winit::window::Window) -> Result<Self> {
+    async fn new(window: &'a Window) -> Result<Self> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
             flags: wgpu::InstanceFlags::default(),
@@ -551,9 +552,9 @@ pub struct FullscreenUpscalerUi<'a> {
     /// Current buffer index
     current_buffer_index: AtomicUsize,
     /// Surface for WGPU rendering
-    surface: Option<wgpu::Surface>,
+    surface: Option<wgpu::Surface<'a>>,
     /// Window reference
-    window: Option<Arc<winit::window::Window>>,
+    window: Option<Arc<Window>>,
     /// egui::TextureId for the WGPU texture
     egui_texture_id: Option<egui::TextureId>,
     /// egui_wgpu::Renderer for rendering
@@ -570,7 +571,7 @@ impl<'a> FullscreenUpscalerUi<'a> {
         algorithm: Option<UpscalingAlgorithm>,
         capture_target: CaptureTarget,
     ) -> Self {
-        let window = cc.native_window().clone();
+        let window = cc.viewport().window().clone();
         let wgpu_state = pollster::block_on(WgpuState::new(&window)).ok();
         let egui_wgpu_renderer = if let Some(ref state) = wgpu_state {
             Some(egui_wgpu::Renderer::new(
@@ -616,8 +617,8 @@ impl<'a> FullscreenUpscalerUi<'a> {
                 Arc::new(Mutex::new(None)),
             ],
             current_buffer_index: AtomicUsize::new(0),
-            surface,
-            window,
+            surface: None, // Not used directly
+            window: Some(Arc::new(window)),
             egui_texture_id: None,
             egui_wgpu_renderer,
         }
@@ -705,13 +706,13 @@ impl<'a> FullscreenUpscalerUi<'a> {
     }
 
     fn update_source_window_info(&mut self, ctx: &egui::Context) {
-        // Implementation for updating window information
-        if let Some(window) = ctx.window() {
+        if let Some(viewport) = ctx.viewport() {
+            let rect = viewport.rect();
             self.source_window_info = Some((
-                window.rect.left() as i32,
-                window.rect.top() as i32,
-                window.rect.width() as u32,
-                window.rect.height() as u32,
+                rect.left() as i32,
+                rect.top() as i32,
+                rect.width() as u32,
+                rect.height() as u32,
             ));
         }
     }
@@ -753,7 +754,10 @@ impl<'a> FullscreenUpscalerUi<'a> {
 
     pub fn render_upscaled_content(&self, ui: &mut egui::Ui) -> bool {
         if let Some(texture_id) = self.egui_texture_id {
-            ui.image(texture_id);
+            ui.image(egui::Image::new(egui::ImageSource::Texture {
+                id: texture_id,
+                size: Some(ui.available_size()),
+            }));
             true
         } else {
             false
@@ -762,7 +766,7 @@ impl<'a> FullscreenUpscalerUi<'a> {
 }
 
 impl<'a> eframe::App for FullscreenUpscalerUi<'a> {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         // Check if upscaler needs to be reinitialized
         if self.requires_reinitialization {
             // Clean up existing resources
@@ -794,85 +798,88 @@ impl<'a> eframe::App for FullscreenUpscalerUi<'a> {
         
         // Safe error handling to avoid crashes
         if !skip_processing {
-            match self.update_texture(ctx, _frame.egui_wgpu_backend()) {
-                Ok(_) => {
-                    // Measure frame processing time and check if we're lagging
-                    let frame_time = update_start.elapsed();
-                    if frame_time > frame_budget && self.enable_frame_skipping {
-                        log::warn!("Frame processing took {}ms (budget: {}ms), consider adjusting settings",
-                                frame_time.as_millis(), frame_budget.as_millis());
-                    }
-                    
-                    // Calculate FPS with higher precision for gaming PCs
-                    let now = std::time::Instant::now();
-                    let frame_time = now.duration_since(self.last_frame_time);
-                    self.last_frame_time = now;
-                    
-                    // Calculate rolling FPS average - more responsive for gaming PCs
-                    let current_fps = 1.0 / frame_time.as_secs_f32().max(0.0001); // Prevent division by zero
-                    
-                    // Update FPS history with adaptive smoothing based on stability
-                    let smooth_factor = if self.fps_history.len() > 10 {
-                        // Calculate FPS variance to determine smoothing factor
-                        let sum: f32 = self.fps_history.iter().sum();
-                        let mean = sum / self.fps_history.len() as f32;
-                        let variance: f32 = self.fps_history.iter()
-                            .map(|x| (x - mean).powi(2))
-                            .sum::<f32>() / self.fps_history.len() as f32;
-                        
-                        // More stable FPS = less smoothing needed
-                        if variance < 5.0 { 0.8 } else { 0.95 }
-                    } else {
-                        // Default smoothing for initial values
-                        0.9
-                    };
-                    
-                    self.fps = if self.fps == 0.0 {
-                        current_fps
-                    } else {
-                        self.fps * smooth_factor + current_fps * (1.0 - smooth_factor)
-                    };
-                    
-                    // Keep the last 120 frames of history for the graph
-                    self.fps_history.push(self.fps);
-                    if self.fps_history.len() > 120 {
-                        self.fps_history.remove(0);
-                    }
-                    
-                    // Update upscale time history
-                    let upscale_time_ms = self.performance_metrics.upscale_time.as_secs_f32() * 1000.0;
-                    self.last_upscale_time = upscale_time_ms;
-                    self.upscale_time_history.push(upscale_time_ms);
-                    if self.upscale_time_history.len() > 120 {
-                        self.upscale_time_history.remove(0);
-                    }
-                    
-                    // Update frame counter
-                    self.frames_processed += 1;
-                    
-                    // Update input/output size for display
-                    if let Ok(texture_guard) = self.texture.lock() {
-                        if let Some(texture) = texture_guard.as_ref() {
-                            let size = texture.size();
-                            self.output_size = (size[0] as u32, size[1] as u32);
+            let latest_frame = self.read_frame();
+            if let Some(ref frame_data) = latest_frame {
+                match self.update_texture(frame_data) {
+                    Ok(_) => {
+                        // Measure frame processing time and check if we're lagging
+                        let frame_time = update_start.elapsed();
+                        if frame_time > frame_budget && self.enable_frame_skipping {
+                            log::warn!("Frame processing took {}ms (budget: {}ms), consider adjusting settings",
+                                    frame_time.as_millis(), frame_budget.as_millis());
                         }
-                    }
-                    
-                    // Update input size from the latest frame
-                    if let Ok(Some(frame)) = self.frame_buffer.get_latest_frame() {
-                        self.input_size = (frame.width(), frame.height());
-                    }
-                },
-                Err(e) => {
-                    log::error!("Error updating texture: {}", e);
-                    
-                    // Increment error counter and trigger recovery if needed
-                    self.performance_metrics.error_count += 1;
-                    if self.performance_metrics.error_count > 5 {
-                        log::warn!("Multiple texture update errors, triggering recovery");
-                        self.cleanup();
-                        self.requires_reinitialization = true;
-                        self.performance_metrics.error_count = 0;
+                        
+                        // Calculate FPS with higher precision for gaming PCs
+                        let now = std::time::Instant::now();
+                        let frame_time = now.duration_since(self.last_frame_time);
+                        self.last_frame_time = now;
+                        
+                        // Calculate rolling FPS average - more responsive for gaming PCs
+                        let current_fps = 1.0 / frame_time.as_secs_f32().max(0.0001); // Prevent division by zero
+                        
+                        // Update FPS history with adaptive smoothing based on stability
+                        let smooth_factor = if self.fps_history.len() > 10 {
+                            // Calculate FPS variance to determine smoothing factor
+                            let sum: f32 = self.fps_history.iter().sum();
+                            let mean = sum / self.fps_history.len() as f32;
+                            let variance: f32 = self.fps_history.iter()
+                                .map(|x| (x - mean).powi(2))
+                                .sum::<f32>() / self.fps_history.len() as f32;
+                            
+                            // More stable FPS = less smoothing needed
+                            if variance < 5.0 { 0.8 } else { 0.95 }
+                        } else {
+                            // Default smoothing for initial values
+                            0.9
+                        };
+                        
+                        self.fps = if self.fps == 0.0 {
+                            current_fps
+                        } else {
+                            self.fps * smooth_factor + current_fps * (1.0 - smooth_factor)
+                        };
+                        
+                        // Keep the last 120 frames of history for the graph
+                        self.fps_history.push(self.fps);
+                        if self.fps_history.len() > 120 {
+                            self.fps_history.remove(0);
+                        }
+                        
+                        // Update upscale time history
+                        let upscale_time_ms = self.performance_metrics.upscale_time.as_secs_f32() * 1000.0;
+                        self.last_upscale_time = upscale_time_ms;
+                        self.upscale_time_history.push(upscale_time_ms);
+                        if self.upscale_time_history.len() > 120 {
+                            self.upscale_time_history.remove(0);
+                        }
+                        
+                        // Update frame counter
+                        self.frames_processed += 1;
+                        
+                        // Update input/output size for display
+                        if let Ok(texture_guard) = self.texture.lock() {
+                            if let Some(texture) = texture_guard.as_ref() {
+                                let size = texture.size();
+                                self.output_size = (size[0] as u32, size[1] as u32);
+                            }
+                        }
+                        
+                        // Update input size from the latest frame
+                        if let Ok(Some(frame)) = self.frame_buffer.get_latest_frame() {
+                            self.input_size = (frame.width(), frame.height());
+                        }
+                    },
+                    Err(e) => {
+                        log::error!("Error updating texture: {}", e);
+                        
+                        // Increment error counter and trigger recovery if needed
+                        self.performance_metrics.error_count += 1;
+                        if self.performance_metrics.error_count > 5 {
+                            log::warn!("Multiple texture update errors, triggering recovery");
+                            self.cleanup();
+                            self.requires_reinitialization = true;
+                            self.performance_metrics.error_count = 0;
+                        }
                     }
                 }
             }
@@ -904,12 +911,12 @@ impl<'a> eframe::App for FullscreenUpscalerUi<'a> {
         }
         
         // Force the window to be opaque black instead of transparent
-        _ctx.set_visuals(egui::Visuals::dark());
+        ctx.set_visuals(egui::Visuals::dark());
         
         // Use a dark background instead of transparent
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(egui::Color32::from_rgb(10, 10, 10)))
-            .show(_ctx, |ui| {
+            .show(ctx, |ui| {
                 let texture_available = if let Ok(texture_guard) = self.texture.lock() {
                     texture_guard.is_some()
                 } else {
@@ -1006,10 +1013,10 @@ impl<'a> eframe::App for FullscreenUpscalerUi<'a> {
         };
         
         // Request repaint based on performance metrics for gaming PC
-        _ctx.request_repaint_after(next_frame_time);
+        ctx.request_repaint_after(next_frame_time);
         
         // Safe window position update
-        self.update_source_window_info(_ctx);
+        self.update_source_window_info(ctx);
     }
     
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -1189,41 +1196,16 @@ pub fn run_fullscreen_upscaler(
         "NU_Scaler Fullscreen",
         native_options,
         Box::new(move |cc| {
-            Box::new(async move {
-                // Configure the wgpu renderer if available
-                if let Some(ctx) = &cc.wgpu_render_state {
-                    log::info!("Using wgpu renderer with features: {:?}", ctx.adapter.features());
-                }
-                
-                // Create the UI
-                let mut ui = FullscreenUpscalerUi::new(
-                    cc,
-                    frame_buffer_clone,
-                    stop_signal_clone,
-                    upscaler,
-                    algorithm_copy,
-                    capture_target_clone,
-                );
-                
-                // Set the capture target
-                ui.set_capture_target(capture_target_clone);
-                
-                ui
-            })
+            let mut ui = FullscreenUpscalerUi::new(
+                cc,
+                frame_buffer_clone,
+                stop_signal_clone,
+                upscaler,
+                algorithm_copy,
+                capture_target_clone,
+            );
+            ui.set_capture_target(capture_target_clone);
+            Box::new(ui)
         }),
     ).map_err(|e| e.to_string())
-}
-
-/// Integration method for the main window to use this upscaler
-impl FullscreenUpscalerUi {
-    // Method to render upscaled content in any UI context
-    pub fn render_upscaled_content(&self, ui: &mut egui::Ui) -> bool {
-        if let Some(texture_id) = self.egui_texture_id {
-            let size = ui.available_size();
-            ui.image(texture_id, size);
-            true
-        } else {
-            false
-        }
-    }
 }
