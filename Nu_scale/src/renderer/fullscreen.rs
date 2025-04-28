@@ -9,7 +9,6 @@ use std::time::{Instant, Duration};
 use log;
 use egui_wgpu::WgpuConfiguration;
 use winit::window::Window;
-use egui::load::SizedTexture;
 
 use crate::capture::common::FrameBuffer;
 use crate::upscale::{Upscaler, UpscalingTechnology, UpscalingQuality};
@@ -278,10 +277,7 @@ impl<'a> WgpuState<'a> {
 
     /// Create render resources for direct rendering
     fn create_render_resources(&mut self, width: u32, height: u32) -> Result<()> {
-        let needs_creation = self.render_resources
-            .as_ref()
-            .map_or(true, |r| r.texture_size != (width, height));
-        if needs_creation {
+        if self.render_resources.is_none() {
             // Create shader module
             let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Fullscreen Shader"),
@@ -316,7 +312,6 @@ impl<'a> WgpuState<'a> {
                 ..Default::default()
             });
 
-            // Create bind group layout
             let bind_group_layout = self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("Frame Bind Group Layout"),
                 entries: &[
@@ -326,7 +321,7 @@ impl<'a> WgpuState<'a> {
                         ty: wgpu::BindingType::Texture {
                             multisampled: false,
                             view_dimension: wgpu::TextureViewDimension::D2,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            sample_type: wgpu::BindingType::TextureSampleType::Float { filterable: true },
                         },
                         count: None,
                     },
@@ -339,7 +334,6 @@ impl<'a> WgpuState<'a> {
                 ],
             });
 
-            // Create bind group
             let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Frame Bind Group"),
                 layout: &bind_group_layout,
@@ -355,7 +349,6 @@ impl<'a> WgpuState<'a> {
                 ],
             });
 
-            // Create render pipeline
             let render_pipeline_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Fullscreen Pipeline Layout"),
                 bind_group_layouts: &[&bind_group_layout],
@@ -397,7 +390,6 @@ impl<'a> WgpuState<'a> {
                 multiview: None,
             });
 
-            // Create vertex buffer (empty since we use vertex shader to generate vertices)
             let vertex_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Vertex Buffer"),
                 size: 0,
@@ -574,7 +566,7 @@ impl<'a> FullscreenUpscalerUi<'a> {
         algorithm: Option<UpscalingAlgorithm>,
         capture_target: CaptureTarget,
     ) -> Self {
-        let window = cc.native_window();
+        let window = cc.viewport_rect().window();
         let wgpu_state = pollster::block_on(WgpuState::new(window)).ok();
         let egui_wgpu_renderer = if let Some(ref state) = wgpu_state {
             Some(egui_wgpu::Renderer::new(
@@ -709,8 +701,7 @@ impl<'a> FullscreenUpscalerUi<'a> {
     }
 
     fn update_source_window_info(&mut self, ctx: &egui::Context) {
-        let viewport_id = ctx.viewport_id();
-        let rect = ctx.viewport_rect();
+        let rect = ctx.frame().rect;
         self.source_window_info = Some((
             rect.left() as i32,
             rect.top() as i32,
@@ -755,17 +746,15 @@ impl<'a> FullscreenUpscalerUi<'a> {
     }
 
     pub fn render_upscaled_content(&self, ui: &mut egui::Ui) -> bool {
-        if let Some(texture_id) = self.egui_texture_id {
-            ui.image(egui::Image::new((texture_id, ui.available_size())));
+        self.egui_texture_id.map_or(false, |texture_id| {
+            ui.image((texture_id, ui.available_size()));
             true
-        } else {
-            false
-        }
+        })
     }
 }
 
 impl<'a> eframe::App for FullscreenUpscalerUi<'a> {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Check if upscaler needs to be reinitialized
         if self.requires_reinitialization {
             // Clean up existing resources
