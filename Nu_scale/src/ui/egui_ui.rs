@@ -2172,38 +2172,33 @@ impl Drop for TextureCache {
 
 /// Run the egui application
 pub fn run_app() -> Result<()> {
-    println!("Launching GUI!");
-    let options = eframe::NativeOptions {
-        viewport: ViewportBuilder::default()
-            .with_inner_size([1024.0, 768.0])
+    let native_options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([1200.0, 800.0])
             .with_min_inner_size([800.0, 600.0])
-            .with_decorations(true)
-            .with_title("NU Scale"),
+            .with_transparent(true),
         renderer: eframe::Renderer::Wgpu,
         ..Default::default()
     };
-    // Manually set theme on viewport
-    let native_options = options;
-    // Fix: Use .with_theme() method correctly
-    // Remove viewport theme setting here, will be set via context later
-    // native_options.viewport = native_options.viewport.with_theme(Some(eframe::Theme::Dark.into())); 
 
     eframe::run_native(
-        "NU Scale",
-        native_options, // Use native options without theme
+        "NU Scaler", 
+        native_options,
         Box::new(|cc| {
-            let app_state = AppState::default();
-            app_state.configure_fonts(&cc.egui_ctx);
-            // Apply theme from settings using context visuals
-            let theme = match app_state.settings.theme.as_str() {
-                "light" => egui::Visuals::light(),
-                _ => egui::Visuals::dark(), // Default to Dark
-            };
-            cc.egui_ctx.set_visuals(theme);
-            Box::new(app_state)
+            let mut fonts = egui::FontDefinitions::default();
+            fonts.font_data.insert(
+                "Inter".to_owned(),
+                egui::FontData::from_static(include_bytes!("../../assets/Inter-Regular.ttf")),
+            );
+            fonts.families.insert(
+                egui::FontFamily::Proportional,
+                vec!["Inter".to_owned()],
+            );
+            cc.egui_ctx.set_fonts(fonts);
+            Box::new(AppState::default())
         }),
     )
-    .map_err(|e| anyhow!("Failed to run eframe: {}", e))?;
+    .map_err(|e| anyhow!("Application failed: {}", e))?;
 
     Ok(())
 } 
