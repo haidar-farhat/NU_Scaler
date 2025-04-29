@@ -42,7 +42,6 @@ egui-wgpu = "0.27"
 
 # Replace GTK with Iced (pure Rust GUI)
 iced = { version = "0.10", features = ["image", "tokio", "debug"] }
-iced_aw = "0.7"  # Additional widgets for Iced
 iced_native = "0.10"  # Native backend
 iced_style = "0.9"    # Styling
 

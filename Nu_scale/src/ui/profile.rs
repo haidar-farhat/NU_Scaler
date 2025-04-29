@@ -3,6 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use anyhow::{Result, anyhow};
 use dirs;
+use std::fmt;
 
 /// Source type for capture
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -29,7 +30,7 @@ pub enum SystemPlatform {
 }
 
 /// Upscaling technology
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum UpscalingTechnology {
     /// No upscaling
     None,
@@ -43,8 +44,21 @@ pub enum UpscalingTechnology {
     Custom,
 }
 
+// Implement Display for UpscalingTechnology
+impl fmt::Display for UpscalingTechnology {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            UpscalingTechnology::None => write!(f, "Auto"),
+            UpscalingTechnology::FSR => write!(f, "AMD FSR"),
+            UpscalingTechnology::DLSS => write!(f, "NVIDIA DLSS"),
+            UpscalingTechnology::Fallback => write!(f, "Fallback/Basic"),
+            UpscalingTechnology::Custom => write!(f, "GPU (Vulkan)"),
+        }
+    }
+}
+
 /// Upscaling quality
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum UpscalingQuality {
     /// Ultra quality (minimal upscaling)
     Ultra,
@@ -54,6 +68,18 @@ pub enum UpscalingQuality {
     Balanced,
     /// Performance (focus on performance)
     Performance,
+}
+
+// Implement Display for UpscalingQuality
+impl fmt::Display for UpscalingQuality {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            UpscalingQuality::Ultra => write!(f, "Ultra Quality"),
+            UpscalingQuality::Quality => write!(f, "Quality"),
+            UpscalingQuality::Balanced => write!(f, "Balanced"),
+            UpscalingQuality::Performance => write!(f, "Performance"),
+        }
+    }
 }
 
 /// A profile for capturing and upscaling settings

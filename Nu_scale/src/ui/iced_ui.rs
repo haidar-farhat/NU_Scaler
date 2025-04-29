@@ -172,7 +172,7 @@ impl AppState {
         let available_profiles = super::profile::Profile::list_profiles().unwrap_or_default();
         
         Ok(Self {
-            profile,
+            profile: profile.clone(),
             settings,
             is_capturing: false,
             is_upscaling: false,
@@ -208,7 +208,7 @@ impl Application for AppState {
             Err(e) => {
                 eprintln!("Failed to create app state: {}", e);
                 // Create a default app state and set an error message
-                let mut default_app = AppState {
+                let default_app = AppState {
                     profile: Profile::default(),
                     settings: AppSettings::default(),
                     is_capturing: false,
@@ -269,6 +269,7 @@ impl Application for AppState {
                 match Profile::load(&profile_path) {
                     Ok(profile) => {
                         self.profile = profile;
+                        let profile_name = name.clone();
                         self.settings.current_profile = name;
                         let _ = self.settings.save();
                         
@@ -288,7 +289,7 @@ impl Application for AppState {
                         self.scale_factor = self.profile.scale_factor;
                         self.fps = self.profile.fps;
                         
-                        self.status_message = format!("Loaded profile: {}", name);
+                        self.status_message = format!("Loaded profile: {}", profile_name);
                         self.status_message_type = MessageType::Success;
                     }
                     Err(e) => {
@@ -637,28 +638,23 @@ impl AppState {
             column![
                 text("Capture Source").size(18),
                 // Fullscreen radio button
-                button(
-                    row![
-                        checkbox(
-                            self.capture_source == CaptureSource::Fullscreen,
-                            "🖥️ Fullscreen",
-                            |_| Message::SelectCaptureSource(CaptureSource::Fullscreen),
-                        ),
-                    ]
-                )
-                .style(theme::Button::Text),
+                checkbox(
+                    "🖥️ Fullscreen",
+                    self.capture_source == CaptureSource::Fullscreen,
+                    |_| Message::SelectCaptureSource(CaptureSource::Fullscreen),
+                ),
                 
                 // Window radio button
                 row![
                     checkbox(
-                        self.capture_source == CaptureSource::Window,
                         "🪟 Window",
+                        self.capture_source == CaptureSource::Window,
                         |_| Message::SelectCaptureSource(CaptureSource::Window),
                     ),
                     
                     // Only show window dropdown if Window is selected
                     if self.capture_source == CaptureSource::Window {
-                        row![
+                        let window_controls: Element<Message> = row![
                             pick_list(
                                 self.available_windows.clone(),
                                 self.available_windows.get(self.selected_window_index).cloned(),
@@ -668,23 +664,25 @@ impl AppState {
                             button("🔄 Refresh").on_press(Message::RefreshWindows),
                         ]
                         .spacing(8)
-                        .into()
+                        .into();
+                        window_controls
                     } else {
-                        row![].into()
+                        let empty: Element<Message> = row![].into();
+                        empty
                     }
                 ],
                 
                 // Region radio button
                 row![
                     checkbox(
-                        self.capture_source == CaptureSource::Region,
                         "📏 Region",
+                        self.capture_source == CaptureSource::Region,
                         |_| Message::SelectCaptureSource(CaptureSource::Region),
                     ),
                     
                     // Only show region selector if Region is selected
                     if self.capture_source == CaptureSource::Region {
-                        row![
+                        let region_controls: Element<Message> = row![
                             button("Select Region").on_press(Message::SelectRegion),
                             text(format!(
                                 "({}, {}, {}x{})",
@@ -692,9 +690,11 @@ impl AppState {
                             )),
                         ]
                         .spacing(8)
-                        .into()
+                        .into();
+                        region_controls
                     } else {
-                        row![].into()
+                        let empty: Element<Message> = row![].into();
+                        empty
                     }
                 ],
             ]
@@ -740,31 +740,21 @@ impl AppState {
                     text("Upscaling Technology:"),
                     pick_list(
                         vec![
-                            ("Auto", ProfileUpscalingTechnology::None),
-                            ("AMD FSR", ProfileUpscalingTechnology::FSR),
-                            ("NVIDIA DLSS", ProfileUpscalingTechnology::DLSS),
-                            ("GPU (Vulkan)", ProfileUpscalingTechnology::Custom),
-                            ("Fallback/Basic", ProfileUpscalingTechnology::Fallback),
+                            ProfileUpscalingTechnology::None,
+                            ProfileUpscalingTechnology::FSR,
+                            ProfileUpscalingTechnology::DLSS,
+                            ProfileUpscalingTechnology::Custom,
+                            ProfileUpscalingTechnology::Fallback,
                         ],
-                        Some((
-                            match self.profile.upscaling_tech {
-                                0 => "Auto",
-                                1 => "AMD FSR",
-                                2 => "NVIDIA DLSS",
-                                3 => "GPU (Vulkan)",
-                                4 => "Fallback/Basic",
-                                _ => "Auto",
-                            }, 
-                            match self.profile.upscaling_tech {
-                                0 => ProfileUpscalingTechnology::None,
-                                1 => ProfileUpscalingTechnology::FSR,
-                                2 => ProfileUpscalingTechnology::DLSS,
-                                3 => ProfileUpscalingTechnology::Custom,
-                                4 => ProfileUpscalingTechnology::Fallback,
-                                _ => ProfileUpscalingTechnology::None,
-                            }
-                        )),
-                        |(_label, tech)| Message::TechSelected(tech),
+                        Some(match self.profile.upscaling_tech {
+                            0 => ProfileUpscalingTechnology::None,
+                            1 => ProfileUpscalingTechnology::FSR,
+                            2 => ProfileUpscalingTechnology::DLSS,
+                            3 => ProfileUpscalingTechnology::Custom,
+                            4 => ProfileUpscalingTechnology::Fallback,
+                            _ => ProfileUpscalingTechnology::None,
+                        }),
+                        |tech| Message::TechSelected(tech),
                     ),
                 ],
                 
@@ -773,54 +763,31 @@ impl AppState {
                     text("Upscaling Quality:"),
                     pick_list(
                         vec![
-                            ("Ultra Quality", ProfileUpscalingQuality::Ultra),
-                            ("Quality", ProfileUpscalingQuality::Quality),
-                            ("Balanced", ProfileUpscalingQuality::Balanced),
-                            ("Performance", ProfileUpscalingQuality::Performance),
+                            ProfileUpscalingQuality::Ultra,
+                            ProfileUpscalingQuality::Quality,
+                            ProfileUpscalingQuality::Balanced,
+                            ProfileUpscalingQuality::Performance,
                         ],
-                        Some((
-                            match self.profile.upscaling_quality {
-                                0 => "Ultra Quality",
-                                1 => "Quality",
-                                2 => "Balanced",
-                                3 => "Performance",
-                                _ => "Quality",
-                            },
-                            match self.profile.upscaling_quality {
-                                0 => ProfileUpscalingQuality::Ultra,
-                                1 => ProfileUpscalingQuality::Quality,
-                                2 => ProfileUpscalingQuality::Balanced,
-                                3 => ProfileUpscalingQuality::Performance,
-                                _ => ProfileUpscalingQuality::Quality,
-                            }
-                        )),
-                        |(_label, quality)| Message::QualitySelected(quality),
+                        Some(match self.profile.upscaling_quality {
+                            0 => ProfileUpscalingQuality::Ultra,
+                            1 => ProfileUpscalingQuality::Quality,
+                            2 => ProfileUpscalingQuality::Balanced,
+                            3 => ProfileUpscalingQuality::Performance,
+                            _ => ProfileUpscalingQuality::Quality,
+                        }),
+                        |quality| Message::QualitySelected(quality),
                     ),
                 ],
                 
                 // Upscaling algorithm (only shown for GPU or Fallback)
                 if self.profile.upscaling_tech == 3 || self.profile.upscaling_tech == 4 {
-                    column![
+                    let algorithm_controls: Element<Message> = column![
                         row![
                             text("Upscaling Algorithm:"),
                             pick_list(
-                                vec![
-                                    ("Lanczos (a=3)", 0),
-                                    ("Bicubic", 1),
-                                    ("Bilinear", 2),
-                                    ("Nearest-Neighbor", 3),
-                                ],
-                                Some((
-                                    match self.profile.upscaling_algorithm {
-                                        0 => "Lanczos (a=3)",
-                                        1 => "Bicubic",
-                                        2 => "Bilinear",
-                                        3 => "Nearest-Neighbor",
-                                        _ => "Lanczos (a=3)",
-                                    },
-                                    self.profile.upscaling_algorithm
-                                )),
-                                |(_label, algorithm)| Message::AlgorithmSelected(algorithm),
+                                vec![0, 1, 2, 3],
+                                Some(self.profile.upscaling_algorithm),
+                                Message::AlgorithmSelected,
                             ),
                         ],
                         
@@ -837,7 +804,8 @@ impl AppState {
                         .size(12)
                         .style(theme::Text::Color(iced::Color::from_rgb(0.7, 0.7, 0.7))),
                     ]
-                    .into()
+                    .into();
+                    algorithm_controls
                 } else {
                     row![].into()
                 },
@@ -892,20 +860,20 @@ impl AppState {
                 
                 // Checkboxes for application settings
                 checkbox(
-                    self.settings.auto_save_frames,
                     "Auto-save Captured Frames",
+                    self.settings.auto_save_frames,
                     Message::ToggleAutoSaveFrames,
                 ),
                 
                 checkbox(
-                    self.settings.show_fps_counter,
                     "Show FPS counter",
+                    self.settings.show_fps_counter,
                     Message::ToggleShowFpsCounter,
                 ),
                 
                 checkbox(
-                    self.settings.show_notifications,
                     "Show notifications",
+                    self.settings.show_notifications,
                     Message::ToggleShowNotifications,
                 ),
                 
@@ -913,9 +881,9 @@ impl AppState {
                 row![
                     text("Theme:"),
                     pick_list(
-                        vec!["light", "dark"],
-                        Some(self.settings.theme.as_str()),
-                        |theme| Message::ThemeSelected(theme.to_string()),
+                        vec!["light".to_string(), "dark".to_string()],
+                        Some(self.settings.theme.clone()),
+                        Message::ThemeSelected,
                     ),
                 ],
             ]
