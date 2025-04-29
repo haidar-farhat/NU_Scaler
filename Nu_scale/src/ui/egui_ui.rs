@@ -2185,16 +2185,7 @@ pub fn run_app() -> Result<()> {
         "NU Scaler", 
         native_options,
         Box::new(|cc| {
-            let mut fonts = egui::FontDefinitions::default();
-            fonts.font_data.insert(
-                "Inter".to_owned(),
-                egui::FontData::from_static(include_bytes!("../../assets/Inter-Regular.ttf")),
-            );
-            fonts.families.insert(
-                egui::FontFamily::Proportional,
-                vec!["Inter".to_owned()],
-            );
-            cc.egui_ctx.set_fonts(fonts);
+            // Use default egui fonts (no custom font loading)
             Box::new(AppState::default())
         }),
     )
