@@ -2176,7 +2176,7 @@ pub fn run_app() -> Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1200.0, 800.0])
             .with_min_inner_size([800.0, 600.0])
-            .with_transparent(true),
+            .with_transparent(false), // Changed from true to false
         renderer: eframe::Renderer::Wgpu,
         ..Default::default()
     };
