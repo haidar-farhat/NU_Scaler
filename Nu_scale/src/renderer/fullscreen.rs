@@ -1,3 +1,4 @@
+#![allow(dead_code, unused_variables, unused_mut)]
 use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering, AtomicUsize}};
 use std::fs::{File, OpenOptions};
 use std::io::ErrorKind;
@@ -653,7 +654,7 @@ impl<'a> FullscreenUpscalerUi<'a> {
         if let Some(wgpu_state) = &mut self.wgpu_state {
             wgpu_state.render_resources = None;
         }
-        self.upscaler.cleanup();
+        let _ = self.upscaler.cleanup();
     }
 
     fn start_processing_thread(&mut self) {
