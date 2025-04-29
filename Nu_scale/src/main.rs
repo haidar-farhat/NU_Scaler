@@ -3,8 +3,6 @@ use clap::{Arg, App, SubCommand};
 use log::{debug, info, warn, error};
 use nu_scaler::capture::platform::windows::WgpuWindowsCapture;
 use pollster::block_on;
-use eframe;
-use egui;
 
 fn main() -> Result<()> {
     env_logger::init();
@@ -98,24 +96,10 @@ fn main() -> Result<()> {
 
     // Launch GUI if no subcommands and not forced to CLI
     if !force_cli && matches.subcommand_name().is_none() {
-        info!("Starting NU_Scaler GUI");
+        info!("Starting NU_Scaler GUI with GTK");
 
-        // Explicit platform initialization for eframe/egui
-        let native_options = eframe::NativeOptions {
-            viewport: egui::ViewportBuilder::default()
-                .with_inner_size([1200.0, 800.0])
-                .with_transparent(true),
-            renderer: eframe::Renderer::Wgpu,
-            ..Default::default()
-        };
-
-        eframe::run_native(
-            "NU Scaler",
-            native_options,
-            Box::new(|cc| Box::new(nu_scaler::ui::AppState::default())),
-        ).map_err(|e| anyhow!("GUI failed: {}", e))?;
-
-        return Ok(());
+        // Run the GTK application
+        return nu_scaler::ui::gtk_ui::run_app();
     }
 
     // Fallback to CLI mode

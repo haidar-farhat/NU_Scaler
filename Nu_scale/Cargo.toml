@@ -40,6 +40,15 @@ opencv = { version = "0.75", optional = true }
 
 egui-wgpu = "0.27"
 
+# Add GTK dependencies
+gtk4 = "0.6"
+relm4 = "0.6" # Optional: Higher-level wrapper around GTK4
+glib = "0.17"
+gio = "0.17"
+gdk-pixbuf = "0.17"
+pango = "0.17"
+cairo-rs = { version = "0.17", features = ["png"] }
+
 [features]
 default = ["gui"]
 gui = ["egui", "eframe"]
