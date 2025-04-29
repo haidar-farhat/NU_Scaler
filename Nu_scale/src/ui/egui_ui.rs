@@ -1,3 +1,4 @@
+#![allow(unused_variables, dead_code, unused_imports, unused_mut)]
 use anyhow::{anyhow, Result};
 use egui::{
     epaint::ahash::AHashMap,
