@@ -97,7 +97,11 @@ fn main() -> Result<()> {
     // Launch GUI if no subcommands and not forced to CLI
     if !force_cli && matches.subcommand_name().is_none() {
         info!("Starting NU_Scaler GUI");
-        return nu_scaler::ui::run_app(); // Use the proper GUI entry point
+        nu_scaler::ui::run_app().map_err(|e| {
+            error!("GUI failed to launch: {}", e);
+            std::process::exit(1);
+        })?;
+        return Ok(());
     }
 
     // Fallback to CLI mode

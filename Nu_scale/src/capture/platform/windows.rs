@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use anyhow::{Result, anyhow};
 use image::{RgbaImage, Rgba};
 use std::mem::size_of;
