@@ -2518,6 +2518,7 @@ dependencies = [
  "wayland-protocols 0.30.1",
  "wgpu",
  "windows 0.48.0",
+ "winit",
  "x11rb 0.11.1",
 ]
 

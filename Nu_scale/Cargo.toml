@@ -24,6 +24,7 @@ chrono = "0.4"
 rand = "0.8.5"
 raw-window-handle = "0.5"
 crossbeam-channel = "0.5"
+winit = "0.29"
 
 # Vulkan dependencies
 vulkano = "0.34"

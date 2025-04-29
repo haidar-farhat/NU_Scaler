@@ -1,3 +1,4 @@
+#![allow(dead_code, unused_variables, unused_mut)]
 use anyhow::{Result, anyhow};
 use image::RgbaImage;
 use std::sync::atomic::{AtomicBool, Ordering};
