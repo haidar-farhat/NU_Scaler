@@ -807,7 +807,8 @@ impl AppState {
                     .into();
                     algorithm_controls
                 } else {
-                    row![].into()
+                    let empty: Element<Message> = row![].into();
+                    empty
                 },
             ]
             .spacing(10)
