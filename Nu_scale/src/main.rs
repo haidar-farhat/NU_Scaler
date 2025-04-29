@@ -4,15 +4,6 @@ use log::{debug, info, warn, error};
 use nu_scaler::capture::platform::windows::WgpuWindowsCapture;
 use pollster::block_on;
 
-struct MyApp;
-impl eframe::App for MyApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Hello, world! If you see this, eframe/egui is working.");
-        });
-    }
-}
-
 fn main() -> Result<()> {
     env_logger::init();
 
@@ -20,7 +11,7 @@ fn main() -> Result<()> {
     block_on(async {
         let mut capture = WgpuWindowsCapture::new().expect("instance");
         capture.initialize_wgpu().await.expect("init wgpu");
-        // Optional: test a capture here...
+        std::mem::forget(capture); // Prevent immediate cleanup
     });
 
     // Simple CLI app with all needed commands
@@ -97,7 +88,6 @@ fn main() -> Result<()> {
     
     // If fullscreen command is used, handle it
     if let Some(matches) = matches.subcommand_matches("fullscreen") {
-        // ... [existing fullscreen subcommand handling code] ...
         return handle_fullscreen_subcommand(matches);
     }
 
@@ -107,12 +97,7 @@ fn main() -> Result<()> {
     // Launch GUI if no subcommands and not forced to CLI
     if !force_cli && matches.subcommand_name().is_none() {
         info!("Starting NU_Scaler GUI");
-        eframe::run_native(
-            "NU Scaler",
-            eframe::NativeOptions::default(),
-            Box::new(|_cc| Box::new(MyApp {})),
-        );
-        return Ok(());
+        return nu_scaler::ui::run_app(); // Use the proper GUI entry point
     }
 
     // Fallback to CLI mode

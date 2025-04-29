@@ -201,7 +201,11 @@ impl FullscreenUpscalerUiOld {
     ) -> Self {
         // Initialize the appropriate capture backend based on platform
         #[cfg(target_os = "windows")]
-        let capture_backend = Box::new(crate::capture::platform::windows::WgpuWindowsCapture::new().unwrap());
+        let capture_backend = {
+            let backend = crate::capture::platform::windows::WgpuWindowsCapture::new().unwrap();
+            std::mem::forget(backend);
+            Box::new(crate::capture::platform::windows::WgpuWindowsCapture::new().unwrap())
+        };
         
         #[cfg(target_os = "linux")]
         let capture_backend = {
