@@ -2,7 +2,7 @@
 #[cfg(not(feature = "disable_gui"))]
 pub mod egui_ui;
 #[cfg(not(feature = "disable_gui"))]
-pub mod gtk_ui;
+pub mod iced_ui;
 pub mod profile;
 pub mod settings;
 pub mod hotkeys;
@@ -12,9 +12,9 @@ pub mod tabs;
 
 // Use crate:: paths for re-exports and imports from lib/ui scope
 #[cfg(not(feature = "disable_gui"))]
-pub use crate::ui::egui_ui::{AppState, run_app as run_egui_app};
+pub use crate::ui::egui_ui::{AppState as EguiAppState, run_app as run_egui_app};
 #[cfg(not(feature = "disable_gui"))]
-pub use crate::ui::gtk_ui::{AppState as GtkAppState, run_app as run_gtk_app};
+pub use crate::ui::iced_ui::{AppState, run_app};
 pub use crate::ui::profile::Profile;
 pub use crate::ui::region_dialog::RegionDialog;
 
@@ -37,8 +37,8 @@ use crate::upscale::{UpscalingTechnology, UpscalingQuality};
 /// Run the UI
 pub fn run_ui() -> Result<()> {
     #[cfg(not(feature = "disable_gui"))]
-    // Default to using GTK UI if available, fall back to egui if needed
-    return crate::ui::gtk_ui::run_app();
+    // Use Iced UI
+    return crate::ui::iced_ui::run_app();
     
     #[cfg(feature = "disable_gui")]
     {

@@ -40,14 +40,11 @@ opencv = { version = "0.75", optional = true }
 
 egui-wgpu = "0.27"
 
-# Add GTK dependencies
-gtk4 = "0.6"
-relm4 = "0.6" # Optional: Higher-level wrapper around GTK4
-glib = "0.17"
-gio = "0.17"
-gdk-pixbuf = "0.17"
-pango = "0.17"
-cairo-rs = { version = "0.17", features = ["png"] }
+# Replace GTK with Iced (pure Rust GUI)
+iced = { version = "0.10", features = ["image", "tokio", "debug"] }
+iced_aw = "0.7"  # Additional widgets for Iced
+iced_native = "0.10"  # Native backend
+iced_style = "0.9"    # Styling
 
 [features]
 default = ["gui"]

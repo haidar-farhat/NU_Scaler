@@ -96,10 +96,10 @@ fn main() -> Result<()> {
 
     // Launch GUI if no subcommands and not forced to CLI
     if !force_cli && matches.subcommand_name().is_none() {
-        info!("Starting NU_Scaler GUI with GTK");
+        info!("Starting NU_Scaler GUI with Iced");
 
-        // Run the GTK application
-        return nu_scaler::ui::gtk_ui::run_app();
+        // Run the Iced application
+        return nu_scaler::ui::iced_ui::run_app();
     }
 
     // Fallback to CLI mode
