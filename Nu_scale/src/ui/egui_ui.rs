@@ -353,6 +353,7 @@ impl FrameBudget {
 
 impl Default for AppState {
     fn default() -> Self {
+        println!("AppState::default() called");
         let settings = AppSettings::load().unwrap_or_default();
         let profile_path = format!("{}.json", settings.current_profile);
         let profile = Profile::load(&profile_path).unwrap_or_default();
@@ -2172,6 +2173,10 @@ impl Drop for TextureCache {
 
 /// Run the egui application
 pub fn run_app() -> Result<()> {
+    std::panic::set_hook(Box::new(|info| {
+        println!("PANIC: {}", info);
+    }));
+    println!("run_app() started");
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1200.0, 800.0])
@@ -2179,7 +2184,7 @@ pub fn run_app() -> Result<()> {
             .with_position([100.0, 100.0]) // Force window position
             .with_maximized(true) // Start maximized
             .with_transparent(false),
-        renderer: eframe::Renderer::Wgpu,
+        renderer: eframe::Renderer::Glow, // Switch to OpenGL
         ..Default::default()
     };
 
