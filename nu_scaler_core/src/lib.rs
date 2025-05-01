@@ -87,7 +87,7 @@ impl PyWgpuUpscaler {
     }
 
     /// Batch upscale: takes a list of bytes objects, returns a list of bytes objects
-    pub fn upscale_batch<'py>(&mut self, py: Python<'py>, frames: &PyAny) -> PyResult<Vec<&'py PyBytes>> {
+    pub fn upscale_batch<'py>(&self, py: Python<'py>, frames: &PyAny) -> PyResult<Vec<&'py PyBytes>> {
         let frames_vec: Vec<&[u8]> = frames
             .iter()?
             .map(|item| item?.extract::<&PyBytes>().map(|b| b.as_bytes()))
