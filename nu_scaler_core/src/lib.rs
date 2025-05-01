@@ -86,6 +86,10 @@ impl PyScreenCapture {
     pub fn new() -> Self {
         Self { inner: ScreenCapture::new() }
     }
+    #[staticmethod]
+    pub fn list_windows() -> Vec<String> {
+        ScreenCapture::list_windows()
+    }
     pub fn start(&mut self, target: Option<PyCaptureTarget>) -> PyResult<()> {
         let tgt = target.unwrap_or(PyCaptureTarget::FullScreen);
         self.inner.start(tgt.into()).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))

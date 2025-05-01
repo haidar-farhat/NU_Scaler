@@ -1,6 +1,11 @@
 use scrap::{Capturer, Display};
 use std::io::ErrorKind;
 
+#[cfg(target_os = "windows")]
+use windows::Win32::Foundation::{HWND, LPARAM};
+#[cfg(target_os = "windows")]
+use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowTextW, IsWindowVisible};
+
 #[derive(Debug, Clone)]
 pub enum CaptureTarget {
     FullScreen,
@@ -12,6 +17,7 @@ pub trait RealTimeCapture {
     fn start(&mut self, target: CaptureTarget) -> Result<(), String>;
     fn stop(&mut self);
     fn get_frame(&mut self) -> Option<Vec<u8>>; // Returns raw RGB frame
+    fn list_windows() -> Vec<String> where Self: Sized;
 }
 
 pub struct ScreenCapture {
@@ -30,6 +36,35 @@ impl ScreenCapture {
             width: 0,
             height: 0,
             target: None,
+        }
+    }
+    pub fn list_windows() -> Vec<String> {
+        #[cfg(target_os = "windows")]
+        {
+            use std::ptr;
+            use std::ffi::OsString;
+            use std::os::windows::ffi::OsStringExt;
+            let mut titles = Vec::new();
+            unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> i32 {
+                let mut buf = [0u16; 512];
+                let len = GetWindowTextW(hwnd, &mut buf);
+                if len > 0 && IsWindowVisible(hwnd).as_bool() {
+                    let title = OsString::from_wide(&buf[..len as usize]).to_string_lossy().to_string();
+                    if !title.is_empty() {
+                        let titles = &mut *(lparam.0 as *mut Vec<String>);
+                        titles.push(title);
+                    }
+                }
+                1
+            }
+            unsafe {
+                EnumWindows(Some(enum_windows_proc), LPARAM(&mut titles as *mut _ as isize));
+            }
+            titles
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            vec![]
         }
     }
 }
@@ -92,5 +127,8 @@ impl RealTimeCapture for ScreenCapture {
             Err(ref e) if e.kind() == ErrorKind::WouldBlock => None, // No new frame yet
             Err(_) => None,
         }
+    }
+    fn list_windows() -> Vec<String> {
+        ScreenCapture::list_windows()
     }
 } 
