@@ -201,7 +201,7 @@ class LiveFeedScreen(QWidget):
             return # No frame yet
 
         frame_bytes_obj, in_w, in_h = frame_result
-        frame = frame_bytes_obj.tobytes() # Extract bytes from PyBytes/PyObject
+        frame = frame_bytes_obj
 
         # Initialize upscaler on first frame or if dimensions change
         if not self.upscaler or not self.upscaler_initialized:
