@@ -3,6 +3,9 @@ use std::io::ErrorKind;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::BOOL;
 
+// Add image crate imports here too
+// use image::ImageBuffer;
+
 #[cfg(target_os = "windows")]
 use windows::Win32::Foundation::{HWND, LPARAM, RECT};
 #[cfg(target_os = "windows")]
@@ -29,7 +32,7 @@ pub struct ScreenCapture {
     capturer: Option<Capturer>,
     width: usize,
     height: usize,
-    target: Option<CaptureTarget>,
+    pub target: Option<CaptureTarget>,
     #[cfg(target_os = "windows")]
     hwnd: Option<isize>,
 }
@@ -259,16 +262,9 @@ impl RealTimeCapture for ScreenCapture {
                                 return None;
                             }
 
-                            let mut rgba = Vec::with_capacity(width * height * 4);
-                            for chunk in buf.chunks_exact(4) {
-                                rgba.push(chunk[2]);
-                                rgba.push(chunk[1]);
-                                rgba.push(chunk[0]);
-                                rgba.push(chunk[3]);
-                            }
-
-                            self.debug_print(&format!("Captured window frame: {} bytes ({}x{}) via GDI", rgba.len(), width, height));
-                            Some((rgba, width, height))
+                            self.debug_print(&format!("Captured window frame: {} bytes ({}x{}) via GDI", buf.len(), width, height));
+                            // Return the RAW BGRA buffer
+                            Some((buf, width, height))
                         }
                     })
                 }
