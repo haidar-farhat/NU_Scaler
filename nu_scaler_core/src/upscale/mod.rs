@@ -3,6 +3,7 @@ use wgpu::{Instance, Device, Queue, Adapter, Backends, DeviceDescriptor, Feature
 use wgpu::util::DeviceExt;
 use rayon::prelude::*;
 use std::time::Instant;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Upscaling quality levels
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -165,15 +166,16 @@ pub struct WgpuUpscaler {
     input_buffer: Option<Buffer>,
     output_buffer: Option<Buffer>,
     dimensions_buffer: Option<Buffer>,
-    bind_group: Option<BindGroup>,
     bind_group_layout: Option<BindGroupLayout>,
+    buffer_pool: Vec<Buffer>,
+    buffer_pool_index: AtomicUsize,
+    buffer_pool_bind_groups: Vec<BindGroup>,
+    fallback_bind_group: Option<BindGroup>,
     // Advanced settings
     thread_count: u32,
     buffer_pool_size: u32,
     gpu_allocator: String,
     shader_path: String,
-    buffer_pool: Vec<Buffer>,
-    buffer_pool_index: usize,
 }
 
 impl WgpuUpscaler {
@@ -194,14 +196,15 @@ impl WgpuUpscaler {
             input_buffer: None,
             output_buffer: None,
             dimensions_buffer: None,
-            bind_group: None,
             bind_group_layout: None,
+            buffer_pool: Vec::new(),
+            buffer_pool_index: AtomicUsize::new(0),
+            buffer_pool_bind_groups: Vec::new(),
+            fallback_bind_group: None,
             thread_count: 4,
             buffer_pool_size: 4,
             gpu_allocator: "Default".to_string(),
             shader_path: "".to_string(),
-            buffer_pool: Vec::new(),
-            buffer_pool_index: 0,
         }
     }
     pub fn set_thread_count(&mut self, n: u32) {
@@ -215,20 +218,45 @@ impl WgpuUpscaler {
     pub fn set_buffer_pool_size(&mut self, n: u32) {
         self.buffer_pool_size = n;
         println!("[WgpuUpscaler] Set buffer pool size: {}", n);
-        // Re-allocate buffer pool if device is available
+
         self.buffer_pool.clear();
-        if let Some(device) = self.device.as_ref() {
-            for _ in 0..n {
-                let buf = device.create_buffer(&BufferDescriptor {
-                    label: Some("Output Buffer (Pool)"),
-                    size: (self.output_width * self.output_height * 4) as u64,
+        self.buffer_pool_bind_groups.clear();
+
+        if let (Some(device), Some(layout), Some(input_buf), Some(dims_buf)) = (
+            self.device.as_ref(),
+            self.bind_group_layout.as_ref(),
+            self.input_buffer.as_ref(),
+            self.dimensions_buffer.as_ref(),
+        ) {
+            let buffer_size = (self.output_width * self.output_height * 4) as u64;
+            if buffer_size == 0 { return; } // Avoid creating zero-sized buffers
+
+            for i in 0..n {
+                let output_buf = device.create_buffer(&BufferDescriptor {
+                    label: Some(&format!("Output Buffer (Pool {})", i)),
+                    size: buffer_size,
                     usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
                     mapped_at_creation: false,
                 });
-                self.buffer_pool.push(buf);
+                let bind_group = device.create_bind_group(&BindGroupDescriptor {
+                    label: Some(&format!("Upscale Bind Group (Pool {})", i)),
+                    layout: layout,
+                    entries: &[BindGroupEntry {
+                        binding: 0,
+                        resource: input_buf.as_entire_binding(),
+                    }, BindGroupEntry {
+                        binding: 1,
+                        resource: output_buf.as_entire_binding(),
+                    }, BindGroupEntry {
+                        binding: 2,
+                        resource: dims_buf.as_entire_binding(),
+                    }],
+                });
+                self.buffer_pool.push(output_buf);
+                self.buffer_pool_bind_groups.push(bind_group);
             }
         }
-        self.buffer_pool_index = 0;
+        self.buffer_pool_index.store(0, Ordering::SeqCst);
     }
     pub fn set_gpu_allocator(&mut self, preset: &str) {
         self.gpu_allocator = preset.to_string();
@@ -290,22 +318,22 @@ impl WgpuUpscaler {
         }
         Ok(())
     }
-    pub fn upscale_batch(&mut self, frames: &[&[u8]]) -> Result<Vec<Vec<u8>>> {
+    pub fn upscale_batch(&self, frames: &[&[u8]]) -> Result<Vec<Vec<u8>>> {
         let start = Instant::now();
         let results: Vec<_> = if self.thread_count > 1 {
-            frames.par_iter().map(|frame| {
+            frames.par_iter().enumerate().map(|(i, frame)| {
                 let t0 = Instant::now();
                 let out = self.upscale(frame);
                 let t1 = Instant::now();
-                println!("[Batch] Frame time: {:.2} ms", (t1 - t0).as_secs_f64() * 1000.0);
+                println!("[Batch {}] Frame time: {:.2} ms", i, (t1 - t0).as_secs_f64() * 1000.0);
                 out
             }).collect()
         } else {
-            frames.iter().map(|frame| {
+            frames.iter().enumerate().map(|(i, frame)| {
                 let t0 = Instant::now();
                 let out = self.upscale(frame);
                 let t1 = Instant::now();
-                println!("[Batch] Frame time: {:.2} ms", (t1 - t0).as_secs_f64() * 1000.0);
+                println!("[Batch {}] Frame time: {:.2} ms", i, (t1 - t0).as_secs_f64() * 1000.0);
                 out
             }).collect()
         };
@@ -412,22 +440,6 @@ impl Upscaler for WgpuUpscaler {
             ],
         });
 
-        // Create bind group
-        let bind_group = device.create_bind_group(&BindGroupDescriptor {
-            label: Some("Upscale Bind Group"),
-            layout: &bind_group_layout,
-            entries: &[BindGroupEntry {
-                binding: 0,
-                resource: input_buffer.as_entire_binding(),
-            }, BindGroupEntry {
-                binding: 1,
-                resource: output_buffer.as_entire_binding(),
-            }, BindGroupEntry {
-                binding: 2,
-                resource: dimensions_buffer.as_entire_binding(),
-            }],
-        });
-
         // Create pipeline
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Upscale Pipeline Layout"),
@@ -449,29 +461,58 @@ impl Upscaler for WgpuUpscaler {
         self.input_buffer = Some(input_buffer);
         self.output_buffer = Some(output_buffer);
         self.dimensions_buffer = Some(dimensions_buffer);
-        self.bind_group = Some(bind_group);
         self.bind_group_layout = Some(bind_group_layout);
-        self.initialized = true;
-        // After creating output_buffer, pre-allocate buffer pool
+
+        // Create fallback bind group using the original output buffer
+        if let (Some(dev), Some(layout), Some(in_buf), Some(out_buf), Some(dims_buf)) = (
+            self.device.as_ref(), self.bind_group_layout.as_ref(),
+            self.input_buffer.as_ref(), self.output_buffer.as_ref(), self.dimensions_buffer.as_ref()
+        ) {
+            self.fallback_bind_group = Some(dev.create_bind_group(&BindGroupDescriptor {
+                label: Some("Upscale Bind Group (Fallback)"),
+                layout: layout,
+                entries: &[BindGroupEntry {
+                    binding: 0,
+                    resource: in_buf.as_entire_binding(),
+                }, BindGroupEntry {
+                    binding: 1,
+                    resource: out_buf.as_entire_binding(),
+                }, BindGroupEntry {
+                    binding: 2,
+                    resource: dims_buf.as_entire_binding(),
+                }],
+            }));
+        }
+
+        // Initialize buffer pool (this will create pooled buffers and their bind groups)
         self.set_buffer_pool_size(self.buffer_pool_size);
+        self.buffer_pool_index.store(0, Ordering::SeqCst);
+        self.initialized = true;
         Ok(())
     }
     fn upscale(&self, input: &[u8]) -> Result<Vec<u8>> {
         if !self.initialized {
             anyhow::bail!("WgpuUpscaler not initialized");
         }
-        // Use buffer pool if available
-        let output_buffer = if !self.buffer_pool.is_empty() {
-            // Cycle through pool
-            let idx = self.buffer_pool_index % self.buffer_pool.len();
-            &self.buffer_pool[idx]
+
+        // Select the correct output buffer and corresponding bind group from the pool
+        let buffer_index = self.buffer_pool_index.fetch_add(1, Ordering::SeqCst);
+        let (output_buffer, bind_group) = if !self.buffer_pool.is_empty() && !self.buffer_pool_bind_groups.is_empty() {
+            let idx = buffer_index % self.buffer_pool.len();
+            // Ensure bind group index is also valid
+            let bg_idx = idx.min(self.buffer_pool_bind_groups.len() - 1);
+            (&self.buffer_pool[idx], &self.buffer_pool_bind_groups[bg_idx])
         } else {
-            self.output_buffer.as_ref().ok_or_else(|| anyhow::anyhow!("No output buffer"))?
+            // Fallback to original buffer and its bind group
+            (
+                self.output_buffer.as_ref().ok_or_else(|| anyhow::anyhow!("No fallback output buffer"))?,
+                self.fallback_bind_group.as_ref().ok_or_else(|| anyhow::anyhow!("No fallback bind group"))?
+            )
         };
+
         let device = self.device.as_ref().ok_or_else(|| anyhow::anyhow!("No device"))?;
         let queue = self.queue.as_ref().ok_or_else(|| anyhow::anyhow!("No queue"))?;
         let pipeline = self.pipeline.as_ref().ok_or_else(|| anyhow::anyhow!("No pipeline"))?;
-        let bind_group = self.bind_group.as_ref().ok_or_else(|| anyhow::anyhow!("No bind group"))?;
         let input_buffer = self.input_buffer.as_ref().ok_or_else(|| anyhow::anyhow!("No input buffer"))?;
         let dimensions_buffer = self.dimensions_buffer.as_ref().ok_or_else(|| anyhow::anyhow!("No dimensions buffer"))?;
 
@@ -505,7 +546,7 @@ impl Upscaler for WgpuUpscaler {
         }
         queue.submit(Some(encoder.finish()));
 
-        // Download result from GPU
+        // Download result from the specific output buffer used
         let buffer_slice = output_buffer.slice(..);
         let (sender, receiver) = std::sync::mpsc::channel();
         buffer_slice.map_async(MapMode::Read, move |v| sender.send(v).unwrap());
@@ -514,10 +555,6 @@ impl Upscaler for WgpuUpscaler {
         let data = buffer_slice.get_mapped_range().to_vec();
         output_buffer.unmap();
 
-        // For multi-threading, if thread_count > 1, use rayon to parallelize (stub for now)
-        if self.thread_count > 1 {
-            println!("[WgpuUpscaler] Would use {} threads for batch upscaling (not implemented)", self.thread_count);
-        }
         Ok(data)
     }
     fn name(&self) -> &'static str {
