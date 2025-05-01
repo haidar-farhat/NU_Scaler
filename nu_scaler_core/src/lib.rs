@@ -85,6 +85,17 @@ impl PyWgpuUpscaler {
         self.inner.set_gpu_allocator(preset);
         Ok(())
     }
+
+    /// Batch upscale: takes a list of bytes objects, returns a list of bytes objects
+    pub fn upscale_batch<'py>(&mut self, py: Python<'py>, frames: &PyAny) -> PyResult<Vec<&'py PyBytes>> {
+        let frames_vec: Vec<&[u8]> = frames
+            .iter()?
+            .map(|item| item?.extract::<&PyBytes>().map(|b| b.as_bytes()))
+            .collect::<Result<_, _>>()?;
+        let outs = self.inner.upscale_batch(&frames_vec)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(outs.into_iter().map(|out| PyBytes::new(py, &out)).collect())
+    }
 }
 
 #[pyclass]
