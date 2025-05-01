@@ -347,24 +347,47 @@ impl WgpuUpscaler {
 
 impl Upscaler for WgpuUpscaler {
     fn initialize(&mut self, input_width: u32, input_height: u32, output_width: u32, output_height: u32) -> Result<()> {
+        if self.initialized &&
+           self.input_width == input_width &&
+           self.input_height == input_height &&
+           self.output_width == output_width &&
+           self.output_height == output_height {
+            println!("[WgpuUpscaler] Already initialized with same dimensions.");
+            return Ok(());
+        }
+
+        println!("[WgpuUpscaler] Initializing...");
         self.input_width = input_width;
         self.input_height = input_height;
         self.output_width = output_width;
         self.output_height = output_height;
 
-        // WGPU setup
-        let instance = Instance::new(wgpu::InstanceDescriptor {
-            backends: Backends::all(),
-            ..Default::default()
+        // Reset fields
+        self.buffer_pool.clear();
+        self.buffer_pool_bind_groups.clear();
+        self.buffer_pool_index = AtomicUsize::new(0);
+
+        // Create WGPU instance if not exists
+        let instance = self.instance.get_or_insert_with(|| {
+            println!("[WgpuUpscaler] Creating WGPU instance (Backends: {:?})", Backends::PRIMARY);
+            Instance::new(wgpu::InstanceDescriptor {
+                backends: Backends::PRIMARY, // Request primary backends (Vulkan/Metal/DX12)
+                ..Default::default()
+            })
         });
-        let adapter = pollster::block_on(instance.request_adapter(&RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        })).ok_or_else(|| anyhow::anyhow!("No suitable GPU adapter found"))?;
+
+        // Request adapter
+        let adapter = pollster::block_on(instance.request_adapter(&RequestAdapterOptions::default()))
+            .ok_or_else(|| anyhow::anyhow!("Failed to find suitable adapter"))?;
+
+        // <<< ADD LOGGING HERE >>>
+        let adapter_info = adapter.get_info();
+        println!("[WgpuUpscaler] Selected Adapter: {} ({:?}, Backend: {:?})", adapter_info.name, adapter_info.device_type, adapter_info.backend);
+
+        // Request device and queue
         let (device, queue) = pollster::block_on(adapter.request_device(
             &DeviceDescriptor {
-                label: Some("WgpuUpscaler Device"),
+                label: Some("Upscaler Device"),
                 required_features: Features::empty(),
                 required_limits: Limits::default(),
             },
@@ -468,7 +491,6 @@ impl Upscaler for WgpuUpscaler {
             None
         };
 
-        self.instance = Some(instance);
         self.device = Some(device);
         self.queue = Some(queue);
         self.shader = Some(shader);
