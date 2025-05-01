@@ -8,4 +8,8 @@ version = "0.1.0"
 description = "Hybrid Rust+Python real-time upscaling application."
 readme = "README.md"
 requires-python = ">=3.8"
+dependencies = [
+    "PySide6",
+    "Pillow"
+]
 # dependencies = []  # Add Python dependencies here
