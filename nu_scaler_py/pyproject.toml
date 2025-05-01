@@ -1,0 +1,11 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nu_scaler"
+version = "0.1.0"
+description = "Hybrid Rust+Python real-time upscaling application."
+readme = "README.md"
+requires-python = ">=3.8"
+# dependencies = []  # Add Python dependencies here
