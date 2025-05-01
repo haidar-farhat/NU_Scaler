@@ -16,4 +16,33 @@ pub trait GpuManager {
     fn initialize(&mut self, provider: GpuProvider) -> Result<GpuContext>;
     /// Check if a provider is supported
     fn is_supported(&self, provider: GpuProvider) -> bool;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct DummyGpuManager;
+    impl GpuManager for DummyGpuManager {
+        fn initialize(&mut self, _provider: GpuProvider) -> Result<GpuContext> {
+            unimplemented!()
+        }
+        fn is_supported(&self, _provider: GpuProvider) -> bool {
+            unimplemented!()
+        }
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_initialize_panics() {
+        let mut mgr = DummyGpuManager;
+        let _ = mgr.initialize(GpuProvider::Wgpu).unwrap();
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_is_supported_panics() {
+        let mgr = DummyGpuManager;
+        let _ = mgr.is_supported(GpuProvider::Wgpu);
+    }
 } 

@@ -52,4 +52,37 @@ impl Upscaler for MockUpscaler {
     fn set_quality(&mut self, _quality: UpscalingQuality) -> Result<()> {
         unimplemented!()
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[should_panic]
+    fn test_initialize_panics() {
+        let mut up = MockUpscaler;
+        let _ = up.initialize(1, 1, 2, 2).unwrap();
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_upscale_panics() {
+        let up = MockUpscaler;
+        let _ = up.upscale(&[0u8; 4]).unwrap();
+    }
+
+    #[test]
+    fn test_name_and_quality() {
+        let up = MockUpscaler;
+        assert_eq!(up.name(), "MockUpscaler");
+        assert_eq!(up.quality(), UpscalingQuality::Quality);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_set_quality_panics() {
+        let mut up = MockUpscaler;
+        let _ = up.set_quality(UpscalingQuality::Ultra).unwrap();
+    }
 } 
