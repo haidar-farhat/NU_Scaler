@@ -9,3 +9,4 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 anyhow = "1.0"
 pyo3 = { version = "0.20", features = ["extension-module"] }
+wgpu = "0.19"
