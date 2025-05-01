@@ -499,11 +499,9 @@ impl Upscaler for WgpuUpscaler {
         let buffer_index = self.buffer_pool_index.fetch_add(1, Ordering::SeqCst);
         let (output_buffer, bind_group) = if !self.buffer_pool.is_empty() && !self.buffer_pool_bind_groups.is_empty() {
             let idx = buffer_index % self.buffer_pool.len();
-            // Ensure bind group index is also valid
             let bg_idx = idx.min(self.buffer_pool_bind_groups.len() - 1);
             (&self.buffer_pool[idx], &self.buffer_pool_bind_groups[bg_idx])
         } else {
-            // Fallback to original buffer and its bind group
             (
                 self.output_buffer.as_ref().ok_or_else(|| anyhow::anyhow!("No fallback output buffer"))?,
                 self.fallback_bind_group.as_ref().ok_or_else(|| anyhow::anyhow!("No fallback bind group"))?
@@ -546,16 +544,43 @@ impl Upscaler for WgpuUpscaler {
         }
         queue.submit(Some(encoder.finish()));
 
-        // Download result from the specific output buffer used
-        let buffer_slice = output_buffer.slice(..);
-        let (sender, receiver) = std::sync::mpsc::channel();
-        buffer_slice.map_async(MapMode::Read, move |v| sender.send(v).unwrap());
-        device.poll(wgpu::Maintain::Wait);
-        receiver.recv().unwrap().map_err(|_| anyhow::anyhow!("Failed to map output buffer"))?;
-        let data = buffer_slice.get_mapped_range().to_vec();
-        output_buffer.unmap();
+        // Refined Download/Map/Unmap
+        let mapped_data: Result<Vec<u8>, anyhow::Error> = {
+            let buffer_slice = output_buffer.slice(..);
+            let (sender, receiver) = std::sync::mpsc::channel();
 
-        Ok(data)
+            // Request mapping
+            buffer_slice.map_async(MapMode::Read, move |v| sender.send(v).unwrap());
+
+            // Poll the device until the callback is processed
+            // This is crucial for map_async to work correctly
+            device.poll(wgpu::Maintain::Wait);
+
+            // Block until the mapping result is received from the callback
+            match receiver.recv() {
+                Ok(Ok(())) => {
+                    // Mapping succeeded, get the mapped range and copy data
+                    let data = buffer_slice.get_mapped_range().to_vec();
+                    // Drop the mapped range view BEFORE unmapping
+                    drop(buffer_slice.get_mapped_range());
+                    // Unmap the buffer
+                    output_buffer.unmap();
+                    Ok(data)
+                }
+                Ok(Err(e)) => {
+                    // Mapping callback reported an error
+                    // Buffer might still be mapped, try unmapping defensively?
+                    // output_buffer.unmap(); // Or maybe not?
+                    Err(anyhow::anyhow!("Buffer map callback failed: {:?}", e))
+                }
+                Err(e) => {
+                    // Failed to receive result from callback (channel error)
+                    Err(anyhow::anyhow!("Failed to receive buffer map result: {:?}", e))
+                }
+            }
+        };
+
+        mapped_data // Return the result (Vec<u8> or error)
     }
     fn name(&self) -> &'static str {
         "WgpuUpscaler"
