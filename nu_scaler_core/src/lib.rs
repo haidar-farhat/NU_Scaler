@@ -8,7 +8,6 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use once_cell::sync::Lazy;
-use image::{ImageBuffer, Rgba};
 
 pub mod capture;
 pub mod gpu;
@@ -160,25 +159,34 @@ impl PyScreenCapture {
     pub fn get_frame<'py>(&mut self, py: Python<'py>) -> PyResult<Option<(PyObject, usize, usize)>> {
         match self.inner.get_frame() {
             Some((frame_data, width, height)) => {
-                let width_u32 = width as u32;
-                let height_u32 = height as u32;
-                if width_u32 > 0 && height_u32 > 0 {
-                    match ImageBuffer::<Rgba<u8>, _>::from_raw(width_u32, height_u32, frame_data.clone()) {
-                        Some(image_buffer) => {
-                            match image_buffer.save("captured_debug.png") {
-                                Ok(_) => println!("[Capture] Saved raw captured frame to captured_debug.png ({width}x{height})"),
-                                Err(e) => println!("[Capture] Error saving captured_debug.png: {}", e),
+                // Check the target to see if conversion is needed
+                let rgba_data = match self.inner.target {
+                    // FullScreen capture (scrap) already returns RGBA (based on our conversion in realtime.rs)
+                    Some(CaptureTarget::FullScreen) => frame_data,
+                    // Window capture (GDI) returns BGRA, needs conversion
+                    Some(CaptureTarget::WindowByTitle(_)) |
+                    Some(CaptureTarget::Region { .. }) => { // Assume Region uses GDI too if implemented
+                         if frame_data.len() == width * height * 4 {
+                            let mut rgba = Vec::with_capacity(width * height * 4);
+                            for chunk in frame_data.chunks_exact(4) {
+                                // BGRA -> RGBA
+                                rgba.push(chunk[2]); // R
+                                rgba.push(chunk[1]); // G
+                                rgba.push(chunk[0]); // B
+                                rgba.push(chunk[3]); // A
                             }
-                        }
-                        None => {
-                            println!("[Capture] Error: Could not create ImageBuffer from raw data. Len={}, Expected={}", frame_data.len(), width_u32*height_u32*4);
-                        }
+                            rgba // Return the converted RGBA data
+                         } else {
+                             // Return original data if size is wrong (shouldn't happen often)
+                             println!("[FFI] Warning: GDI frame size mismatch, skipping conversion.");
+                             frame_data
+                         }
                     }
-                } else {
-                     println!("[Capture] Warning: Received frame with zero width or height ({width}x{height})");
-                }
+                    None => frame_data, // Should not happen if capture started
+                };
 
-                let py_bytes = PyBytes::new(py, &frame_data);
+                // Return the (potentially converted) RGBA data as PyBytes
+                let py_bytes = PyBytes::new(py, &rgba_data);
                 Ok(Some((py_bytes.into(), width, height)))
             },
             None => Ok(None),
