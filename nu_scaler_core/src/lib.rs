@@ -9,7 +9,7 @@ pub mod upscale;
 pub mod renderer;
 
 use upscale::{WgpuUpscaler, UpscalingQuality, UpscaleAlgorithm};
-use capture::realtime::ScreenCapture;
+use capture::realtime::{ScreenCapture, CaptureTarget};
 
 /// Public API for initializing the core library (placeholder)
 pub fn initialize() {
@@ -58,6 +58,24 @@ impl PyWgpuUpscaler {
 }
 
 #[pyclass]
+#[derive(Clone)]
+pub enum PyCaptureTarget {
+    FullScreen,
+    WindowByTitle(String),
+    Region { x: i32, y: i32, width: u32, height: u32 },
+}
+
+impl From<PyCaptureTarget> for CaptureTarget {
+    fn from(py_target: PyCaptureTarget) -> Self {
+        match py_target {
+            PyCaptureTarget::FullScreen => CaptureTarget::FullScreen,
+            PyCaptureTarget::WindowByTitle(title) => CaptureTarget::WindowByTitle(title),
+            PyCaptureTarget::Region { x, y, width, height } => CaptureTarget::Region { x, y, width, height },
+        }
+    }
+}
+
+#[pyclass]
 pub struct PyScreenCapture {
     inner: ScreenCapture,
 }
@@ -68,8 +86,9 @@ impl PyScreenCapture {
     pub fn new() -> Self {
         Self { inner: ScreenCapture::new() }
     }
-    pub fn start(&mut self) -> PyResult<()> {
-        self.inner.start().map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))
+    pub fn start(&mut self, target: Option<PyCaptureTarget>) -> PyResult<()> {
+        let tgt = target.unwrap_or(PyCaptureTarget::FullScreen);
+        self.inner.start(tgt.into()).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))
     }
     pub fn stop(&mut self) {
         self.inner.stop();
@@ -86,6 +105,7 @@ impl PyScreenCapture {
 fn nu_scaler_core(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<PyWgpuUpscaler>()?;
     m.add_class::<PyScreenCapture>()?;
+    m.add_class::<PyCaptureTarget>()?;
     Ok(())
 }
 
