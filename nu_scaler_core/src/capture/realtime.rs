@@ -22,7 +22,7 @@ pub enum CaptureTarget {
 pub trait RealTimeCapture {
     fn start(&mut self, target: CaptureTarget) -> Result<(), String>;
     fn stop(&mut self);
-    fn get_frame(&mut self) -> Option<Vec<u8>>; // Returns raw RGB frame
+    fn get_frame(&mut self) -> Option<(Vec<u8>, usize, usize)>;
     fn list_windows() -> Vec<String> where Self: Sized;
 }
 
@@ -157,26 +157,29 @@ impl RealTimeCapture for ScreenCapture {
             self.hwnd = None;
         }
     }
-    fn get_frame(&mut self) -> Option<Vec<u8>> {
+    fn get_frame(&mut self) -> Option<(Vec<u8>, usize, usize)> {
         if !self.running {
             self.debug_print("get_frame called but not running");
             return None;
         }
+        let width = self.width;
+        let height = self.height;
         match &self.target {
             Some(CaptureTarget::FullScreen) => {
                 let capturer = self.capturer.as_mut()?;
                 match capturer.frame() {
                     Ok(frame) => {
-                        let mut rgb = Vec::with_capacity(self.width * self.height * 3);
+                        let mut rgba = Vec::with_capacity(width * height * 4);
                         for chunk in frame.chunks(4) {
                             if chunk.len() == 4 {
-                                rgb.push(chunk[2]);
-                                rgb.push(chunk[1]);
-                                rgb.push(chunk[0]);
+                                rgba.push(chunk[2]);
+                                rgba.push(chunk[1]);
+                                rgba.push(chunk[0]);
+                                rgba.push(chunk[3]);
                             }
                         }
-                        self.debug_print(&format!("Captured frame: {} bytes", rgb.len()));
-                        Some(rgb)
+                        self.debug_print(&format!("Captured fullscreen frame: {} bytes ({}x{})", rgba.len(), width, height));
+                        Some((rgba, width, height))
                     }
                     Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
                         self.debug_print("No frame available yet (WouldBlock)");
@@ -201,7 +204,7 @@ impl RealTimeCapture for ScreenCapture {
                         let mut bmi = BITMAPINFO::default();
                         bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
                         bmi.bmiHeader.biWidth = self.width as i32;
-                        bmi.bmiHeader.biHeight = -(self.height as i32); // top-down
+                        bmi.bmiHeader.biHeight = -(self.height as i32);
                         bmi.bmiHeader.biPlanes = 1;
                         bmi.bmiHeader.biBitCount = 24;
                         bmi.bmiHeader.biCompression = BI_RGB.0 as u32;
@@ -210,8 +213,18 @@ impl RealTimeCapture for ScreenCapture {
                         DeleteObject(hbm);
                         DeleteDC(hdc_mem);
                         ReleaseDC(HWND(hwnd), hdc_window);
-                        self.debug_print(&format!("Captured window frame: {} bytes", buf.len()));
-                        Some(buf)
+
+                        let mut rgba = Vec::with_capacity(width * height * 4);
+                        for chunk in buf.chunks(3) {
+                            if chunk.len() == 3 {
+                                rgba.push(chunk[2]);
+                                rgba.push(chunk[1]);
+                                rgba.push(chunk[0]);
+                                rgba.push(255);
+                            }
+                        }
+                        self.debug_print(&format!("Captured window frame: {} bytes ({}x{})", rgba.len(), width, height));
+                        Some((rgba, width, height))
                     }
                 }
                 #[cfg(not(target_os = "windows"))]

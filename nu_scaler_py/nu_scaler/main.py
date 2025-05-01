@@ -24,6 +24,7 @@ class LiveFeedScreen(QWidget):
         self.timer.timeout.connect(self.update_frame)
         self.last_frame_time = None
         self.fps = 0.0
+        self.upscaler_initialized = False
         self.init_ui()
 
     def init_ui(self):
@@ -140,27 +141,31 @@ class LiveFeedScreen(QWidget):
         try:
             self.capture = nu_scaler_core.PyScreenCapture()
             source = self.source_box.currentText()
+            window_title = self.window_box.currentText() if source == "Window" else ""
+
             if source == "Screen":
                 target = nu_scaler_core.PyCaptureTarget.FullScreen
                 window = None
                 region = None
             elif source == "Window":
                 target = nu_scaler_core.PyCaptureTarget.WindowByTitle
-                window = nu_scaler_core.PyWindowByTitle(title=self.window_box.currentText())
+                window = nu_scaler_core.PyWindowByTitle(title=window_title)
                 region = None
-            else:
+            else: # Region
                 target = nu_scaler_core.PyCaptureTarget.Region
                 window = None
-                # For demo, use a fixed region
-                region = nu_scaler_core.PyRegion(x=100, y=100, width=640, height=480)
+                region = nu_scaler_core.PyRegion(x=100, y=100, width=640, height=480) # Fixed region for demo
+
             self.capture.start(target, window, region)
-            self.init_upscaler()
-            self.timer.start(33)  # ~30 FPS
+            self.upscaler_initialized = False # Reset upscaler state
+            self.upscaler = None
+            self.timer.start(16) # Aim for ~60 FPS
             self.start_btn.setEnabled(False)
             self.stop_btn.setEnabled(True)
             self.status_bar.setText("Capture started")
         except Exception as e:
-            self.status_bar.setText(f"Error: {e}")
+            self.status_bar.setText(f"Error starting capture: {e}")
+            self.log_signal.emit(f"Error starting capture: {e}")
 
     def stop_capture(self):
         if self.capture:
@@ -170,50 +175,72 @@ class LiveFeedScreen(QWidget):
         self.stop_btn.setEnabled(False)
         self.status_bar.setText("Capture stopped")
 
-    def init_upscaler(self):
+    def init_upscaler(self, in_w, in_h, scale):
         quality = self.quality_box.currentText()
         algorithm = self.algorithm_box.currentText()
-        scale = self.scale_slider.value() / 10.0
-        self.upscaler = nu_scaler_core.PyWgpuUpscaler(quality, algorithm)
-        # We'll set input/output size on first frame
-        self.upscale_scale = scale
+        out_w = int(in_w * scale)
+        out_h = int(in_h * scale)
+        try:
+            self.upscaler = nu_scaler_core.PyWgpuUpscaler(quality, algorithm)
+            self.upscaler.initialize(in_w, in_h, out_w, out_h)
+            self.upscale_scale = scale
+            self.upscaler_initialized = True
+            self.log_signal.emit(f"Upscaler initialized: {in_w}x{in_h} -> {out_w}x{out_h} ({quality}, {algorithm})")
+            return True
+        except Exception as e:
+            self.log_signal.emit(f"Upscaler init error: {e}")
+            self.stop_capture()
+            return False
 
     def update_frame(self):
-        if not self.capture or not self.upscaler:
+        if not self.capture:
             return
         t0 = time.perf_counter()
+        frame_result = self.capture.get_frame()
+        if frame_result is None:
+            return # No frame yet
+
+        frame_bytes_obj, in_w, in_h = frame_result
+        frame = frame_bytes_obj.tobytes() # Extract bytes from PyBytes/PyObject
+
+        # Initialize upscaler on first frame or if dimensions change
+        if not self.upscaler or not self.upscaler_initialized:
+            scale = self.scale_slider.value() / 10.0
+            if not self.init_upscaler(in_w, in_h, scale):
+                return # Stop if upscaler failed to init
+        # TODO: Add logic to re-initialize if scale factor changes
+
         try:
-            frame = self.capture.get_frame()
-            if frame is None:
-                return
-            in_len = len(frame)
-            in_w = in_h = int((in_len // 3) ** 0.5)
+            out_bytes = self.upscaler.upscale(frame) # Frame is now RGBA
             out_w = int(in_w * self.upscale_scale)
             out_h = int(in_h * self.upscale_scale)
-            self.upscaler.initialize(in_w, in_h, out_w, out_h)
-            out_bytes = self.upscaler.upscale(frame)
-            img = QImage(out_bytes, out_w, out_h, QImage.Format_RGB888)
+
+            # Display output (assuming RGBA)
+            img = QImage(out_bytes, out_w, out_h, QImage.Format_RGBA8888)
             pixmap = QPixmap.fromImage(img).scaled(self.output_preview.width(), self.output_preview.height(), Qt.KeepAspectRatio)
             self.output_preview.setPixmap(pixmap)
-            img_in = QImage(frame, in_w, in_h, QImage.Format_RGB888)
+
+            # Display input (assuming RGBA)
+            img_in = QImage(frame, in_w, in_h, QImage.Format_RGBA8888)
             pixmap_in = QPixmap.fromImage(img_in).scaled(self.input_preview.width(), self.input_preview.height(), Qt.KeepAspectRatio)
             self.input_preview.setPixmap(pixmap_in)
+
+            # Update overlay and status
             t1 = time.perf_counter()
             frame_time = (t1 - t0) * 1000
             self.fps = 1000.0 / frame_time if frame_time > 0 else 0.0
             self.overlay.setText(f"Input: {in_w}×{in_h}\nUpscaled: {out_w}×{out_h}\nFPS: {self.fps:.1f}")
             self.status_bar.setText(f"Frame Time: {frame_time:.1f} ms   FPS: {self.fps:.1f}   Resolution: {in_w}×{in_h} → {out_w}×{out_h}")
-            # Emit profiler data
             self.profiler_signal.emit(frame_time, self.fps, in_w, in_h)
-            # Emit warning if FPS drops
             if self.fps < 30:
                 self.warning_signal.emit(f"Warning: Low FPS ({self.fps:.1f})", True)
             else:
                 self.warning_signal.emit("", False)
+
         except Exception as e:
             self.status_bar.setText(f"Upscale error: {e}")
             self.log_signal.emit(f"Error: {e}")
-            self.stop_capture()
+            self.stop_capture() # Stop on error
 
 class SettingsScreen(QWidget):
     def __init__(self, live_feed_screen=None):
