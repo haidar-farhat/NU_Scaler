@@ -125,23 +125,20 @@ class MainWindow(QMainWindow):
         self.game_view.setStyleSheet("border: 1px solid gray;")
         # Target selection
         self.game_target_box = QComboBox()
-        self.game_target_box.addItems(["FullScreen", "Window", "Region"])
+        self.game_target_box.addItems(["FullScreen", "Window"])
         self.game_window_box = QComboBox()
         self.game_window_box.setEnabled(False)
-        self.game_region_x = QSpinBox(); self.game_region_x.setRange(0, 9999)
-        self.game_region_y = QSpinBox(); self.game_region_y.setRange(0, 9999)
-        self.game_region_w = QSpinBox(); self.game_region_w.setRange(1, 9999)
-        self.game_region_h = QSpinBox(); self.game_region_h.setRange(1, 9999)
-        for w in [self.game_region_x, self.game_region_y, self.game_region_w, self.game_region_h]:
-            w.setEnabled(False)
         self.game_target_box.currentTextChanged.connect(self.update_game_target_ui)
-        # List windows if possible
+        # List windows using FFI
         try:
             from nu_scaler_core import PyScreenCapture
-            cap = PyScreenCapture()
-            self.game_window_box.addItems(["Window 1", "Window 2"])  # TODO: call list_windows FFI
+            windows = PyScreenCapture.list_windows()
+            if windows:
+                self.game_window_box.addItems(windows)
+            else:
+                self.game_window_box.addItem("No windows found")
         except Exception:
-            self.game_window_box.addItems(["Window 1", "Window 2"])
+            self.game_window_box.addItem("Error listing windows")
         # Buttons
         self.game_start_btn = QPushButton("Start Capture")
         self.game_stop_btn = QPushButton("Stop Capture")
@@ -157,11 +154,6 @@ class MainWindow(QMainWindow):
         target_layout.addWidget(self.game_target_box)
         target_layout.addWidget(QLabel("Window:"))
         target_layout.addWidget(self.game_window_box)
-        target_layout.addWidget(QLabel("Region x/y/w/h:"))
-        target_layout.addWidget(self.game_region_x)
-        target_layout.addWidget(self.game_region_y)
-        target_layout.addWidget(self.game_region_w)
-        target_layout.addWidget(self.game_region_h)
         layout.addWidget(self.game_status)
         layout.addWidget(self.game_view)
         layout.addLayout(target_layout)
@@ -172,16 +164,8 @@ class MainWindow(QMainWindow):
     def update_game_target_ui(self, text):
         if text == "FullScreen":
             self.game_window_box.setEnabled(False)
-            for w in [self.game_region_x, self.game_region_y, self.game_region_w, self.game_region_h]:
-                w.setEnabled(False)
         elif text == "Window":
             self.game_window_box.setEnabled(True)
-            for w in [self.game_region_x, self.game_region_y, self.game_region_w, self.game_region_h]:
-                w.setEnabled(False)
-        elif text == "Region":
-            self.game_window_box.setEnabled(False)
-            for w in [self.game_region_x, self.game_region_y, self.game_region_w, self.game_region_h]:
-                w.setEnabled(True)
 
     def start_game_capture(self):
         try:
@@ -197,12 +181,6 @@ class MainWindow(QMainWindow):
         elif tgt_type == "Window":
             title = self.game_window_box.currentText()
             target = PyCaptureTarget.WindowByTitle(title)
-        elif tgt_type == "Region":
-            x = self.game_region_x.value()
-            y = self.game_region_y.value()
-            w = self.game_region_w.value()
-            h = self.game_region_h.value()
-            target = PyCaptureTarget.Region(x, y, w, h)
         else:
             target = PyCaptureTarget.FullScreen
         try:
