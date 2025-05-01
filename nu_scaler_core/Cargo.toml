@@ -10,7 +10,9 @@ crate-type = ["cdylib", "rlib"]
 anyhow = "1.0"
 pyo3 = { version = "0.20", features = ["extension-module"] }
 wgpu = "0.19"
-scrap = "0.10"
+scrap = "0.5"
 windows = { version = "0.52", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging"] }
 image = "0.24"
 x11 = { version = "2.21", optional = true }
+bytemuck = "1.14"
+pollster = "0.3"
