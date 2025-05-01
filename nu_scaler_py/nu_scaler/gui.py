@@ -8,14 +8,18 @@ from PySide6.QtWidgets import (
     QFileDialog, QComboBox, QSpinBox, QMessageBox, QTabWidget
 )
 from PySide6.QtGui import QPixmap, QImage
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PIL import Image
 import numpy as np
+import threading
+import time
 
 try:
     import nu_scaler_core
+    import cv2
 except ImportError:
     nu_scaler_core = None
+    cv2 = None
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -115,18 +119,168 @@ class MainWindow(QMainWindow):
     def make_game_tab(self):
         container = QWidget()
         layout = QVBoxLayout()
-        label = QLabel("Game Mode: Real-time screen/window upscaling (coming soon)")
-        layout.addWidget(label)
+        self.game_status = QLabel("Status: Idle")
+        self.game_view = QLabel()
+        self.game_view.setFixedSize(512, 288)
+        self.game_view.setStyleSheet("border: 1px solid gray;")
+        self.game_start_btn = QPushButton("Start Capture")
+        self.game_stop_btn = QPushButton("Stop Capture")
+        self.game_stop_btn.setEnabled(False)
+        self.game_start_btn.clicked.connect(self.start_game_capture)
+        self.game_stop_btn.clicked.connect(self.stop_game_capture)
+        btns = QHBoxLayout()
+        btns.addWidget(self.game_start_btn)
+        btns.addWidget(self.game_stop_btn)
+        layout.addWidget(self.game_status)
+        layout.addWidget(self.game_view)
+        layout.addLayout(btns)
         container.setLayout(layout)
         return container
+
+    def start_game_capture(self):
+        try:
+            from nu_scaler_core import PyScreenCapture, PyWgpuUpscaler
+        except ImportError:
+            QMessageBox.critical(self, "Rust core missing", "nu_scaler_core module not found.")
+            return
+        self.game_capture = PyScreenCapture()
+        try:
+            self.game_capture.start()
+        except Exception as e:
+            QMessageBox.critical(self, "Capture Error", str(e))
+            return
+        # Use upscaler settings from image tab
+        quality = self.quality_box.currentText()
+        algorithm = self.algorithm_box.currentText()
+        out_w = self.output_w.value()
+        out_h = self.output_h.value()
+        self.game_upscaler = PyWgpuUpscaler(quality, algorithm)
+        # We'll get input size from the first frame
+        self.game_status.setText("Status: Running")
+        self.game_start_btn.setEnabled(False)
+        self.game_stop_btn.setEnabled(True)
+        self.game_timer = QTimer()
+        self.game_timer.timeout.connect(lambda: self.update_game_frame(out_w, out_h))
+        self.game_timer.start(33)  # ~30 FPS
+
+    def update_game_frame(self, out_w, out_h):
+        frame = self.game_capture.get_frame()
+        if frame is None:
+            return
+        # Assume frame is RGB, get input size from length
+        in_len = len(frame)
+        # Guess width/height (from last capture)
+        if not hasattr(self, 'game_in_w') or not hasattr(self, 'game_in_h'):
+            # Try to infer from upscaler or default to 1920x1080
+            self.game_in_w = 1920
+            self.game_in_h = 1080
+            if hasattr(self.game_capture, 'width') and hasattr(self.game_capture, 'height'):
+                self.game_in_w = self.game_capture.width
+                self.game_in_h = self.game_capture.height
+        # Try to infer from frame size
+        if in_len % 3 == 0:
+            px = int((in_len // 3) ** 0.5)
+            if px * px * 3 == in_len:
+                self.game_in_w = self.game_in_h = px
+        try:
+            self.game_upscaler.initialize(self.game_in_w, self.game_in_h, out_w, out_h)
+            out_bytes = self.game_upscaler.upscale(frame)
+            img = Image.frombytes("RGB", (out_w, out_h), out_bytes)
+            self.display_image(img, self.game_view)
+        except Exception as e:
+            self.game_status.setText(f"Error: {e}")
+            self.stop_game_capture()
+
+    def stop_game_capture(self):
+        if hasattr(self, 'game_timer'):
+            self.game_timer.stop()
+        if hasattr(self, 'game_capture'):
+            self.game_capture.stop()
+        self.game_status.setText("Status: Idle")
+        self.game_start_btn.setEnabled(True)
+        self.game_stop_btn.setEnabled(False)
 
     def make_video_tab(self):
         container = QWidget()
         layout = QVBoxLayout()
-        label = QLabel("Video Mode: Real-time video file upscaling (coming soon)")
-        layout.addWidget(label)
+        self.video_status = QLabel("Status: Idle")
+        self.video_view = QLabel()
+        self.video_view.setFixedSize(512, 288)
+        self.video_view.setStyleSheet("border: 1px solid gray;")
+        self.video_open_btn = QPushButton("Open Video")
+        self.video_play_btn = QPushButton("Play")
+        self.video_stop_btn = QPushButton("Stop")
+        self.video_play_btn.setEnabled(False)
+        self.video_stop_btn.setEnabled(False)
+        self.video_open_btn.clicked.connect(self.open_video_file)
+        self.video_play_btn.clicked.connect(self.start_video_playback)
+        self.video_stop_btn.clicked.connect(self.stop_video_playback)
+        btns = QHBoxLayout()
+        btns.addWidget(self.video_open_btn)
+        btns.addWidget(self.video_play_btn)
+        btns.addWidget(self.video_stop_btn)
+        layout.addWidget(self.video_status)
+        layout.addWidget(self.video_view)
+        layout.addLayout(btns)
         container.setLayout(layout)
         return container
+
+    def open_video_file(self):
+        file, _ = QFileDialog.getOpenFileName(self, "Open Video", "", "Videos (*.mp4 *.avi *.mkv)")
+        if not file:
+            return
+        if cv2 is None:
+            QMessageBox.critical(self, "OpenCV missing", "cv2 (OpenCV) is required for video mode.")
+            return
+        self.video_file = file
+        self.video_play_btn.setEnabled(True)
+        self.video_status.setText(f"Loaded: {file}")
+
+    def start_video_playback(self):
+        if not hasattr(self, 'video_file'):
+            return
+        self.video_cap = cv2.VideoCapture(self.video_file)
+        if not self.video_cap.isOpened():
+            self.video_status.setText("Error: Cannot open video.")
+            return
+        from nu_scaler_core import PyWgpuUpscaler
+        quality = self.quality_box.currentText()
+        algorithm = self.algorithm_box.currentText()
+        out_w = self.output_w.value()
+        out_h = self.output_h.value()
+        self.video_upscaler = PyWgpuUpscaler(quality, algorithm)
+        self.video_play_btn.setEnabled(False)
+        self.video_stop_btn.setEnabled(True)
+        self.video_status.setText("Status: Playing")
+        self.video_timer = QTimer()
+        self.video_timer.timeout.connect(lambda: self.update_video_frame(out_w, out_h))
+        self.video_timer.start(33)  # ~30 FPS
+
+    def update_video_frame(self, out_w, out_h):
+        ret, frame = self.video_cap.read()
+        if not ret:
+            self.stop_video_playback()
+            return
+        # Convert BGR to RGB
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        in_h, in_w = frame_rgb.shape[:2]
+        try:
+            self.video_upscaler.initialize(in_w, in_h, out_w, out_h)
+            out_bytes = self.video_upscaler.upscale(frame_rgb.tobytes())
+            img = Image.frombytes("RGB", (out_w, out_h), out_bytes)
+            self.display_image(img, self.video_view)
+        except Exception as e:
+            self.video_status.setText(f"Error: {e}")
+            self.stop_video_playback()
+
+    def stop_video_playback(self):
+        if hasattr(self, 'video_timer'):
+            self.video_timer.stop()
+        if hasattr(self, 'video_cap'):
+            self.video_cap.release()
+        self.video_status.setText("Status: Idle")
+        self.video_play_btn.setEnabled(True)
+        self.video_stop_btn.setEnabled(False)
 
     def load_image(self):
         file, _ = QFileDialog.getOpenFileName(self, "Open Image", "", "Images (*.png *.jpg *.bmp)")
