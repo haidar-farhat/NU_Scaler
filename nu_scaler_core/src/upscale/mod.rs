@@ -10,6 +10,13 @@ pub enum UpscalingQuality {
     Performance,
 }
 
+/// Supported upscaling algorithms
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum UpscaleAlgorithm {
+    Nearest,
+    Bilinear,
+}
+
 /// Supported upscaling technologies
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum UpscalingTechnology {
@@ -55,7 +62,7 @@ impl Upscaler for MockUpscaler {
     }
 }
 
-/// WGSL compute shader with dynamic dimensions via uniform buffer
+/// WGSL compute shader with dynamic dimensions via uniform buffer (Nearest Neighbor)
 const NN_UPSCALE_SHADER: &str = r#"
 struct Dimensions {
     in_width: u32,
@@ -80,9 +87,67 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 "#;
 
+/// WGSL compute shader for bilinear upscaling (RGBA8, dynamic dimensions)
+const BILINEAR_UPSCALE_SHADER: &str = r#"
+struct Dimensions {
+    in_width: u32,
+    in_height: u32,
+    out_width: u32,
+    out_height: u32,
+}
+@group(0) @binding(0) var<storage, read> input_img: array<u32>;
+@group(0) @binding(1) var<storage, read_write> output_img: array<u32>;
+@group(0) @binding(2) var<uniform> dims: Dimensions;
+
+fn unpack_rgba8(p: u32) -> vec4<f32> {
+    return vec4<f32>(
+        f32((p >> 0) & 0xFF),
+        f32((p >> 8) & 0xFF),
+        f32((p >> 16) & 0xFF),
+        f32((p >> 24) & 0xFF)
+    ) / 255.0;
+}
+fn pack_rgba8(v: vec4<f32>) -> u32 {
+    let r = u32(clamp(v.x, 0.0, 1.0) * 255.0);
+    let g = u32(clamp(v.y, 0.0, 1.0) * 255.0);
+    let b = u32(clamp(v.z, 0.0, 1.0) * 255.0);
+    let a = u32(clamp(v.w, 0.0, 1.0) * 255.0);
+    return (a << 24) | (b << 16) | (g << 8) | r;
+}
+
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if (gid.x >= dims.out_width || gid.y >= dims.out_height) {
+        return;
+    }
+    let fx = f32(gid.x) * f32(dims.in_width) / f32(dims.out_width);
+    let fy = f32(gid.y) * f32(dims.in_height) / f32(dims.out_height);
+    let x0 = u32(fx);
+    let y0 = u32(fy);
+    let x1 = min(x0 + 1, dims.in_width - 1);
+    let y1 = min(y0 + 1, dims.in_height - 1);
+    let dx = fx - f32(x0);
+    let dy = fy - f32(y0);
+    let idx00 = y0 * dims.in_width + x0;
+    let idx10 = y0 * dims.in_width + x1;
+    let idx01 = y1 * dims.in_width + x0;
+    let idx11 = y1 * dims.in_width + x1;
+    let c00 = unpack_rgba8(input_img[idx00]);
+    let c10 = unpack_rgba8(input_img[idx10]);
+    let c01 = unpack_rgba8(input_img[idx01]);
+    let c11 = unpack_rgba8(input_img[idx11]);
+    let c0 = mix(c00, c10, dx);
+    let c1 = mix(c01, c11, dx);
+    let c = mix(c0, c1, dy);
+    let dst_idx = gid.y * dims.out_width + gid.x;
+    output_img[dst_idx] = pack_rgba8(c);
+}
+"#;
+
 /// GPU-accelerated upscaler using WGPU
 pub struct WgpuUpscaler {
     quality: UpscalingQuality,
+    algorithm: UpscaleAlgorithm,
     input_width: u32,
     input_height: u32,
     output_width: u32,
@@ -102,9 +167,10 @@ pub struct WgpuUpscaler {
 }
 
 impl WgpuUpscaler {
-    pub fn new(quality: UpscalingQuality) -> Self {
+    pub fn new(quality: UpscalingQuality, algorithm: UpscaleAlgorithm) -> Self {
         Self {
             quality,
+            algorithm,
             input_width: 0,
             input_height: 0,
             output_width: 0,
@@ -150,10 +216,15 @@ impl Upscaler for WgpuUpscaler {
             None,
         ))?;
 
+        // Select shader source
+        let shader_src = match self.algorithm {
+            UpscaleAlgorithm::Nearest => NN_UPSCALE_SHADER,
+            UpscaleAlgorithm::Bilinear => BILINEAR_UPSCALE_SHADER,
+        };
         // Create shader module
         let shader = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("NN Upscale Shader"),
-            source: ShaderSource::Wgsl(NN_UPSCALE_SHADER.into()),
+            label: Some("Upscale Shader"),
+            source: ShaderSource::Wgsl(shader_src.into()),
         });
 
         // Create buffers
@@ -355,7 +426,7 @@ mod tests {
 
     #[test]
     fn test_wgpu_upscaler_init() {
-        let mut up = WgpuUpscaler::new(UpscalingQuality::Quality);
+        let mut up = WgpuUpscaler::new(UpscalingQuality::Quality, UpscaleAlgorithm::Nearest);
         assert!(!up.initialized);
         up.initialize(640, 480, 1280, 960).unwrap();
         assert!(up.initialized);
