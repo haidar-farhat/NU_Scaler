@@ -117,17 +117,21 @@ class LiveFeedScreen(QWidget):
             self.window_box.setEnabled(False)
 
     def refresh_windows(self):
+        print("[GUI] Refreshing windows list...")
         self.window_box.clear()
         if nu_scaler_core is not None:
             try:
                 windows = nu_scaler_core.PyScreenCapture.list_windows()
+                print(f"[GUI] Received windows: {windows}")
                 if windows:
                     self.window_box.addItems(windows)
                 else:
                     self.window_box.addItem("No windows found")
-            except Exception:
+            except Exception as e:
+                print(f"[GUI] Error listing windows: {e}")
                 self.window_box.addItem("Error listing windows")
         else:
+            print("[GUI] Rust core not available for listing windows.")
             self.window_box.addItem("Rust core missing")
 
     def update_scale_label(self):
@@ -135,35 +139,51 @@ class LiveFeedScreen(QWidget):
         self.scale_label.setText(f"{val:.1f}×")
 
     def start_capture(self):
+        print("[GUI] Start capture requested.")
         if nu_scaler_core is None:
+            print("[GUI] Rust core not available for capture.")
             self.status_bar.setText("Rust core missing")
             return
         try:
-            self.capture = nu_scaler_core.PyScreenCapture()
             source = self.source_box.currentText()
-            window_title = self.window_box.currentText() if source == "Window" else ""
+            window_title = self.window_box.currentText() if source == "Window" else None
+            print(f"[GUI] Source: {source}, Window Title: {window_title}")
 
+            self.capture = nu_scaler_core.PyScreenCapture()
+
+            # Determine target based on GUI selection
             if source == "Screen":
                 target = nu_scaler_core.PyCaptureTarget.FullScreen
                 window = None
                 region = None
-            elif source == "Window":
+                print("[GUI] Using FullScreen target.")
+            elif source == "Window" and window_title and window_title != "No windows found" and window_title != "Error listing windows":
                 target = nu_scaler_core.PyCaptureTarget.WindowByTitle
                 window = nu_scaler_core.PyWindowByTitle(title=window_title)
                 region = None
-            else: # Region
+                print(f"[GUI] Using WindowByTitle target: {window_title}")
+            elif source == "Region": # Fixed region for demo
                 target = nu_scaler_core.PyCaptureTarget.Region
                 window = None
-                region = nu_scaler_core.PyRegion(x=100, y=100, width=640, height=480) # Fixed region for demo
+                region = nu_scaler_core.PyRegion(x=100, y=100, width=640, height=480)
+                print(f"[GUI] Using Region target: {region.x},{region.y} {region.width}x{region.height}")
+            else:
+                print("[GUI] Invalid capture configuration.")
+                self.status_bar.setText("Invalid capture config")
+                return
 
+            print("[GUI] Calling capture.start()...")
             self.capture.start(target, window, region)
+            print("[GUI] capture.start() returned.")
             self.upscaler_initialized = False # Reset upscaler state
             self.upscaler = None
             self.timer.start(16) # Aim for ~60 FPS
             self.start_btn.setEnabled(False)
             self.stop_btn.setEnabled(True)
             self.status_bar.setText("Capture started")
+            print("[GUI] Capture timer started.")
         except Exception as e:
+            print(f"[GUI] Error starting capture: {e}")
             self.status_bar.setText(f"Error starting capture: {e}")
             self.log_signal.emit(f"Error starting capture: {e}")
 
@@ -231,14 +251,14 @@ class LiveFeedScreen(QWidget):
                 print(f"Error saving debug image: {save_e}")
             # --- END ADDED DEBUG CODE ---
 
-            # Display output (assuming RGBA)
-            img = QImage(out_bytes, out_w, out_h, QImage.Format_RGBA8888)
-            pixmap = QPixmap.fromImage(img).scaled(self.output_preview.width(), self.output_preview.height(), Qt.KeepAspectRatio)
+            # Display output (assuming BGRA -> ARGB32)
+            img = QImage(out_bytes, out_w, out_h, QImage.Format_ARGB32)
+            pixmap = QPixmap.fromImage(img)
             self.output_preview.setPixmap(pixmap)
 
-            # Display input (assuming RGBA)
-            img_in = QImage(frame, in_w, in_h, QImage.Format_RGBA8888)
-            pixmap_in = QPixmap.fromImage(img_in).scaled(self.input_preview.width(), self.input_preview.height(), Qt.KeepAspectRatio)
+            # Display input (assuming BGRA -> ARGB32)
+            img_in = QImage(frame, in_w, in_h, QImage.Format_ARGB32)
+            pixmap_in = QPixmap.fromImage(img_in)
             self.input_preview.setPixmap(pixmap_in)
 
             # Update overlay and status

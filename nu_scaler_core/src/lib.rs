@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use once_cell::sync::Lazy;
+use image::{ImageBuffer, Rgba};
 
 pub mod capture;
 pub mod gpu;
@@ -159,6 +160,24 @@ impl PyScreenCapture {
     pub fn get_frame<'py>(&mut self, py: Python<'py>) -> PyResult<Option<(PyObject, usize, usize)>> {
         match self.inner.get_frame() {
             Some((frame_data, width, height)) => {
+                let width_u32 = width as u32;
+                let height_u32 = height as u32;
+                if width_u32 > 0 && height_u32 > 0 {
+                    match ImageBuffer::<Rgba<u8>, _>::from_raw(width_u32, height_u32, frame_data.clone()) {
+                        Some(image_buffer) => {
+                            match image_buffer.save("captured_debug.png") {
+                                Ok(_) => println!("[Capture] Saved raw captured frame to captured_debug.png ({width}x{height})"),
+                                Err(e) => println!("[Capture] Error saving captured_debug.png: {}", e),
+                            }
+                        }
+                        None => {
+                            println!("[Capture] Error: Could not create ImageBuffer from raw data. Len={}, Expected={}", frame_data.len(), width_u32*height_u32*4);
+                        }
+                    }
+                } else {
+                     println!("[Capture] Warning: Received frame with zero width or height ({width}x{height})");
+                }
+
                 let py_bytes = PyBytes::new(py, &frame_data);
                 Ok(Some((py_bytes.into(), width, height)))
             },
