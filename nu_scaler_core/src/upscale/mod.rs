@@ -2,6 +2,7 @@ use anyhow::Result;
 use wgpu::{Instance, Device, Queue, Adapter, Backends, DeviceDescriptor, Features, Limits, RequestAdapterOptions, ShaderModule, ComputePipeline, Buffer, BindGroup, BindGroupLayout, BufferUsages, ShaderModuleDescriptor, ShaderSource, ComputePipelineDescriptor, PipelineLayoutDescriptor, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, BufferBindingType, BindGroupDescriptor, BindGroupEntry, BindingResource, CommandEncoderDescriptor, BufferDescriptor, MapMode};
 use wgpu::util::DeviceExt;
 use rayon::prelude::*;
+use std::time::Instant;
 
 /// Upscaling quality levels
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -231,8 +232,35 @@ impl WgpuUpscaler {
     }
     pub fn set_gpu_allocator(&mut self, preset: &str) {
         self.gpu_allocator = preset.to_string();
-        println!("[WgpuUpscaler] Set GPU allocator: {}", preset);
-        // For now, just print. In future, change allocation strategy.
+        match preset {
+            "Aggressive" => {
+                // Pre-allocate a large pool, never shrink
+                let n = self.buffer_pool_size.max(8);
+                self.buffer_pool.clear();
+                if let Some(device) = self.device.as_ref() {
+                    for _ in 0..n {
+                        let buf = device.create_buffer(&BufferDescriptor {
+                            label: Some("Output Buffer (Aggressive)"),
+                            size: (self.output_width * self.output_height * 4 * 2) as u64,
+                            usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+                            mapped_at_creation: false,
+                        });
+                        self.buffer_pool.push(buf);
+                    }
+                }
+                println!("[WgpuUpscaler] Aggressive allocator: pre-allocated {} large buffers", n);
+            }
+            "Conservative" => {
+                // Free all buffers, allocate per use
+                self.buffer_pool.clear();
+                println!("[WgpuUpscaler] Conservative allocator: will allocate/free per use");
+            }
+            _ => {
+                // Default: as before
+                self.set_buffer_pool_size(self.buffer_pool_size);
+                println!("[WgpuUpscaler] Default allocator: buffer pool size {}", self.buffer_pool_size);
+            }
+        }
     }
     pub fn reload_shader(&mut self, path: &str) -> anyhow::Result<()> {
         use std::fs;
@@ -261,6 +289,29 @@ impl WgpuUpscaler {
             println!("[WgpuUpscaler] Cannot reload shader: device or bind_group_layout missing");
         }
         Ok(())
+    }
+    pub fn upscale_batch(&mut self, frames: &[&[u8]]) -> Result<Vec<Vec<u8>>> {
+        let start = Instant::now();
+        let results: Vec<_> = if self.thread_count > 1 {
+            frames.par_iter().map(|frame| {
+                let t0 = Instant::now();
+                let out = self.upscale(frame);
+                let t1 = Instant::now();
+                println!("[Batch] Frame time: {:.2} ms", (t1 - t0).as_secs_f64() * 1000.0);
+                out
+            }).collect()
+        } else {
+            frames.iter().map(|frame| {
+                let t0 = Instant::now();
+                let out = self.upscale(frame);
+                let t1 = Instant::now();
+                println!("[Batch] Frame time: {:.2} ms", (t1 - t0).as_secs_f64() * 1000.0);
+                out
+            }).collect()
+        };
+        let total = Instant::now() - start;
+        println!("[Batch] Total time: {:.2} ms for {} frames", total.as_secs_f64() * 1000.0, frames.len());
+        results.into_iter().collect()
     }
 }
 
