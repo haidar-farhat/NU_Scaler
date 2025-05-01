@@ -21,6 +21,11 @@ except ImportError:
     nu_scaler_core = None
     cv2 = None
 
+try:
+    import ffpyplayer.player
+except ImportError:
+    ffpyplayer = None
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -291,11 +296,21 @@ class MainWindow(QMainWindow):
         self.video_play_btn.setEnabled(False)
         self.video_stop_btn.setEnabled(True)
         self.video_status.setText("Status: Playing")
+        # Audio sync
+        self.audio_player = None
+        if ffpyplayer is not None:
+            self.audio_player = ffpyplayer.player.MediaPlayer(self.video_file)
         self.video_timer = QTimer()
-        self.video_timer.timeout.connect(lambda: self.update_video_frame(out_w, out_h))
+        self.video_timer.timeout.connect(lambda: self.update_video_frame_with_audio(out_w, out_h))
         self.video_timer.start(33)  # ~30 FPS
 
-    def update_video_frame(self, out_w, out_h):
+    def update_video_frame_with_audio(self, out_w, out_h):
+        # Sync with audio
+        pts = None
+        if self.audio_player is not None:
+            frame, val = self.audio_player.get_frame()
+            if val is not None and 'pts' in val:
+                pts = val['pts']
         ret, frame = self.video_cap.read()
         if not ret:
             self.stop_video_playback()
@@ -311,12 +326,15 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.video_status.setText(f"Error: {e}")
             self.stop_video_playback()
+        # Optionally, use pts to sync video frame timing (not implemented for simplicity)
 
     def stop_video_playback(self):
         if hasattr(self, 'video_timer'):
             self.video_timer.stop()
         if hasattr(self, 'video_cap'):
             self.video_cap.release()
+        if hasattr(self, 'audio_player') and self.audio_player is not None:
+            self.audio_player.close_player()
         self.video_status.setText("Status: Idle")
         self.video_play_btn.setEnabled(True)
         self.video_stop_btn.setEnabled(False)
