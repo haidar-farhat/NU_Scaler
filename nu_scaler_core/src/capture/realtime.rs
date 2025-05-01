@@ -106,7 +106,7 @@ impl RealTimeCapture for ScreenCapture {
                     use std::ffi::OsStr;
                     use std::os::windows::ffi::OsStrExt;
                     let wide: Vec<u16> = OsStr::new(&title).encode_wide().chain(Some(0)).collect();
-                    let hwnd = unsafe { FindWindowW(None, &wide) };
+                    let hwnd = unsafe { FindWindowW(None, wide.as_ptr()) };
                     if hwnd.0 == 0 {
                         return Err(format!("Window '{}' not found", title));
                     }
