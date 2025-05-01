@@ -381,8 +381,9 @@ class DebugScreen(QWidget):
         self.warning_label.setVisible(show)
 
 class AdvancedScreen(QWidget):
-    def __init__(self):
+    def __init__(self, live_feed_screen=None):
         super().__init__()
+        self.live_feed_screen = live_feed_screen
         layout = QVBoxLayout(self)
         shader_group = QGroupBox("Shader & Engine")
         shader_form = QFormLayout(shader_group)
@@ -419,19 +420,47 @@ class AdvancedScreen(QWidget):
         layout.addWidget(concurrency_group)
         layout.addWidget(memory_group)
         layout.addStretch()
+    def get_upscaler(self):
+        if self.live_feed_screen and self.live_feed_screen.upscaler:
+            return self.live_feed_screen.upscaler
+        return None
     def reload_shader_backend(self):
-        # Placeholder: call backend to reload shader
-        from PySide6.QtWidgets import QMessageBox
-        QMessageBox.information(self, "Reload Shader", "Shader reload not yet implemented.")
+        upscaler = self.get_upscaler()
+        if upscaler:
+            # For demo, use a placeholder path
+            path = self.shader_path.text() or "shader.wgsl"
+            try:
+                upscaler.reload_shader(path)
+            except Exception as e:
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Reload Shader", f"Error: {e}")
+        else:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Reload Shader", "No upscaler instance available.")
     def update_threads(self, val):
-        # Placeholder: call backend to update thread count
-        pass
+        upscaler = self.get_upscaler()
+        if upscaler:
+            try:
+                upscaler.set_thread_count(val)
+            except Exception as e:
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Thread Count", f"Error: {e}")
     def update_buffer_pool(self, val):
-        # Placeholder: call backend to update buffer pool
-        pass
+        upscaler = self.get_upscaler()
+        if upscaler:
+            try:
+                upscaler.set_buffer_pool_size(val)
+            except Exception as e:
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Buffer Pool", f"Error: {e}")
     def update_gpu_allocator(self, val):
-        # Placeholder: call backend to update allocator
-        pass
+        upscaler = self.get_upscaler()
+        if upscaler:
+            try:
+                upscaler.set_gpu_allocator(val)
+            except Exception as e:
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "GPU Allocator", f"Error: {e}")
 
 class UIAccessibilityScreen(QWidget):
     def __init__(self):
@@ -504,7 +533,7 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.live_feed_screen = LiveFeedScreen()
         self.debug_screen = DebugScreen()
-        self.advanced_screen = AdvancedScreen()
+        self.advanced_screen = AdvancedScreen(live_feed_screen=self.live_feed_screen)
         self.ui_screen = UIAccessibilityScreen()
         self.screens = {
             0: self.live_feed_screen,
