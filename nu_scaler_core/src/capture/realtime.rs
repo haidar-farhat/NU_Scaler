@@ -180,7 +180,7 @@ impl RealTimeCapture for ScreenCapture {
                         bmi.bmiHeader.biHeight = -(self.height as i32); // top-down
                         bmi.bmiHeader.biPlanes = 1;
                         bmi.bmiHeader.biBitCount = 24;
-                        bmi.bmiHeader.biCompression = BI_RGB;
+                        bmi.bmiHeader.biCompression = BI_RGB.0 as u32;
                         let mut buf = vec![0u8; self.width * self.height * 3];
                         GetDIBits(hdc_mem, hbm, 0, self.height as u32, Some(buf.as_mut_ptr() as *mut _), &mut bmi, DIB_RGB_COLORS);
                         DeleteObject(hbm);
