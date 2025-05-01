@@ -156,9 +156,12 @@ impl PyScreenCapture {
     pub fn stop(&mut self) {
         self.inner.stop();
     }
-    pub fn get_frame<'py>(&mut self, py: Python<'py>) -> PyResult<Option<&'py PyBytes>> {
+    pub fn get_frame<'py>(&mut self, py: Python<'py>) -> PyResult<Option<(PyObject, usize, usize)>> {
         match self.inner.get_frame() {
-            Some(frame) => Ok(Some(PyBytes::new(py, &frame))),
+            Some((frame_data, width, height)) => {
+                let py_bytes = PyBytes::new(py, &frame_data);
+                Ok(Some((py_bytes.into(), width, height)))
+            },
             None => Ok(None),
         }
     }
