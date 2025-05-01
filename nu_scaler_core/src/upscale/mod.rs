@@ -165,6 +165,11 @@ pub struct WgpuUpscaler {
     dimensions_buffer: Option<Buffer>,
     bind_group: Option<BindGroup>,
     bind_group_layout: Option<BindGroupLayout>,
+    // Advanced settings
+    thread_count: u32,
+    buffer_pool_size: u32,
+    gpu_allocator: String,
+    shader_path: String,
 }
 
 impl WgpuUpscaler {
@@ -187,7 +192,51 @@ impl WgpuUpscaler {
             dimensions_buffer: None,
             bind_group: None,
             bind_group_layout: None,
+            thread_count: 4,
+            buffer_pool_size: 4,
+            gpu_allocator: "Default".to_string(),
+            shader_path: "".to_string(),
         }
+    }
+    pub fn set_thread_count(&mut self, n: u32) {
+        self.thread_count = n;
+        println!("[WgpuUpscaler] Set thread count: {}", n);
+    }
+    pub fn set_buffer_pool_size(&mut self, n: u32) {
+        self.buffer_pool_size = n;
+        println!("[WgpuUpscaler] Set buffer pool size: {}", n);
+    }
+    pub fn set_gpu_allocator(&mut self, preset: &str) {
+        self.gpu_allocator = preset.to_string();
+        println!("[WgpuUpscaler] Set GPU allocator: {}", preset);
+    }
+    pub fn reload_shader(&mut self, path: &str) -> anyhow::Result<()> {
+        use std::fs;
+        let code = fs::read_to_string(path)?;
+        self.shader_path = path.to_string();
+        if let (Some(device), Some(bind_group_layout)) = (self.device.as_ref(), self.bind_group_layout.as_ref()) {
+            let shader = device.create_shader_module(ShaderModuleDescriptor {
+                label: Some("Upscale Shader (Reloaded)"),
+                source: ShaderSource::Wgsl(code.into()),
+            });
+            let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+                label: Some("Upscale Pipeline Layout (Reloaded)"),
+                bind_group_layouts: &[bind_group_layout],
+                push_constant_ranges: &[],
+            });
+            let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+                label: Some("Upscale Pipeline (Reloaded)"),
+                layout: Some(&pipeline_layout),
+                module: &shader,
+                entry_point: "main",
+            });
+            self.shader = Some(shader);
+            self.pipeline = Some(pipeline);
+            println!("[WgpuUpscaler] Shader reloaded from {}", path);
+        } else {
+            println!("[WgpuUpscaler] Cannot reload shader: device or bind_group_layout missing");
+        }
+        Ok(())
     }
 }
 

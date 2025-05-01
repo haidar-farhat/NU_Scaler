@@ -61,6 +61,30 @@ impl PyWgpuUpscaler {
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(PyBytes::new(py, &out))
     }
+
+    /// Reload the WGSL shader from a file path
+    pub fn reload_shader(&mut self, path: &str) -> PyResult<()> {
+        self.inner.reload_shader(path)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    /// Set the thread count for upscaling/concurrency
+    pub fn set_thread_count(&mut self, n: u32) -> PyResult<()> {
+        self.inner.set_thread_count(n);
+        Ok(())
+    }
+
+    /// Set the buffer pool size
+    pub fn set_buffer_pool_size(&mut self, n: u32) -> PyResult<()> {
+        self.inner.set_buffer_pool_size(n);
+        Ok(())
+    }
+
+    /// Set the GPU allocator preset
+    pub fn set_gpu_allocator(&mut self, preset: &str) -> PyResult<()> {
+        self.inner.set_gpu_allocator(preset);
+        Ok(())
+    }
 }
 
 #[pyclass]
