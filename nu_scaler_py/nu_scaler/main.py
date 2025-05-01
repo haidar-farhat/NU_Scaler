@@ -209,18 +209,25 @@ class LiveFeedScreen(QWidget):
             self.stop_capture()
 
 class SettingsScreen(QWidget):
-    def __init__(self):
+    def __init__(self, live_feed_screen=None):
         super().__init__()
+        self.live_feed_screen = live_feed_screen
         layout = QVBoxLayout(self)
         # Input & Capture
         input_group = QGroupBox("Input & Capture")
         input_form = QFormLayout(input_group)
         self.input_source = QComboBox()
         self.input_source.addItems(["Screen Capture", "Video File", "Static Image"])
+        self.input_source.setToolTip("Select the input source for upscaling.")
         self.backend = QComboBox()
         self.backend.addItems(["Auto", "Win32", "X11", "Wayland"])
+        self.backend.setToolTip("Select the backend for capture (platform dependent).")
         self.capture_btn = QPushButton("Capture Frame")
+        self.capture_btn.setToolTip("Capture a single frame from the selected input.")
+        self.capture_btn.clicked.connect(self.capture_frame)
         self.refresh_btn = QPushButton("Refresh Devices")
+        self.refresh_btn.setToolTip("Refresh the list of available input devices/windows.")
+        self.refresh_btn.clicked.connect(self.refresh_devices)
         input_form.addRow("Input Source:", self.input_source)
         input_form.addRow("Backend:", self.backend)
         input_form.addRow(self.capture_btn, self.refresh_btn)
@@ -232,9 +239,13 @@ class SettingsScreen(QWidget):
         self.scale_slider.setValue(20)
         self.scale_label = QLabel("2.0×")
         self.scale_slider.valueChanged.connect(lambda: self.scale_label.setText(f"{self.scale_slider.value()/10.0:.1f}×"))
+        self.scale_slider.setToolTip("Set the upscaling factor (1.0× to 4.0×).")
         self.method = QComboBox()
         self.method.addItems(["AMD FSR", "NVIDIA NIS", "Pure Rust Interpolation"])
+        self.method.setToolTip("Select the upscaling algorithm.")
         self.advanced_btn = QPushButton("Advanced Algorithm Settings")
+        self.advanced_btn.setToolTip("Open advanced settings for the selected algorithm.")
+        self.advanced_btn.clicked.connect(self.open_advanced_settings)
         upscale_form.addRow("Scale Factor:", self.scale_slider)
         upscale_form.addRow("", self.scale_label)
         upscale_form.addRow("Upscaling Method:", self.method)
@@ -245,14 +256,19 @@ class SettingsScreen(QWidget):
         self.motion_slider = QSlider(Qt.Horizontal)
         self.motion_slider.setRange(0, 100)
         self.motion_slider.setValue(50)
+        self.motion_slider.setToolTip("Adjust motion sensitivity for optical flow.")
         self.blend_slider = QSlider(Qt.Horizontal)
         self.blend_slider.setRange(0, 100)
         self.blend_slider.setValue(50)
+        self.blend_slider.setToolTip("Adjust blending ratio for interpolation.")
         self.smooth_slider = QSlider(Qt.Horizontal)
         self.smooth_slider.setRange(0, 100)
         self.smooth_slider.setValue(50)
+        self.smooth_slider.setToolTip("Adjust smoothing factor for interpolation.")
         self.gpu_shader = QCheckBox("Use GPU Shader")
+        self.gpu_shader.setToolTip("Enable GPU shader for interpolation.")
         self.reload_shader = QPushButton("Reload Shader")
+        self.reload_shader.setToolTip("Reload the current shader from disk.")
         interp_form.addRow("Motion Sensitivity:", self.motion_slider)
         interp_form.addRow("Blending Ratio:", self.blend_slider)
         interp_form.addRow("Smoothing Factor:", self.smooth_slider)
@@ -262,16 +278,25 @@ class SettingsScreen(QWidget):
         compute_form = QFormLayout(compute_group)
         self.render_mode = QComboBox()
         self.render_mode.addItems(["GPU Accelerated", "CPU-only"])
+        self.render_mode.setToolTip("Choose between GPU or CPU rendering.")
         self.optimize_perf = QCheckBox("Optimize for Performance")
+        self.optimize_perf.setToolTip("Trade off quality for speed.")
         compute_form.addRow("Rendering Mode:", self.render_mode)
         compute_form.addRow(self.optimize_perf)
         # Control Buttons
         control_group = QGroupBox("Controls")
         control_layout = QHBoxLayout(control_group)
         self.start_btn = QPushButton("Start")
+        self.start_btn.setToolTip("Start real-time upscaling.")
+        self.start_btn.clicked.connect(self.start_pipeline)
         self.pause_btn = QPushButton("Pause/Resume")
+        self.pause_btn.setToolTip("Pause or resume the pipeline.")
+        self.pause_btn.clicked.connect(self.pause_pipeline)
         self.stop_btn = QPushButton("Stop")
+        self.stop_btn.setToolTip("Stop the pipeline.")
+        self.stop_btn.clicked.connect(self.stop_pipeline)
         self.export_btn = QPushButton("Export Frame")
+        self.export_btn.setToolTip("Export the current upscaled frame.")
         self.export_format = QComboBox()
         self.export_format.addItems(["PNG", "JPG", "BMP"])
         control_layout.addWidget(self.start_btn)
@@ -286,6 +311,34 @@ class SettingsScreen(QWidget):
         layout.addWidget(compute_group)
         layout.addWidget(control_group)
         layout.addStretch()
+
+    def capture_frame(self):
+        # Example: trigger a single frame capture in LiveFeedScreen
+        if self.live_feed_screen:
+            self.live_feed_screen.start_capture()
+            self.live_feed_screen.timer.singleShot(100, self.live_feed_screen.stop_capture)
+
+    def refresh_devices(self):
+        if self.live_feed_screen:
+            self.live_feed_screen.refresh_windows()
+
+    def open_advanced_settings(self):
+        # Placeholder: show a message or open a modal
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.information(self, "Advanced Settings", "Advanced algorithm settings coming soon!")
+
+    def start_pipeline(self):
+        if self.live_feed_screen:
+            self.live_feed_screen.start_capture()
+
+    def pause_pipeline(self):
+        # Placeholder: implement pause/resume logic
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.information(self, "Pause/Resume", "Pause/Resume not yet implemented.")
+
+    def stop_pipeline(self):
+        if self.live_feed_screen:
+            self.live_feed_screen.stop_capture()
 
 class DebugScreen(QWidget):
     def __init__(self):
@@ -409,9 +462,10 @@ class MainWindow(QMainWindow):
         self.sidebar.setStyleSheet("background: #232323; color: #bbb; font-size: 16px;")
         # Stacked widget for screens
         self.stack = QStackedWidget()
+        self.live_feed_screen = LiveFeedScreen()
         self.screens = {
-            0: LiveFeedScreen(),
-            1: SettingsScreen(),
+            0: self.live_feed_screen,
+            1: SettingsScreen(live_feed_screen=self.live_feed_screen),
             2: DebugScreen(),
             3: AdvancedScreen(),
             4: UIAccessibilityScreen(),
