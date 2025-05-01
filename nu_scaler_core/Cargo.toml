@@ -11,12 +11,8 @@ anyhow = "1.0"
 pyo3 = { version = "0.20", features = ["extension-module"] }
 wgpu = "0.19"
 scrap = "0.5"
-windows = { version = "0.52", features = [
-    "Win32_Foundation", 
-    "Win32_Graphics_Gdi", 
-    "Win32_UI_WindowsAndMessaging",
-    "Win32_System_SystemServices"
-] }
+windows = "0.52"
+windows-capture = "1.4"
 image = "0.25"
 x11 = { version = "2.21", optional = true }
 bytemuck = "1.14"
