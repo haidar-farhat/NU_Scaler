@@ -77,32 +77,44 @@ impl ScreenCapture {
             vec![]
         }
     }
+    pub fn debug_print(&self, msg: &str) {
+        println!("[ScreenCapture] {}", msg);
+    }
 }
 
 impl RealTimeCapture for ScreenCapture {
     fn start(&mut self, target: CaptureTarget) -> Result<(), String> {
+        self.debug_print(&format!("Starting capture: {:?}", target));
         self.target = Some(target.clone());
         match target {
             CaptureTarget::FullScreen => {
                 #[cfg(target_os = "windows")]
                 {
-                    let display = Display::primary().map_err(|e| e.to_string())?;
+                    let display = Display::primary().map_err(|e| {
+                        self.debug_print(&format!("Failed to get primary display: {}", e));
+                        e.to_string()
+                    })?;
                     let width = display.width();
                     let height = display.height();
-                    let capturer = Capturer::new(display).map_err(|e| e.to_string())?;
+                    let capturer = Capturer::new(display).map_err(|e| {
+                        self.debug_print(&format!("Failed to create capturer: {}", e));
+                        e.to_string()
+                    })?;
                     self.width = width as usize;
                     self.height = height as usize;
                     self.capturer = Some(capturer);
                     self.running = true;
                     self.hwnd = None;
+                    self.debug_print(&format!("FullScreen capture started: {}x{}", width, height));
                     Ok(())
                 }
                 #[cfg(not(target_os = "windows"))]
                 {
+                    self.debug_print("Screen capture not implemented for this OS");
                     Err("Screen capture not implemented for this OS".to_string())
                 }
             }
-            CaptureTarget::WindowByTitle(title) => {
+            CaptureTarget::WindowByTitle(ref title) => {
                 #[cfg(target_os = "windows")]
                 {
                     use std::ffi::OsStr;
@@ -110,30 +122,34 @@ impl RealTimeCapture for ScreenCapture {
                     let wide: Vec<u16> = OsStr::new(&title).encode_wide().chain(Some(0)).collect();
                     let hwnd = unsafe { FindWindowW(None, PCWSTR::from_raw(wide.as_ptr())) };
                     if hwnd.0 == 0 {
+                        self.debug_print(&format!("Window '{}' not found", title));
                         return Err(format!("Window '{}' not found", title));
                     }
                     let mut rect = RECT::default();
-                    unsafe { GetWindowRect(hwnd, &mut rect) };
+                    let _ = unsafe { GetWindowRect(hwnd, &mut rect) };
                     let width = (rect.right - rect.left) as usize;
                     let height = (rect.bottom - rect.top) as usize;
                     self.width = width;
                     self.height = height;
                     self.hwnd = Some(hwnd.0);
                     self.running = true;
+                    self.debug_print(&format!("WindowByTitle capture started: '{}' {}x{}", title, width, height));
                     Ok(())
                 }
                 #[cfg(not(target_os = "windows"))]
                 {
+                    self.debug_print("Window capture not implemented for this OS");
                     Err("Window capture not implemented for this OS".to_string())
                 }
             }
             CaptureTarget::Region { .. } => {
-                // TODO: Implement region capture (Windows: BitBlt, Linux: X11)
+                self.debug_print("Region capture not implemented yet");
                 Err("Region capture not implemented yet".to_string())
             }
         }
     }
     fn stop(&mut self) {
+        self.debug_print("Stopping capture");
         self.running = false;
         self.capturer = None;
         #[cfg(target_os = "windows")]
@@ -143,6 +159,7 @@ impl RealTimeCapture for ScreenCapture {
     }
     fn get_frame(&mut self) -> Option<Vec<u8>> {
         if !self.running {
+            self.debug_print("get_frame called but not running");
             return None;
         }
         match &self.target {
@@ -158,10 +175,17 @@ impl RealTimeCapture for ScreenCapture {
                                 rgb.push(chunk[0]);
                             }
                         }
+                        self.debug_print(&format!("Captured frame: {} bytes", rgb.len()));
                         Some(rgb)
                     }
-                    Err(ref e) if e.kind() == ErrorKind::WouldBlock => None,
-                    Err(_) => None,
+                    Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
+                        self.debug_print("No frame available yet (WouldBlock)");
+                        None
+                    }
+                    Err(e) => {
+                        self.debug_print(&format!("Frame error: {}", e));
+                        None
+                    }
                 }
             }
             Some(CaptureTarget::WindowByTitle(_)) => {
@@ -173,7 +197,7 @@ impl RealTimeCapture for ScreenCapture {
                         let hdc_mem = CreateCompatibleDC(hdc_window);
                         let hbm = CreateCompatibleBitmap(hdc_window, self.width as i32, self.height as i32);
                         SelectObject(hdc_mem, hbm);
-                        BitBlt(hdc_mem, 0, 0, self.width as i32, self.height as i32, hdc_window, 0, 0, SRCCOPY);
+                        let _ = BitBlt(hdc_mem, 0, 0, self.width as i32, self.height as i32, hdc_window, 0, 0, SRCCOPY);
                         let mut bmi = BITMAPINFO::default();
                         bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
                         bmi.bmiHeader.biWidth = self.width as i32;
@@ -186,15 +210,20 @@ impl RealTimeCapture for ScreenCapture {
                         DeleteObject(hbm);
                         DeleteDC(hdc_mem);
                         ReleaseDC(HWND(hwnd), hdc_window);
+                        self.debug_print(&format!("Captured window frame: {} bytes", buf.len()));
                         Some(buf)
                     }
                 }
                 #[cfg(not(target_os = "windows"))]
                 {
+                    self.debug_print("Window capture not implemented for this OS");
                     None
                 }
             }
-            _ => None,
+            _ => {
+                self.debug_print("get_frame called for unsupported target");
+                None
+            }
         }
     }
     fn list_windows() -> Vec<String> {
