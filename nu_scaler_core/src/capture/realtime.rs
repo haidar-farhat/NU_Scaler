@@ -1,5 +1,7 @@
 use scrap::{Capturer, Display};
 use std::io::ErrorKind;
+use windows::core::PCWSTR;
+use windows::Win32::Foundation::BOOL;
 
 #[cfg(target_os = "windows")]
 use windows::Win32::Foundation::{HWND, LPARAM};
@@ -53,7 +55,7 @@ impl ScreenCapture {
             use std::ffi::OsString;
             use std::os::windows::ffi::OsStringExt;
             let mut titles = Vec::new();
-            unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> i32 {
+            unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
                 let mut buf = [0u16; 512];
                 let len = GetWindowTextW(hwnd, &mut buf);
                 if len > 0 && IsWindowVisible(hwnd).as_bool() {
@@ -63,7 +65,7 @@ impl ScreenCapture {
                         titles.push(title);
                     }
                 }
-                1
+                BOOL(1)
             }
             unsafe {
                 EnumWindows(Some(enum_windows_proc), LPARAM(&mut titles as *mut _ as isize));
@@ -106,7 +108,7 @@ impl RealTimeCapture for ScreenCapture {
                     use std::ffi::OsStr;
                     use std::os::windows::ffi::OsStrExt;
                     let wide: Vec<u16> = OsStr::new(&title).encode_wide().chain(Some(0)).collect();
-                    let hwnd = unsafe { FindWindowW(None, wide.as_ptr()) };
+                    let hwnd = unsafe { FindWindowW(None, PCWSTR::from_raw(wide.as_ptr())) };
                     if hwnd.0 == 0 {
                         return Err(format!("Window '{}' not found", title));
                     }
@@ -178,7 +180,7 @@ impl RealTimeCapture for ScreenCapture {
                         bmi.bmiHeader.biHeight = -(self.height as i32); // top-down
                         bmi.bmiHeader.biPlanes = 1;
                         bmi.bmiHeader.biBitCount = 24;
-                        bmi.bmiHeader.biCompression = BI_RGB as u32;
+                        bmi.bmiHeader.biCompression = BI_RGB;
                         let mut buf = vec![0u8; self.width * self.height * 3];
                         GetDIBits(hdc_mem, hbm, 0, self.height as u32, Some(buf.as_mut_ptr() as *mut _), &mut bmi, DIB_RGB_COLORS);
                         DeleteObject(hbm);
