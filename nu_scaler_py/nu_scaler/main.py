@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QListWidget, QStackedWidget, QFrame,
     QPushButton, QComboBox, QSpinBox, QCheckBox, QSlider, QGroupBox, QFormLayout
 )
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QPixmap, QImage
 import time
 
@@ -13,6 +13,9 @@ except ImportError:
     nu_scaler_core = None
 
 class LiveFeedScreen(QWidget):
+    log_signal = Signal(str)
+    profiler_signal = Signal(float, float, int, int)
+    warning_signal = Signal(str, bool)
     def __init__(self):
         super().__init__()
         self.capture = None
@@ -179,33 +182,37 @@ class LiveFeedScreen(QWidget):
         if not self.capture or not self.upscaler:
             return
         t0 = time.perf_counter()
-        frame = self.capture.get_frame()
-        if frame is None:
-            return
-        # Assume frame is RGB, try to infer input size
-        in_len = len(frame)
-        # For demo, guess square
-        in_w = in_h = int((in_len // 3) ** 0.5)
-        out_w = int(in_w * self.upscale_scale)
-        out_h = int(in_h * self.upscale_scale)
         try:
+            frame = self.capture.get_frame()
+            if frame is None:
+                return
+            in_len = len(frame)
+            in_w = in_h = int((in_len // 3) ** 0.5)
+            out_w = int(in_w * self.upscale_scale)
+            out_h = int(in_h * self.upscale_scale)
             self.upscaler.initialize(in_w, in_h, out_w, out_h)
             out_bytes = self.upscaler.upscale(frame)
             img = QImage(out_bytes, out_w, out_h, QImage.Format_RGB888)
             pixmap = QPixmap.fromImage(img).scaled(self.output_preview.width(), self.output_preview.height(), Qt.KeepAspectRatio)
             self.output_preview.setPixmap(pixmap)
-            # Show input as well
             img_in = QImage(frame, in_w, in_h, QImage.Format_RGB888)
             pixmap_in = QPixmap.fromImage(img_in).scaled(self.input_preview.width(), self.input_preview.height(), Qt.KeepAspectRatio)
             self.input_preview.setPixmap(pixmap_in)
-            # Overlay and status
             t1 = time.perf_counter()
             frame_time = (t1 - t0) * 1000
             self.fps = 1000.0 / frame_time if frame_time > 0 else 0.0
             self.overlay.setText(f"Input: {in_w}×{in_h}\nUpscaled: {out_w}×{out_h}\nFPS: {self.fps:.1f}")
             self.status_bar.setText(f"Frame Time: {frame_time:.1f} ms   FPS: {self.fps:.1f}   Resolution: {in_w}×{in_h} → {out_w}×{out_h}")
+            # Emit profiler data
+            self.profiler_signal.emit(frame_time, self.fps, in_w, in_h)
+            # Emit warning if FPS drops
+            if self.fps < 30:
+                self.warning_signal.emit(f"Warning: Low FPS ({self.fps:.1f})", True)
+            else:
+                self.warning_signal.emit("", False)
         except Exception as e:
             self.status_bar.setText(f"Upscale error: {e}")
+            self.log_signal.emit(f"Error: {e}")
             self.stop_capture()
 
 class SettingsScreen(QWidget):
@@ -344,7 +351,6 @@ class DebugScreen(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        # Collapsible log view
         self.log_group = QGroupBox("Log (Collapsible)")
         self.log_group.setCheckable(True)
         self.log_group.setChecked(True)
@@ -353,103 +359,138 @@ class DebugScreen(QWidget):
         self.log_view.setStyleSheet("background: #222; color: #f88; font-family: monospace; padding: 8px;")
         self.log_view.setWordWrap(True)
         log_layout.addWidget(self.log_view)
-        # Profiler graph placeholder
         self.profiler_group = QGroupBox("Profiler")
         profiler_layout = QVBoxLayout(self.profiler_group)
         self.profiler_label = QLabel("[Profiler graph/timeline placeholder]")
         self.profiler_label.setStyleSheet("background: #222; color: #8ff; padding: 8px;")
         profiler_layout.addWidget(self.profiler_label)
-        # Overlay warnings
         self.warning_label = QLabel("[Overlay warnings: FPS drop, errors, etc.]")
         self.warning_label.setStyleSheet("background: #400; color: #fff; padding: 6px; border-radius: 6px;")
         self.warning_label.setVisible(False)
-        # Layout
         layout.addWidget(self.log_group)
         layout.addWidget(self.profiler_group)
         layout.addWidget(self.warning_label)
         layout.addStretch()
+    def append_log(self, msg):
+        prev = self.log_view.text()
+        self.log_view.setText(prev + "\n" + msg)
+    def update_profiler(self, frame_time, fps, in_w, in_h):
+        self.profiler_label.setText(f"Frame: {frame_time:.1f} ms | FPS: {fps:.1f} | Input: {in_w}×{in_h}")
+    def show_warning(self, msg, show):
+        self.warning_label.setText(msg)
+        self.warning_label.setVisible(show)
 
 class AdvancedScreen(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        # Shader & Engine
         shader_group = QGroupBox("Shader & Engine")
         shader_form = QFormLayout(shader_group)
         self.shader_path = QLabel("[WGSL Shader Path]")
         self.reload_shader = QPushButton("Reload Shader")
+        self.reload_shader.clicked.connect(self.reload_shader_backend)
         self.hot_reload = QCheckBox("Enable Hot Reload")
         shader_form.addRow("Custom WGSL Shader Path:", self.shader_path)
         shader_form.addRow(self.reload_shader)
         shader_form.addRow(self.hot_reload)
-        # Concurrency
         concurrency_group = QGroupBox("Concurrency")
         concurrency_form = QFormLayout(concurrency_group)
         self.thread_count = QSpinBox()
         self.thread_count.setRange(1, 64)
         self.thread_count.setValue(4)
+        self.thread_count.valueChanged.connect(self.update_threads)
         self.auto_scale = QCheckBox("Auto-scale threads")
         self.rayon_toggle = QCheckBox("Use Rayon/Crossbeam backend")
         concurrency_form.addRow("Thread Count:", self.thread_count)
         concurrency_form.addRow(self.auto_scale)
         concurrency_form.addRow(self.rayon_toggle)
-        # Memory Options
         memory_group = QGroupBox("Memory Options")
         memory_form = QFormLayout(memory_group)
         self.buffer_pool = QSpinBox()
         self.buffer_pool.setRange(1, 32)
         self.buffer_pool.setValue(4)
+        self.buffer_pool.valueChanged.connect(self.update_buffer_pool)
         self.gpu_allocator = QComboBox()
         self.gpu_allocator.addItems(["Default", "Aggressive", "Conservative"])
+        self.gpu_allocator.currentTextChanged.connect(self.update_gpu_allocator)
         memory_form.addRow("Buffer Pool Size:", self.buffer_pool)
         memory_form.addRow("GPU Allocator Preset:", self.gpu_allocator)
-        # Layout
         layout.addWidget(shader_group)
         layout.addWidget(concurrency_group)
         layout.addWidget(memory_group)
         layout.addStretch()
+    def reload_shader_backend(self):
+        # Placeholder: call backend to reload shader
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.information(self, "Reload Shader", "Shader reload not yet implemented.")
+    def update_threads(self, val):
+        # Placeholder: call backend to update thread count
+        pass
+    def update_buffer_pool(self, val):
+        # Placeholder: call backend to update buffer pool
+        pass
+    def update_gpu_allocator(self, val):
+        # Placeholder: call backend to update allocator
+        pass
 
 class UIAccessibilityScreen(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        # Theme
         theme_group = QGroupBox("Theme & Appearance")
         theme_form = QFormLayout(theme_group)
         self.theme_select = QComboBox()
         self.theme_select.addItems(["Dark", "Light", "System Default"])
+        self.theme_select.currentTextChanged.connect(self.apply_theme)
         self.font_scale = QSlider(Qt.Horizontal)
         self.font_scale.setRange(8, 32)
         self.font_scale.setValue(14)
         self.font_label = QLabel("14pt")
         self.font_scale.valueChanged.connect(lambda: self.font_label.setText(f"{self.font_scale.value()}pt"))
+        self.font_scale.valueChanged.connect(self.apply_font_scale)
         theme_form.addRow("Theme:", self.theme_select)
         theme_form.addRow("Font Scale:", self.font_scale)
         theme_form.addRow("", self.font_label)
-        # Shortcuts
         shortcut_group = QGroupBox("Keyboard Shortcuts")
         shortcut_layout = QVBoxLayout(shortcut_group)
         self.shortcut_label = QLabel("[Shortcuts view/editor placeholder]")
         shortcut_layout.addWidget(self.shortcut_label)
-        # Config
         config_group = QGroupBox("Configuration")
         config_layout = QHBoxLayout(config_group)
         self.save_btn = QPushButton("Save Config")
+        self.save_btn.clicked.connect(self.save_config)
         self.load_btn = QPushButton("Load Config")
+        self.load_btn.clicked.connect(self.load_config)
         config_layout.addWidget(self.save_btn)
         config_layout.addWidget(self.load_btn)
-        # Layout
         layout.addWidget(theme_group)
         layout.addWidget(shortcut_group)
         layout.addWidget(config_group)
         layout.addStretch()
+    def apply_theme(self, theme):
+        # Apply theme globally
+        if theme == "Dark":
+            QApplication.instance().setStyleSheet("QMainWindow { background: #181818; } QLabel { color: #ccc; }")
+        elif theme == "Light":
+            QApplication.instance().setStyleSheet("QMainWindow { background: #f8f8f8; } QLabel { color: #222; }")
+        else:
+            QApplication.instance().setStyleSheet("")
+    def apply_font_scale(self, val):
+        QApplication.instance().setStyleSheet(QApplication.instance().styleSheet() + f" QLabel {{ font-size: {val}px; }}")
+    def save_config(self):
+        # Placeholder: save config to file
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.information(self, "Save Config", "Config save not yet implemented.")
+    def load_config(self):
+        # Placeholder: load config from file
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.information(self, "Load Config", "Config load not yet implemented.")
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Nu Scaler")
         self.setMinimumSize(1100, 650)
-        # Sidebar navigation
         self.sidebar = QListWidget()
         self.sidebar.addItems([
             "Live Feed",
@@ -460,26 +501,31 @@ class MainWindow(QMainWindow):
         ])
         self.sidebar.setFixedWidth(180)
         self.sidebar.setStyleSheet("background: #232323; color: #bbb; font-size: 16px;")
-        # Stacked widget for screens
         self.stack = QStackedWidget()
         self.live_feed_screen = LiveFeedScreen()
+        self.debug_screen = DebugScreen()
+        self.advanced_screen = AdvancedScreen()
+        self.ui_screen = UIAccessibilityScreen()
         self.screens = {
             0: self.live_feed_screen,
             1: SettingsScreen(live_feed_screen=self.live_feed_screen),
-            2: DebugScreen(),
-            3: AdvancedScreen(),
-            4: UIAccessibilityScreen(),
+            2: self.debug_screen,
+            3: self.advanced_screen,
+            4: self.ui_screen,
         }
         for i in range(5):
             self.stack.addWidget(self.screens[i])
         self.sidebar.currentRowChanged.connect(self.stack.setCurrentIndex)
-        # Main layout
         main_widget = QWidget()
         main_layout = QHBoxLayout(main_widget)
         main_layout.addWidget(self.sidebar)
         main_layout.addWidget(self.stack)
         self.setCentralWidget(main_widget)
         self.apply_theme()
+        # Connect LiveFeedScreen signals to DebugScreen
+        self.live_feed_screen.log_signal.connect(self.debug_screen.append_log)
+        self.live_feed_screen.profiler_signal.connect(self.debug_screen.update_profiler)
+        self.live_feed_screen.warning_signal.connect(self.debug_screen.show_warning)
     def apply_theme(self):
         self.setStyleSheet("""
             QMainWindow { background: #181818; }
