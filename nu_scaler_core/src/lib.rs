@@ -2,6 +2,12 @@
 
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
+use crate::upscale::Upscaler;
+use crate::capture::realtime::RealTimeCapture;
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use once_cell::sync::Lazy;
 
 pub mod capture;
 pub mod gpu;
@@ -58,12 +64,14 @@ impl PyWgpuUpscaler {
 }
 
 #[pyclass]
+#[derive(Clone)]
 pub struct PyWindowByTitle {
     #[pyo3(get, set)]
     pub title: String,
 }
 
 #[pyclass]
+#[derive(Clone)]
 pub struct PyRegion {
     #[pyo3(get, set)]
     pub x: i32,
@@ -74,6 +82,10 @@ pub struct PyRegion {
     #[pyo3(get, set)]
     pub height: u32,
 }
+
+// Global registry for ScreenCapture handles
+static CAPTURE_REGISTRY: Lazy<Mutex<HashMap<u64, ScreenCapture>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+static CAPTURE_ID: AtomicU64 = AtomicU64::new(1);
 
 #[pyclass]
 #[derive(Clone)]
@@ -99,43 +111,59 @@ impl PyCaptureTarget {
     }
 }
 
-#[pyclass]
-pub struct PyScreenCapture {
-    inner: std::sync::Arc<std::sync::Mutex<ScreenCapture>>,
+#[pyfunction]
+fn create_screen_capture_py() -> u64 {
+    let mut reg = CAPTURE_REGISTRY.lock().unwrap();
+    let id = CAPTURE_ID.fetch_add(1, Ordering::SeqCst);
+    reg.insert(id, ScreenCapture::new());
+    id
 }
 
-#[pymethods]
-impl PyScreenCapture {
-    #[new]
-    pub fn new() -> Self {
-        Self { inner: std::sync::Arc::new(std::sync::Mutex::new(ScreenCapture::new())) }
+#[pyfunction]
+fn list_windows_py() -> Vec<String> {
+    ScreenCapture::list_windows()
+}
+
+#[pyfunction]
+fn start_capture_py(handle: u64, target: PyCaptureTarget, window: Option<PyWindowByTitle>, region: Option<PyRegion>) -> PyResult<()> {
+    let mut reg = CAPTURE_REGISTRY.lock().unwrap();
+    let cap = reg.get_mut(&handle).ok_or_else(|| pyo3::exceptions::PyValueError::new_err("Invalid handle"))?;
+    let tgt = target.to_internal(window, region);
+    cap.start(tgt).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))
+}
+
+#[pyfunction]
+fn stop_capture_py(handle: u64) {
+    let mut reg = CAPTURE_REGISTRY.lock().unwrap();
+    if let Some(cap) = reg.get_mut(&handle) {
+        cap.stop();
     }
-    #[staticmethod]
-    pub fn list_windows() -> Vec<String> {
-        ScreenCapture::list_windows()
-    }
-    pub fn start(&self, target: PyCaptureTarget, window: Option<PyWindowByTitle>, region: Option<PyRegion>) -> PyResult<()> {
-        let tgt = target.to_internal(window, region);
-        self.inner.lock().unwrap().start(tgt).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))
-    }
-    pub fn stop(&self) {
-        self.inner.lock().unwrap().stop();
-    }
-    pub fn get_frame<'py>(&self, py: Python<'py>) -> PyResult<Option<&'py PyBytes>> {
-        match self.inner.lock().unwrap().get_frame() {
+}
+
+#[pyfunction]
+fn get_frame_py(py: Python, handle: u64) -> PyResult<Option<&PyBytes>> {
+    let mut reg = CAPTURE_REGISTRY.lock().unwrap();
+    if let Some(cap) = reg.get_mut(&handle) {
+        match cap.get_frame() {
             Some(frame) => Ok(Some(PyBytes::new(py, &frame))),
             None => Ok(None),
         }
+    } else {
+        Ok(None)
     }
 }
 
 #[pymodule]
 fn nu_scaler_core(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<PyWgpuUpscaler>()?;
-    m.add_class::<PyScreenCapture>()?;
     m.add_class::<PyCaptureTarget>()?;
     m.add_class::<PyWindowByTitle>()?;
     m.add_class::<PyRegion>()?;
+    m.add_function(wrap_pyfunction!(create_screen_capture_py, m)?)?;
+    m.add_function(wrap_pyfunction!(list_windows_py, m)?)?;
+    m.add_function(wrap_pyfunction!(start_capture_py, m)?)?;
+    m.add_function(wrap_pyfunction!(stop_capture_py, m)?)?;
+    m.add_function(wrap_pyfunction!(get_frame_py, m)?)?;
     Ok(())
 }
 
