@@ -105,6 +105,14 @@ pub struct PyWindowByTitle {
     pub title: String,
 }
 
+#[pymethods]
+impl PyWindowByTitle {
+    #[new]
+    pub fn new(title: String) -> Self {
+        Self { title }
+    }
+}
+
 #[pyclass]
 #[derive(Clone)]
 pub struct PyRegion {
@@ -116,6 +124,14 @@ pub struct PyRegion {
     pub width: u32,
     #[pyo3(get, set)]
     pub height: u32,
+}
+
+#[pymethods]
+impl PyRegion {
+    #[new]
+    pub fn new(x: i32, y: i32, width: u32, height: u32) -> Self {
+        Self { x, y, width, height }
+    }
 }
 
 #[pyclass(unsendable)]
