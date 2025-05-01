@@ -1,6 +1,31 @@
-# Rust build artifacts
+# Rust
 /target/
+**/*.rs.bk
 Cargo.lock
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.pyd
+*.egg-info/
+.venv/
+nu_scaler_py/.venv/
+
+# Maturin build artifacts
+dist/
+build/
+*.whl
+*.egg
+
+# VSCode and IDE
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Misc
+*.log
 
 # Debug symbols
 *.pdb
