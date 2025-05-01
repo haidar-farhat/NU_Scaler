@@ -3,17 +3,12 @@ use std::io::ErrorKind;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::BOOL;
 
-// Add raw_window_handle imports
-use raw_window_handle::{HasRawWindowHandle, RawWindowHandle, Win32WindowHandle};
-
 #[cfg(target_os = "windows")]
-use windows::Win32::Foundation::{HWND, LPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, RECT};
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowTextW, IsWindowVisible, FindWindowW, GetWindowRect};
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Gdi::{GetDC, ReleaseDC, CreateCompatibleDC, CreateCompatibleBitmap, SelectObject, BitBlt, DeleteObject, DeleteDC, GetDIBits, SRCCOPY, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS};
-#[cfg(target_os = "windows")]
-use windows::Win32::Foundation::{RECT};
 
 #[derive(Debug, Clone)]
 pub enum CaptureTarget {
@@ -35,9 +30,8 @@ pub struct ScreenCapture {
     width: usize,
     height: usize,
     target: Option<CaptureTarget>,
-    // Remove HWND, scrap handles it internally via RawWindowHandle
-    // #[cfg(target_os = "windows")]
-    // hwnd: Option<isize>,
+    #[cfg(target_os = "windows")]
+    hwnd: Option<isize>,
 }
 
 impl ScreenCapture {
@@ -48,9 +42,8 @@ impl ScreenCapture {
             width: 0,
             height: 0,
             target: None,
-            // Remove HWND
-            // #[cfg(target_os = "windows")]
-            // hwnd: None,
+            #[cfg(target_os = "windows")]
+            hwnd: None,
         }
     }
     pub fn list_windows() -> Vec<String> {
@@ -87,19 +80,6 @@ impl ScreenCapture {
     }
 }
 
-// Implement HasRawWindowHandle for HWND to pass to scrap
-#[cfg(target_os = "windows")]
-struct HwndWrapper(HWND);
-
-#[cfg(target_os = "windows")]
-unsafe impl HasRawWindowHandle for HwndWrapper {
-    fn raw_window_handle(&self) -> RawWindowHandle {
-        let mut handle = Win32WindowHandle::empty();
-        handle.hwnd = self.0 .0 as *mut std::ffi::c_void; // HWND -> *mut c_void
-        RawWindowHandle::Win32(handle)
-    }
-}
-
 impl RealTimeCapture for ScreenCapture {
     fn start(&mut self, target: CaptureTarget) -> Result<(), String> {
         self.debug_print(&format!("Starting capture: {:?}", target));
@@ -116,6 +96,8 @@ impl RealTimeCapture for ScreenCapture {
                 self.height = height;
                 self.capturer = Some(capturer);
                 self.running = true;
+                #[cfg(target_os="windows")]
+                { self.hwnd = None; }
                 self.debug_print(&format!("FullScreen capture started: {}x{}", width, height));
                 Ok(())
             }
@@ -130,22 +112,19 @@ impl RealTimeCapture for ScreenCapture {
                         return Err(format!("Window '{}' not found", title));
                     }
                     let mut rect = RECT::default();
-                    if unsafe { GetWindowRect(hwnd, &mut rect) } == false {
+                    if unsafe { GetWindowRect(hwnd, &mut rect).is_ok() } == false {
                          return Err(format!("Could not get window rect for '{}'", title));
                     }
-                    let width = (rect.right - rect.left).max(0) as usize; // Ensure non-negative
+                    let width = (rect.right - rect.left).max(0) as usize;
                     let height = (rect.bottom - rect.top).max(0) as usize;
                     if width == 0 || height == 0 {
                         return Err(format!("Window '{}' has zero width or height", title));
                     }
 
-                    // Use scrap::Capturer::new with the window handle
-                    let wrapper = HwndWrapper(hwnd);
-                    let capturer = Capturer::new(wrapper).map_err(|e| e.to_string())?;
-
                     self.width = width;
                     self.height = height;
-                    self.capturer = Some(capturer);
+                    self.hwnd = Some(hwnd.0);
+                    self.capturer = None;
                     self.running = true;
                     self.debug_print(&format!("WindowByTitle capture started: '{}' {}x{}", title, width, height));
                     Ok(())
@@ -165,61 +144,115 @@ impl RealTimeCapture for ScreenCapture {
         if self.running {
              self.debug_print("Stopping capture");
              self.running = false;
-             self.capturer = None; // Drop the capturer
+             self.capturer = None;
+             #[cfg(target_os = "windows")]
+             { self.hwnd = None; }
         }
     }
 
     fn get_frame(&mut self) -> Option<(Vec<u8>, usize, usize)> {
         if !self.running {
-            // self.debug_print("get_frame called but not running"); // Too noisy
             return None;
         }
         let width = self.width;
         let height = self.height;
 
-        // Use the capturer regardless of target type (if start succeeded)
-        if let Some(capturer) = self.capturer.as_mut() {
-            match capturer.frame() {
-                Ok(frame) => {
-                    // Check frame dimensions match expected (scrap might return full screen?)
-                    // Although for window capture, it *should* return the window size.
-                    // Let's assume scrap gives BGRA bytes for the correct dimensions for now.
-                    let expected_len = width * height * 4;
-                    if frame.len() != expected_len {
-                        self.debug_print(&format!(
-                            "Frame size mismatch! Expected: {}x{}={} bytes, Got: {} bytes. Target: {:?}",
-                            width, height, expected_len, frame.len(), self.target
-                        ));
-                        // Attempt to process anyway if possible, might be stride issue?
-                        // Or return None?
-                        return None; // Safer to return None for now
+        match &self.target {
+            Some(CaptureTarget::FullScreen) => {
+                if let Some(capturer) = self.capturer.as_mut() {
+                    match capturer.frame() {
+                        Ok(frame) => {
+                            let expected_len = width * height * 4;
+                            if frame.len() != expected_len {
+                                let error_msg = format!("Frame size mismatch (FullScreen)! Expected: {}, Got: {}", expected_len, frame.len());
+                                self.debug_print(&error_msg);
+                                return None;
+                            }
+                            let mut rgba = Vec::with_capacity(expected_len);
+                            for chunk in frame.chunks_exact(4) {
+                                rgba.push(chunk[2]); rgba.push(chunk[1]); rgba.push(chunk[0]); rgba.push(chunk[3]);
+                            }
+                            let success_msg = format!("Captured fullscreen frame: {} bytes ({}x{}) via scrap", rgba.len(), width, height);
+                            self.debug_print(&success_msg);
+                            Some((rgba, width, height))
+                        }
+                        Err(ref e) if e.kind() == ErrorKind::WouldBlock => None,
+                        Err(e) => {
+                            self.debug_print(&format!("Frame capture error (FullScreen): {}", e));
+                            self.stop();
+                            None
+                        }
                     }
-
-                    // Convert BGRA to RGBA
-                    let mut rgba = Vec::with_capacity(expected_len);
-                    for chunk in frame.chunks_exact(4) {
-                        // chunk[0]=B, chunk[1]=G, chunk[2]=R, chunk[3]=A
-                        rgba.push(chunk[2]); // R
-                        rgba.push(chunk[1]); // G
-                        rgba.push(chunk[0]); // B
-                        rgba.push(chunk[3]); // A
-                    }
-                    self.debug_print(&format!("Captured frame: {} bytes ({}x{}) via scrap", rgba.len(), width, height));
-                    Some((rgba, width, height))
-                }
-                Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
-                    // self.debug_print("No frame available yet (WouldBlock)"); // Too noisy
-                    None
-                }
-                Err(e) => {
-                    self.debug_print(&format!("Frame capture error: {}", e));
-                    self.stop(); // Stop capture on error
+                } else {
+                    self.debug_print("get_frame called for FullScreen but capturer is None");
                     None
                 }
             }
-        } else {
-            self.debug_print("get_frame called but capturer is None");
-            None
+            Some(CaptureTarget::WindowByTitle(_)) => {
+                #[cfg(target_os = "windows")]
+                {
+                    self.hwnd.and_then(|hwnd_isize| {
+                        unsafe {
+                            let hwnd = HWND(hwnd_isize);
+                            let hdc_window = GetDC(hwnd);
+                            if hdc_window.is_invalid() { return None; }
+                            let hdc_mem = CreateCompatibleDC(hdc_window);
+                            if hdc_mem.is_invalid() { ReleaseDC(hwnd, hdc_window); return None; }
+                            let hbm = CreateCompatibleBitmap(hdc_window, width as i32, height as i32);
+                            if hbm.is_invalid() { DeleteDC(hdc_mem); ReleaseDC(hwnd, hdc_window); return None; }
+                            let old_obj = SelectObject(hdc_mem, hbm);
+
+                            let _ = BitBlt(hdc_mem, 0, 0, width as i32, height as i32, hdc_window, 0, 0, SRCCOPY);
+
+                            let mut bmi = BITMAPINFO {
+                                bmiHeader: BITMAPINFOHEADER {
+                                    biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                                    biWidth: width as i32,
+                                    biHeight: -(height as i32),
+                                    biPlanes: 1,
+                                    biBitCount: 32,
+                                    biCompression: BI_RGB.0 as u32,
+                                    ..Default::default()
+                                },
+                                ..Default::default()
+                            };
+
+                            let mut buf = vec![0u8; width * height * 4];
+
+                            let result = GetDIBits(hdc_mem, hbm, 0, height as u32, Some(buf.as_mut_ptr() as *mut _), &mut bmi, DIB_RGB_COLORS);
+
+                            SelectObject(hdc_mem, old_obj);
+                            DeleteObject(hbm);
+                            DeleteDC(hdc_mem);
+                            ReleaseDC(hwnd, hdc_window);
+
+                            if result == 0 {
+                                self.debug_print("GetDIBits failed for window capture");
+                                return None;
+                            }
+
+                            let mut rgba = Vec::with_capacity(width * height * 4);
+                            for chunk in buf.chunks_exact(4) {
+                                rgba.push(chunk[2]);
+                                rgba.push(chunk[1]);
+                                rgba.push(chunk[0]);
+                                rgba.push(chunk[3]);
+                            }
+
+                            self.debug_print(&format!("Captured window frame: {} bytes ({}x{}) via GDI", rgba.len(), width, height));
+                            Some((rgba, width, height))
+                        }
+                    })
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    None
+                }
+            }
+            _ => {
+                self.debug_print("get_frame called for unsupported target");
+                None
+            }
         }
     }
 
