@@ -58,47 +58,71 @@ impl PyWgpuUpscaler {
 }
 
 #[pyclass]
+pub struct PyWindowByTitle {
+    #[pyo3(get, set)]
+    pub title: String,
+}
+
+#[pyclass]
+pub struct PyRegion {
+    #[pyo3(get, set)]
+    pub x: i32,
+    #[pyo3(get, set)]
+    pub y: i32,
+    #[pyo3(get, set)]
+    pub width: u32,
+    #[pyo3(get, set)]
+    pub height: u32,
+}
+
+#[pyclass]
 #[derive(Clone)]
 pub enum PyCaptureTarget {
     FullScreen,
-    WindowByTitle(String),
-    Region { x: i32, y: i32, width: u32, height: u32 },
+    WindowByTitle,
+    Region,
 }
 
-impl From<PyCaptureTarget> for CaptureTarget {
-    fn from(py_target: PyCaptureTarget) -> Self {
-        match py_target {
+impl PyCaptureTarget {
+    pub fn to_internal(&self, window: Option<PyWindowByTitle>, region: Option<PyRegion>) -> CaptureTarget {
+        match self {
             PyCaptureTarget::FullScreen => CaptureTarget::FullScreen,
-            PyCaptureTarget::WindowByTitle(title) => CaptureTarget::WindowByTitle(title),
-            PyCaptureTarget::Region { x, y, width, height } => CaptureTarget::Region { x, y, width, height },
+            PyCaptureTarget::WindowByTitle => {
+                let title = window.map(|w| w.title).unwrap_or_default();
+                CaptureTarget::WindowByTitle(title)
+            },
+            PyCaptureTarget::Region => {
+                let r = region.unwrap_or(PyRegion { x: 0, y: 0, width: 0, height: 0 });
+                CaptureTarget::Region { x: r.x, y: r.y, width: r.width, height: r.height }
+            },
         }
     }
 }
 
 #[pyclass]
 pub struct PyScreenCapture {
-    inner: ScreenCapture,
+    inner: std::sync::Arc<std::sync::Mutex<ScreenCapture>>,
 }
 
 #[pymethods]
 impl PyScreenCapture {
     #[new]
     pub fn new() -> Self {
-        Self { inner: ScreenCapture::new() }
+        Self { inner: std::sync::Arc::new(std::sync::Mutex::new(ScreenCapture::new())) }
     }
     #[staticmethod]
     pub fn list_windows() -> Vec<String> {
         ScreenCapture::list_windows()
     }
-    pub fn start(&mut self, target: Option<PyCaptureTarget>) -> PyResult<()> {
-        let tgt = target.unwrap_or(PyCaptureTarget::FullScreen);
-        self.inner.start(tgt.into()).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))
+    pub fn start(&self, target: PyCaptureTarget, window: Option<PyWindowByTitle>, region: Option<PyRegion>) -> PyResult<()> {
+        let tgt = target.to_internal(window, region);
+        self.inner.lock().unwrap().start(tgt).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))
     }
-    pub fn stop(&mut self) {
-        self.inner.stop();
+    pub fn stop(&self) {
+        self.inner.lock().unwrap().stop();
     }
-    pub fn get_frame<'py>(&mut self, py: Python<'py>) -> PyResult<Option<&'py PyBytes>> {
-        match self.inner.get_frame() {
+    pub fn get_frame<'py>(&self, py: Python<'py>) -> PyResult<Option<&'py PyBytes>> {
+        match self.inner.lock().unwrap().get_frame() {
             Some(frame) => Ok(Some(PyBytes::new(py, &frame))),
             None => Ok(None),
         }
@@ -110,6 +134,8 @@ fn nu_scaler_core(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<PyWgpuUpscaler>()?;
     m.add_class::<PyScreenCapture>()?;
     m.add_class::<PyCaptureTarget>()?;
+    m.add_class::<PyWindowByTitle>()?;
+    m.add_class::<PyRegion>()?;
     Ok(())
 }
 

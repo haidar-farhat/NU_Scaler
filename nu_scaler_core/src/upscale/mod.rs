@@ -1,5 +1,6 @@
 use anyhow::Result;
 use wgpu::{Instance, Device, Queue, Adapter, Backends, DeviceDescriptor, Features, Limits, RequestAdapterOptions, ShaderModule, ComputePipeline, Buffer, BindGroup, BindGroupLayout, BufferUsages, ShaderModuleDescriptor, ShaderSource, ComputePipelineDescriptor, PipelineLayoutDescriptor, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, BufferBindingType, BindGroupDescriptor, BindGroupEntry, BindingResource, CommandEncoderDescriptor, BufferDescriptor, MapMode};
+use wgpu::util::DeviceExt;
 
 /// Upscaling quality levels
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -361,6 +362,7 @@ impl Upscaler for WgpuUpscaler {
         {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("Upscale Compute Pass"),
+                timestamp_writes: None,
             });
             cpass.set_pipeline(pipeline);
             cpass.set_bind_group(0, bind_group, &[]);
