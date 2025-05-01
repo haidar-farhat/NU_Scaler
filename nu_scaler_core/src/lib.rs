@@ -9,6 +9,7 @@ pub mod upscale;
 pub mod renderer;
 
 use upscale::{WgpuUpscaler, UpscalingQuality, UpscaleAlgorithm};
+use capture::realtime::ScreenCapture;
 
 /// Public API for initializing the core library (placeholder)
 pub fn initialize() {
@@ -56,9 +57,35 @@ impl PyWgpuUpscaler {
     }
 }
 
+#[pyclass]
+pub struct PyScreenCapture {
+    inner: ScreenCapture,
+}
+
+#[pymethods]
+impl PyScreenCapture {
+    #[new]
+    pub fn new() -> Self {
+        Self { inner: ScreenCapture::new() }
+    }
+    pub fn start(&mut self) -> PyResult<()> {
+        self.inner.start().map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))
+    }
+    pub fn stop(&mut self) {
+        self.inner.stop();
+    }
+    pub fn get_frame<'py>(&mut self, py: Python<'py>) -> PyResult<Option<&'py PyBytes>> {
+        match self.inner.get_frame() {
+            Some(frame) => Ok(Some(PyBytes::new(py, &frame))),
+            None => Ok(None),
+        }
+    }
+}
+
 #[pymodule]
 fn nu_scaler_core(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<PyWgpuUpscaler>()?;
+    m.add_class::<PyScreenCapture>()?;
     Ok(())
 }
 

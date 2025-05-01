@@ -5,7 +5,7 @@ nu_scaler.gui - GUI entry point for NuScaler (to be implemented with DearPyGui o
 import sys
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
-    QFileDialog, QComboBox, QSpinBox, QMessageBox
+    QFileDialog, QComboBox, QSpinBox, QMessageBox, QTabWidget
 )
 from PySide6.QtGui import QPixmap, QImage
 from PySide6.QtCore import Qt
@@ -27,6 +27,13 @@ class MainWindow(QMainWindow):
         self.init_ui()
 
     def init_ui(self):
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self.make_image_tab(), "Image Mode")
+        self.tabs.addTab(self.make_game_tab(), "Game Mode")
+        self.tabs.addTab(self.make_video_tab(), "Video Mode")
+        self.setCentralWidget(self.tabs)
+
+    def make_image_tab(self):
         # Widgets
         self.input_label = QLabel("Input Image")
         self.input_label.setAlignment(Qt.AlignCenter)
@@ -103,7 +110,23 @@ class MainWindow(QMainWindow):
 
         container = QWidget()
         container.setLayout(main_layout)
-        self.setCentralWidget(container)
+        return container
+
+    def make_game_tab(self):
+        container = QWidget()
+        layout = QVBoxLayout()
+        label = QLabel("Game Mode: Real-time screen/window upscaling (coming soon)")
+        layout.addWidget(label)
+        container.setLayout(layout)
+        return container
+
+    def make_video_tab(self):
+        container = QWidget()
+        layout = QVBoxLayout()
+        label = QLabel("Video Mode: Real-time video file upscaling (coming soon)")
+        layout.addWidget(label)
+        container.setLayout(layout)
+        return container
 
     def load_image(self):
         file, _ = QFileDialog.getOpenFileName(self, "Open Image", "", "Images (*.png *.jpg *.bmp)")

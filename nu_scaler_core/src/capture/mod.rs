@@ -54,6 +54,8 @@ impl ScreenCapture for BasicCapture {
     }
 }
 
+pub mod realtime;
+
 #[cfg(test)]
 mod tests {
     use super::*;
