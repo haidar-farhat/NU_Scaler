@@ -146,11 +146,14 @@ class LiveFeedScreen(QWidget):
             return
         try:
             # Determine target based on GUI selection
-            # --- Force FullScreen for testing --- 
-            print("[GUI - DEBUG] Forcing FullScreen capture mode.")
-            source = "Screen" # Override
-            window_title = None # Override
-            # --- End Force FullScreen ---
+            source = self.source_box.currentText()
+            window_title = self.window_box.currentText() if source == "Window" else None
+            print(f"[GUI] Source: {source}, Window Title: {window_title}")
+            # --- Remove Forced FullScreen --- 
+            # print("[GUI - DEBUG] Forcing FullScreen capture mode.")
+            # source = "Screen" # Override
+            # window_title = None # Override
+            # --- End Remove Forced FullScreen ---
 
             if source == "Screen":
                 target = nu_scaler_core.PyCaptureTarget.FullScreen
@@ -177,10 +180,10 @@ class LiveFeedScreen(QWidget):
             self.capture.start(target, window, region)
             print("[GUI] capture.start() returned.")
 
-            # Add a delay to allow window focus change
-            print("[GUI] Waiting 2 seconds before starting frame timer...")
-            time.sleep(2.0)
-            print("[GUI] Starting frame timer.")
+            # Remove the delay
+            # print("[GUI] Waiting 2 seconds before starting frame timer...")
+            # time.sleep(2.0)
+            # print("[GUI] Starting frame timer.")
 
             self.upscaler_initialized = False # Reset upscaler state
             self.upscaler = None
@@ -242,6 +245,9 @@ class LiveFeedScreen(QWidget):
             out_w = int(in_w * self.upscale_scale)
             out_h = int(in_h * self.upscale_scale)
 
+            # Print first ~20 bytes of received upscale buffer
+            print(f"[GUI] Received {len(out_bytes)} upscale bytes. First 20: {bytes(out_bytes[:20])}")
+
             # --- BEGIN ADDED DEBUG CODE ---
             try:
                 from PIL import Image
@@ -258,13 +264,16 @@ class LiveFeedScreen(QWidget):
                 print(f"Error saving debug image: {save_e}")
             # --- END ADDED DEBUG CODE ---
 
-            # Display output (assuming BGRA -> ARGB32)
-            img = QImage(out_bytes, out_w, out_h, QImage.Format_ARGB32)
-            pixmap = QPixmap.fromImage(img)
-            self.output_preview.setPixmap(pixmap)
+            # Display output (now showing raw input)
+            # img = QImage(out_bytes, out_w, out_h, QImage.Format_ARGB32)
+            # Use RGBA8888 now that Rust returns RGBA
+            # For output preview, we display the raw input frame for now
+            img_out_debug = QImage(frame, in_w, in_h, QImage.Format_RGBA8888)
+            pixmap_out = QPixmap.fromImage(img_out_debug)
+            self.output_preview.setPixmap(pixmap_out)
 
-            # Display input (assuming BGRA -> ARGB32)
-            img_in = QImage(frame, in_w, in_h, QImage.Format_ARGB32)
+            # Display input (Use RGBA8888)
+            img_in = QImage(frame, in_w, in_h, QImage.Format_RGBA8888) 
             pixmap_in = QPixmap.fromImage(img_in)
             self.input_preview.setPixmap(pixmap_in)
 
