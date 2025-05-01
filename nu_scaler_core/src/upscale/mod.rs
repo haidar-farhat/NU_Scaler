@@ -1,6 +1,7 @@
 use anyhow::Result;
 use wgpu::{Instance, Device, Queue, Adapter, Backends, DeviceDescriptor, Features, Limits, RequestAdapterOptions, ShaderModule, ComputePipeline, Buffer, BindGroup, BindGroupLayout, BufferUsages, ShaderModuleDescriptor, ShaderSource, ComputePipelineDescriptor, PipelineLayoutDescriptor, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, BufferBindingType, BindGroupDescriptor, BindGroupEntry, BindingResource, CommandEncoderDescriptor, BufferDescriptor, MapMode};
 use wgpu::util::DeviceExt;
+use rayon::prelude::*;
 
 /// Upscaling quality levels
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -170,6 +171,8 @@ pub struct WgpuUpscaler {
     buffer_pool_size: u32,
     gpu_allocator: String,
     shader_path: String,
+    buffer_pool: Vec<Buffer>,
+    buffer_pool_index: usize,
 }
 
 impl WgpuUpscaler {
@@ -196,19 +199,40 @@ impl WgpuUpscaler {
             buffer_pool_size: 4,
             gpu_allocator: "Default".to_string(),
             shader_path: "".to_string(),
+            buffer_pool: Vec::new(),
+            buffer_pool_index: 0,
         }
     }
     pub fn set_thread_count(&mut self, n: u32) {
         self.thread_count = n;
         println!("[WgpuUpscaler] Set thread count: {}", n);
+        // Configure Rayon thread pool if needed
+        if n > 1 {
+            let _ = rayon::ThreadPoolBuilder::new().num_threads(n as usize).build_global();
+        }
     }
     pub fn set_buffer_pool_size(&mut self, n: u32) {
         self.buffer_pool_size = n;
         println!("[WgpuUpscaler] Set buffer pool size: {}", n);
+        // Re-allocate buffer pool if device is available
+        self.buffer_pool.clear();
+        if let Some(device) = self.device.as_ref() {
+            for _ in 0..n {
+                let buf = device.create_buffer(&BufferDescriptor {
+                    label: Some("Output Buffer (Pool)"),
+                    size: (self.output_width * self.output_height * 4) as u64,
+                    usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+                    mapped_at_creation: false,
+                });
+                self.buffer_pool.push(buf);
+            }
+        }
+        self.buffer_pool_index = 0;
     }
     pub fn set_gpu_allocator(&mut self, preset: &str) {
         self.gpu_allocator = preset.to_string();
         println!("[WgpuUpscaler] Set GPU allocator: {}", preset);
+        // For now, just print. In future, change allocation strategy.
     }
     pub fn reload_shader(&mut self, path: &str) -> anyhow::Result<()> {
         use std::fs;
@@ -377,18 +401,27 @@ impl Upscaler for WgpuUpscaler {
         self.bind_group = Some(bind_group);
         self.bind_group_layout = Some(bind_group_layout);
         self.initialized = true;
+        // After creating output_buffer, pre-allocate buffer pool
+        self.set_buffer_pool_size(self.buffer_pool_size);
         Ok(())
     }
     fn upscale(&self, input: &[u8]) -> Result<Vec<u8>> {
         if !self.initialized {
             anyhow::bail!("WgpuUpscaler not initialized");
         }
+        // Use buffer pool if available
+        let output_buffer = if !self.buffer_pool.is_empty() {
+            // Cycle through pool
+            let idx = self.buffer_pool_index % self.buffer_pool.len();
+            &self.buffer_pool[idx]
+        } else {
+            self.output_buffer.as_ref().ok_or_else(|| anyhow::anyhow!("No output buffer"))?
+        };
         let device = self.device.as_ref().ok_or_else(|| anyhow::anyhow!("No device"))?;
         let queue = self.queue.as_ref().ok_or_else(|| anyhow::anyhow!("No queue"))?;
         let pipeline = self.pipeline.as_ref().ok_or_else(|| anyhow::anyhow!("No pipeline"))?;
         let bind_group = self.bind_group.as_ref().ok_or_else(|| anyhow::anyhow!("No bind group"))?;
         let input_buffer = self.input_buffer.as_ref().ok_or_else(|| anyhow::anyhow!("No input buffer"))?;
-        let output_buffer = self.output_buffer.as_ref().ok_or_else(|| anyhow::anyhow!("No output buffer"))?;
         let dimensions_buffer = self.dimensions_buffer.as_ref().ok_or_else(|| anyhow::anyhow!("No dimensions buffer"))?;
 
         // Error handling: check input size
@@ -429,6 +462,11 @@ impl Upscaler for WgpuUpscaler {
         receiver.recv().unwrap().map_err(|_| anyhow::anyhow!("Failed to map output buffer"))?;
         let data = buffer_slice.get_mapped_range().to_vec();
         output_buffer.unmap();
+
+        // For multi-threading, if thread_count > 1, use rayon to parallelize (stub for now)
+        if self.thread_count > 1 {
+            println!("[WgpuUpscaler] Would use {} threads for batch upscaling (not implemented)", self.thread_count);
+        }
         Ok(data)
     }
     fn name(&self) -> &'static str {
