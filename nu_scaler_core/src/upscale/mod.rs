@@ -171,6 +171,7 @@ pub struct WgpuUpscaler {
     buffer_pool_index: AtomicUsize,
     buffer_pool_bind_groups: Vec<BindGroup>,
     fallback_bind_group: Option<BindGroup>,
+    staging_buffer: Option<Buffer>,
     // Advanced settings
     thread_count: u32,
     buffer_pool_size: u32,
@@ -201,6 +202,7 @@ impl WgpuUpscaler {
             buffer_pool_index: AtomicUsize::new(0),
             buffer_pool_bind_groups: Vec::new(),
             fallback_bind_group: None,
+            staging_buffer: None,
             thread_count: 4,
             buffer_pool_size: 4,
             gpu_allocator: "Default".to_string(),
@@ -453,6 +455,19 @@ impl Upscaler for WgpuUpscaler {
             entry_point: "main",
         });
 
+        // Create Staging Buffer
+        let staging_buffer_size = (output_width * output_height * 4) as u64;
+        let staging_buffer = if staging_buffer_size > 0 {
+            Some(device.create_buffer(&BufferDescriptor {
+                label: Some("Staging Buffer"),
+                size: staging_buffer_size,
+                usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }))
+        } else {
+            None
+        };
+
         self.instance = Some(instance);
         self.device = Some(device);
         self.queue = Some(queue);
@@ -462,6 +477,7 @@ impl Upscaler for WgpuUpscaler {
         self.output_buffer = Some(output_buffer);
         self.dimensions_buffer = Some(dimensions_buffer);
         self.bind_group_layout = Some(bind_group_layout);
+        self.staging_buffer = staging_buffer;
 
         // Create fallback bind group using the original output buffer
         if let (Some(dev), Some(layout), Some(in_buf), Some(out_buf), Some(dims_buf)) = (
@@ -494,8 +510,9 @@ impl Upscaler for WgpuUpscaler {
         if !self.initialized {
             anyhow::bail!("WgpuUpscaler not initialized");
         }
+        let staging_buffer = self.staging_buffer.as_ref().ok_or_else(|| anyhow::anyhow!("No staging buffer"))?;
 
-        // Select the correct output buffer and corresponding bind group from the pool
+        // Select output buffer and bind group from pool
         let buffer_index = self.buffer_pool_index.fetch_add(1, Ordering::SeqCst);
         let (output_buffer, bind_group) = if !self.buffer_pool.is_empty() && !self.buffer_pool_bind_groups.is_empty() {
             let idx = buffer_index % self.buffer_pool.len();
@@ -527,7 +544,7 @@ impl Upscaler for WgpuUpscaler {
         // Upload input to GPU
         queue.write_buffer(input_buffer, 0, input);
 
-        // Encode and dispatch compute shader
+        // Encode compute pass and copy to staging buffer
         let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
             label: Some("Upscale Encoder"),
         });
@@ -542,45 +559,32 @@ impl Upscaler for WgpuUpscaler {
             let y_groups = (self.output_height + 7) / 8;
             cpass.dispatch_workgroups(x_groups, y_groups, 1);
         }
+        // Copy result from output buffer (pool) to staging buffer
+        encoder.copy_buffer_to_buffer(
+            output_buffer, 0,
+            staging_buffer, 0,
+            staging_buffer.size()
+        );
         queue.submit(Some(encoder.finish()));
 
-        // Refined Download/Map/Unmap
+        // Map the staging buffer to read results
         let mapped_data: Result<Vec<u8>, anyhow::Error> = {
-            let buffer_slice = output_buffer.slice(..);
+            let buffer_slice = staging_buffer.slice(..);
             let (sender, receiver) = std::sync::mpsc::channel();
-
-            // Request mapping
             buffer_slice.map_async(MapMode::Read, move |v| sender.send(v).unwrap());
-
-            // Poll the device until the callback is processed
-            // This is crucial for map_async to work correctly
             device.poll(wgpu::Maintain::Wait);
-
-            // Block until the mapping result is received from the callback
             match receiver.recv() {
                 Ok(Ok(())) => {
-                    // Mapping succeeded, get the mapped range and copy data
                     let data = buffer_slice.get_mapped_range().to_vec();
-                    // Drop the mapped range view BEFORE unmapping
                     drop(buffer_slice.get_mapped_range());
-                    // Unmap the buffer
-                    output_buffer.unmap();
+                    staging_buffer.unmap(); // Unmap the staging buffer
                     Ok(data)
                 }
-                Ok(Err(e)) => {
-                    // Mapping callback reported an error
-                    // Buffer might still be mapped, try unmapping defensively?
-                    // output_buffer.unmap(); // Or maybe not?
-                    Err(anyhow::anyhow!("Buffer map callback failed: {:?}", e))
-                }
-                Err(e) => {
-                    // Failed to receive result from callback (channel error)
-                    Err(anyhow::anyhow!("Failed to receive buffer map result: {:?}", e))
-                }
+                Ok(Err(e)) => Err(anyhow::anyhow!("Buffer map callback failed: {:?}", e)),
+                Err(e) => Err(anyhow::anyhow!("Failed to receive buffer map result: {:?}", e)),
             }
         };
-
-        mapped_data // Return the result (Vec<u8> or error)
+        mapped_data
     }
     fn name(&self) -> &'static str {
         "WgpuUpscaler"
