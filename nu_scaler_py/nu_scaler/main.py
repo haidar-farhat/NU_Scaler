@@ -609,8 +609,9 @@ class MainWindow(QMainWindow):
 def run_gui():
     app = QApplication(sys.argv)
     win = MainWindow()
+    win.showMaximized()
     win.show()
     sys.exit(app.exec())
 
 if __name__ == "__main__":
-    run_gui() 
+    run_gui()
