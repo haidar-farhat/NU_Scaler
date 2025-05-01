@@ -145,13 +145,13 @@ class LiveFeedScreen(QWidget):
             self.status_bar.setText("Rust core missing")
             return
         try:
-            source = self.source_box.currentText()
-            window_title = self.window_box.currentText() if source == "Window" else None
-            print(f"[GUI] Source: {source}, Window Title: {window_title}")
-
-            self.capture = nu_scaler_core.PyScreenCapture()
-
             # Determine target based on GUI selection
+            # --- Force FullScreen for testing --- 
+            print("[GUI - DEBUG] Forcing FullScreen capture mode.")
+            source = "Screen" # Override
+            window_title = None # Override
+            # --- End Force FullScreen ---
+
             if source == "Screen":
                 target = nu_scaler_core.PyCaptureTarget.FullScreen
                 window = None
@@ -173,6 +173,7 @@ class LiveFeedScreen(QWidget):
                 return
 
             print("[GUI] Calling capture.start()...")
+            self.capture = nu_scaler_core.PyScreenCapture()
             self.capture.start(target, window, region)
             print("[GUI] capture.start() returned.")
 
