@@ -194,16 +194,39 @@ impl RealTimeCapture for ScreenCapture {
                     self.hwnd.and_then(|hwnd_isize| {
                         unsafe {
                             let hwnd = HWND(hwnd_isize);
+                            self.debug_print(&format!("Attempting GDI capture for HWND: {:?}", hwnd));
                             let hdc_window = GetDC(hwnd);
-                            if hdc_window.is_invalid() { return None; }
+                            if hdc_window.is_invalid() { self.debug_print("GetDC failed"); return None; }
+                            self.debug_print(&format!("Got window DC: {:?}", hdc_window));
+
                             let hdc_mem = CreateCompatibleDC(hdc_window);
-                            if hdc_mem.is_invalid() { ReleaseDC(hwnd, hdc_window); return None; }
+                            if hdc_mem.is_invalid() { self.debug_print("CreateCompatibleDC failed"); ReleaseDC(hwnd, hdc_window); return None; }
+                            self.debug_print(&format!("Created memory DC: {:?}", hdc_mem));
+
                             let hbm = CreateCompatibleBitmap(hdc_window, width as i32, height as i32);
-                            if hbm.is_invalid() { DeleteDC(hdc_mem); ReleaseDC(hwnd, hdc_window); return None; }
-                            let old_obj = SelectObject(hdc_mem, hbm);
+                            if hbm.is_invalid() { self.debug_print("CreateCompatibleBitmap failed"); DeleteDC(hdc_mem); ReleaseDC(hwnd, hdc_window); return None; }
+                            self.debug_print(&format!("Created compatible bitmap: {:?}", hbm));
 
-                            let _ = BitBlt(hdc_mem, 0, 0, width as i32, height as i32, hdc_window, 0, 0, SRCCOPY);
+                            let old_obj = SelectObject(hdc_mem, hbm); // Select bitmap into memory DC
+                            if old_obj.is_invalid() { self.debug_print("SelectObject (new) failed"); DeleteObject(hbm); DeleteDC(hdc_mem); ReleaseDC(hwnd, hdc_window); return None; }
+                            self.debug_print("Selected bitmap into memory DC");
 
+                            // Copy window content to memory DC
+                            let blt_result = BitBlt(hdc_mem, 0, 0, width as i32, height as i32, hdc_window, 0, 0, SRCCOPY);
+                            // Check if the Result is an error
+                            if blt_result.is_err() { 
+                                self.debug_print(&format!("BitBlt failed: {:?}", blt_result.err())); 
+                                // Decide whether to return None or continue
+                                // Let's return None for now if BitBlt fails
+                                DeleteObject(hbm); // Cleanup needed before returning
+                                DeleteDC(hdc_mem);
+                                ReleaseDC(hwnd, hdc_window);
+                                return None;
+                            } else {
+                                 self.debug_print("BitBlt succeeded");
+                            }
+
+                            // Prepare bitmap info
                             let mut bmi = BITMAPINFO {
                                 bmiHeader: BITMAPINFOHEADER {
                                     biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
@@ -217,17 +240,22 @@ impl RealTimeCapture for ScreenCapture {
                                 ..Default::default()
                             };
 
+                            // Allocate buffer for pixel data (BGRA)
                             let mut buf = vec![0u8; width * height * 4];
 
+                            // Get pixel data
                             let result = GetDIBits(hdc_mem, hbm, 0, height as u32, Some(buf.as_mut_ptr() as *mut _), &mut bmi, DIB_RGB_COLORS);
+                             self.debug_print(&format!("GetDIBits result: {}", result));
 
-                            SelectObject(hdc_mem, old_obj);
+                            // Clean up GDI objects
+                            SelectObject(hdc_mem, old_obj); // Select old object back
                             DeleteObject(hbm);
                             DeleteDC(hdc_mem);
                             ReleaseDC(hwnd, hdc_window);
+                            self.debug_print("Cleaned up GDI objects");
 
                             if result == 0 {
-                                self.debug_print("GetDIBits failed for window capture");
+                                self.debug_print("GetDIBits failed, returning None");
                                 return None;
                             }
 
