@@ -215,6 +215,22 @@ class LiveFeedScreen(QWidget):
             out_w = int(in_w * self.upscale_scale)
             out_h = int(in_h * self.upscale_scale)
 
+            # --- BEGIN ADDED DEBUG CODE ---
+            try:
+                from PIL import Image
+                print(f"Attempting to save upscaled image ({out_w}x{out_h}, {len(out_bytes)} bytes)")
+                if len(out_bytes) == out_w * out_h * 4:
+                    img_to_save = Image.frombytes('RGBA', (out_w, out_h), out_bytes)
+                    img_to_save.save('upscaled_debug.png')
+                    print("Saved upscaled_debug.png successfully.")
+                else:
+                    print(f"Error: Upscaled byte length mismatch. Expected {out_w * out_h * 4}, got {len(out_bytes)}")
+            except ImportError:
+                print("PIL/Pillow not installed. Cannot save debug image.")
+            except Exception as save_e:
+                print(f"Error saving debug image: {save_e}")
+            # --- END ADDED DEBUG CODE ---
+
             # Display output (assuming RGBA)
             img = QImage(out_bytes, out_w, out_h, QImage.Format_RGBA8888)
             pixmap = QPixmap.fromImage(img).scaled(self.output_preview.width(), self.output_preview.height(), Qt.KeepAspectRatio)
@@ -546,7 +562,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Nu Scaler")
-        self.setMinimumSize(1100, 650)
+        # self.setMinimumSize(1100, 650) # <-- Commented out for testing maximization
         self.sidebar = QListWidget()
         self.sidebar.addItems([
             "Live Feed",
