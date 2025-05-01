@@ -175,6 +175,12 @@ class LiveFeedScreen(QWidget):
             print("[GUI] Calling capture.start()...")
             self.capture.start(target, window, region)
             print("[GUI] capture.start() returned.")
+
+            # Add a delay to allow window focus change
+            print("[GUI] Waiting 2 seconds before starting frame timer...")
+            time.sleep(2.0)
+            print("[GUI] Starting frame timer.")
+
             self.upscaler_initialized = False # Reset upscaler state
             self.upscaler = None
             self.timer.start(16) # Aim for ~60 FPS
