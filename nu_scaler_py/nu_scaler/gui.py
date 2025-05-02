@@ -28,19 +28,23 @@ except ImportError:
 
 class MainWindow(QMainWindow):
     def __init__(self):
+        print("[gui.py] MainWindow.__init__ START")
         super().__init__()
         self.setWindowTitle("NuScaler - Basic GUI")
         self.input_image = None
         self.output_image = None
         self.upscaler = None
         self.init_ui()
+        print("[gui.py] MainWindow.__init__ END")
 
     def init_ui(self):
+        print("[gui.py] MainWindow.init_ui START")
         self.tabs = QTabWidget()
         self.tabs.addTab(self.make_image_tab(), "Image Mode")
         self.tabs.addTab(self.make_game_tab(), "Game Mode")
         self.tabs.addTab(self.make_video_tab(), "Video Mode")
         self.setCentralWidget(self.tabs)
+        print("[gui.py] MainWindow.init_ui END")
 
     def make_image_tab(self):
         # Widgets
@@ -173,25 +177,45 @@ class MainWindow(QMainWindow):
             self.game_window_box.setEnabled(True)
 
     def start_game_capture(self):
+        print("[gui.py] start_game_capture START")
         try:
-            from nu_scaler_core import PyScreenCapture, PyWgpuUpscaler, PyCaptureTarget
+            from nu_scaler_core import PyScreenCapture, PyWgpuUpscaler, PyCaptureTarget, PyWindowByTitle
         except ImportError:
             QMessageBox.critical(self, "Rust core missing", "nu_scaler_core module not found.")
             return
         self.game_capture = PyScreenCapture()
         # Determine target
         tgt_type = self.game_target_box.currentText()
+        py_target_variant = None
+        py_window = None
+        py_region = None # Add placeholder for region if needed later
+
         if tgt_type == "FullScreen":
-            target = PyCaptureTarget.FullScreen
+            py_target_variant = PyCaptureTarget.FullScreen
         elif tgt_type == "Window":
             title = self.game_window_box.currentText()
-            target = PyCaptureTarget.WindowByTitle(title)
-        else:
-            target = PyCaptureTarget.FullScreen
+            if title and title != "No windows found" and title != "Error listing windows":
+                py_target_variant = PyCaptureTarget.WindowByTitle
+                py_window = PyWindowByTitle(title) # Create the data object separately
+            else:
+                QMessageBox.warning(self, "No Window", "Please select a valid window title.")
+                return
+        # Add Region handling here if implemented
+        # elif tgt_type == "Region":
+        #     py_target_variant = PyCaptureTarget.Region
+        #     # Get coords/size and create PyRegion object
+        #     # py_region = PyRegion(x, y, w, h)
+
+        if py_target_variant is None:
+            QMessageBox.critical(self, "Capture Error", "Could not determine capture target type.")
+            return
+
         try:
-            self.game_capture.start(target)
+            # Pass the enum variant and the optional data objects
+            self.game_capture.start(py_target_variant, py_window, py_region)
         except Exception as e:
             QMessageBox.critical(self, "Capture Error", str(e))
+            print("[gui.py] start_game_capture END (Exception)")
             return
         # Use upscaler settings from image tab
         quality = self.quality_box.currentText()
@@ -201,11 +225,10 @@ class MainWindow(QMainWindow):
         self.game_upscaler = PyWgpuUpscaler(quality, algorithm)
         # We'll get input size from the first frame
         self.game_status.setText("Status: Running")
-        self.game_start_btn.setEnabled(False)
-        self.game_stop_btn.setEnabled(True)
         self.game_timer = QTimer()
         self.game_timer.timeout.connect(lambda: self.update_game_frame(out_w, out_h))
         self.game_timer.start(33)  # ~30 FPS
+        print("[gui.py] start_game_capture END (Success)")
 
     def update_game_frame(self, out_w, out_h):
         frame = self.game_capture.get_frame()
@@ -236,13 +259,13 @@ class MainWindow(QMainWindow):
             self.stop_game_capture()
 
     def stop_game_capture(self):
+        print("[gui.py] stop_game_capture START")
         if hasattr(self, 'game_timer'):
             self.game_timer.stop()
         if hasattr(self, 'game_capture'):
             self.game_capture.stop()
         self.game_status.setText("Status: Idle")
-        self.game_start_btn.setEnabled(True)
-        self.game_stop_btn.setEnabled(False)
+        print("[gui.py] stop_game_capture END")
 
     def make_video_tab(self):
         container = QWidget()
@@ -398,10 +421,15 @@ class MainWindow(QMainWindow):
 
 
 def run_gui():
+    print("[gui.py] run_gui START")
     app = QApplication(sys.argv)
     win = MainWindow()
     win.show()
-    sys.exit(app.exec())
+    print("[gui.py] run_gui starting app.exec()...")
+    exit_code = app.exec() # Store exit code
+    print(f"[gui.py] run_gui app.exec() finished with code: {exit_code}")
+    print("[gui.py] run_gui END")
+    sys.exit(exit_code) # Exit with the code from app.exec()
 
 if __name__ == "__main__":
     run_gui()
