@@ -5,6 +5,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens; // Ensure Sanctum is used
+use Illuminate\Support\Str; // Import Str facade
 
 class User extends Authenticatable
 {
@@ -46,6 +47,18 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
         ];
+    }
+
+    /**
+     * The "booted" method of the model.
+     */
+    protected static function booted(): void
+    {
+        static::creating(function ($user) {
+            if (empty($user->uuid)) { // Only generate if not already set (e.g., by factory)
+                $user->uuid = (string) Str::uuid();
+            }
+        });
     }
 
     /**
