@@ -4,10 +4,6 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use crate::upscale::Upscaler;
 use crate::capture::realtime::RealTimeCapture;
-use std::collections::HashMap;
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
-use once_cell::sync::Lazy;
 
 pub mod capture;
 pub mod gpu;
@@ -151,7 +147,7 @@ impl PyScreenCapture {
     }
     pub fn start(&mut self, target: PyCaptureTarget, window: Option<PyWindowByTitle>, region: Option<PyRegion>) -> PyResult<()> {
         let tgt = target.to_internal(window, region);
-        self.inner.start(tgt).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))
+        self.inner.start(tgt).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
     }
     pub fn stop(&mut self) {
         self.inner.stop();
@@ -219,7 +215,7 @@ impl PyCaptureTarget {
 }
 
 #[pymodule]
-fn nu_scaler_core(_py: Python, m: &PyModule) -> PyResult<()> {
+fn nu_scaler(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<PyWgpuUpscaler>()?;
     m.add_class::<PyScreenCapture>()?;
     m.add_class::<PyCaptureTarget>()?;
