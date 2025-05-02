@@ -228,6 +228,9 @@ class MainWindow(QMainWindow):
         self.game_timer = QTimer()
         self.game_timer.timeout.connect(lambda: self.update_game_frame(out_w, out_h))
         self.game_timer.start(33)  # ~30 FPS
+        # Set enabled state AFTER timer is started
+        self.game_start_btn.setEnabled(False)
+        self.game_stop_btn.setEnabled(True)
         print("[gui.py] start_game_capture END (Success)")
 
     def update_game_frame(self, out_w, out_h):
@@ -265,6 +268,9 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'game_capture'):
             self.game_capture.stop()
         self.game_status.setText("Status: Idle")
+        # Set enabled state AFTER timer/capture stopped
+        self.game_start_btn.setEnabled(True)
+        self.game_stop_btn.setEnabled(False)
         print("[gui.py] stop_game_capture END")
 
     def make_video_tab(self):
