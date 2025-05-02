@@ -1,5 +1,5 @@
 use anyhow::Result;
-use wgpu::{Instance, Device, Queue, Adapter, Backends, DeviceDescriptor, Features, Limits, RequestAdapterOptions, ShaderModule, ComputePipeline, Buffer, BindGroup, BindGroupLayout, BufferUsages, ShaderModuleDescriptor, ShaderSource, ComputePipelineDescriptor, PipelineLayoutDescriptor, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, BufferBindingType, BindGroupDescriptor, BindGroupEntry, BindingResource, CommandEncoderDescriptor, BufferDescriptor, MapMode};
+use wgpu::{Instance, Device, Queue, /*Adapter,*/ Backends, DeviceDescriptor, /*Features,*/ Limits, RequestAdapterOptions, ShaderModule, ComputePipeline, Buffer, BindGroup, BindGroupLayout, BufferUsages, ShaderModuleDescriptor, ShaderSource, ComputePipelineDescriptor, PipelineLayoutDescriptor, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, BufferBindingType, BindGroupDescriptor, BindGroupEntry, /*BindingResource,*/ CommandEncoderDescriptor, BufferDescriptor, MapMode};
 use wgpu::util::DeviceExt;
 use rayon::prelude::*;
 use std::time::Instant;

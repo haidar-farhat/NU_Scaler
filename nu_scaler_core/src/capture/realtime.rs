@@ -3,17 +3,20 @@ use std::io::ErrorKind;
 use std::sync::mpsc; // For sending frames from callback
 use std::sync::Mutex;
 use std::thread;
+use image::ImageFormat; // Keep, used in workaround
+use std::env;
+use std::fs;
+use uuid::Uuid;
 
 // Windows API imports (needed for list_windows)
-use windows::core::{PCWSTR};
+use windows::core::{Error, Result};
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM};
-use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowTextW, IsWindowVisible, FindWindowW};
+use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowTextW, IsWindowVisible/*, FindWindowW*/}; // FindWindowW unused
 
 // windows-capture integration (v1.4)
-use windows_capture::capture::{GraphicsCaptureApiHandler, Context}; // Use correct handler
-use windows_capture::frame::Frame;
+use windows_capture::capture::{GraphicsCaptureApiHandler, Context};
+use windows_capture::frame::{Frame, FrameBuffer/*, ImageFormat as CaptureImageFormat*/}; // ImageFormat unused here
 use windows_capture::graphics_capture_api::InternalCaptureControl;
-use windows_capture::monitor::Monitor;
 use windows_capture::settings::{Settings, ColorFormat, CursorCaptureSettings, DrawBorderSettings};
 use windows_capture::window::Window;
 
@@ -50,26 +53,34 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         &mut self,
         frame: &mut Frame,
         _capture_control: InternalCaptureControl
-    ) -> Result<(), Self::Error> 
+    ) -> Result<(), Self::Error>
     {
         let width = frame.width() as usize;
         let height = frame.height() as usize;
-        let frame_buffer = frame.buffer()?;
-        let frame_data_slice: &[u8] = frame_buffer.as_ref(); // Use AsRef trait method
-        // Clone the slice into an owned Vec
-        let buffer: Vec<u8> = frame_data_slice.to_vec();
 
-        // Send the frame data (BGRA format from windows-capture)
+        // --- WORKAROUND: Save to temp file and read back --- 
+        let temp_dir = env::temp_dir();
+        let unique_id = Uuid::new_v4();
+        let mut temp_path = temp_dir;
+        temp_path.push(format!("nu_scaler_frame_{}.bmp", unique_id));
+
+        frame.save_as_image(&temp_path, windows_capture::frame::ImageFormat::Bmp)
+             .map_err(|e| Box::new(e) as Self::Error)?;
+        let buffer = fs::read(&temp_path).map_err(|e| Box::new(e) as Self::Error)?;
+        let _ = fs::remove_file(&temp_path); // Ignore remove error
+        // --- End WORKAROUND ---
+
+        // Send the frame data (read from BMP file)
         match self.frame_sender.lock() {
             Ok(sender) => {
-                // Re-enable send
                 if sender.send(Some((buffer, width, height))).is_err() {
                     eprintln!("[CaptureHandler] Receiver disconnected. Stopping capture implicitly.");
                 }
-                // println!("[CaptureHandler] Frame arrived ({}x{}) - Data sent.", width, height); // Optional: keep for debugging?
             },
-            Err(_) => {
-                eprintln!("[CaptureHandler] Mutex poisoned. Cannot send frame.");
+            Err(poison_error) => {
+                let msg = format!("Mutex poisoned: {}", poison_error);
+                eprintln!("[CaptureHandler] {}", msg);
+                return Err(Box::new(std::io::Error::new(ErrorKind::Other, msg)) as Self::Error);
             }
         }
         Ok(())
@@ -79,7 +90,11 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         println!("[CaptureHandler] Capture session closed (on_closed called).");
         match self.frame_sender.lock() {
             Ok(sender) => { let _ = sender.send(None); },
-            Err(_) => { eprintln!("[CaptureHandler] Mutex poisoned. Cannot send stop signal."); }
+            Err(poison_error) => { 
+                let msg = format!("Mutex poisoned on close: {}", poison_error);
+                eprintln!("[CaptureHandler] {}", msg);
+                return Err(Box::new(std::io::Error::new(ErrorKind::Other, msg)) as Self::Error);
+             }
         }
         Ok(())
     }
