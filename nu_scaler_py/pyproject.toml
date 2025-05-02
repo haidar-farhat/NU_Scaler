@@ -10,6 +10,13 @@ readme = "README.md"
 requires-python = ">=3.8"
 dependencies = [
     "PySide6",
-    "Pillow"
+    "Pillow",
+    "numpy",      # Added for potential image manipulation
+    "ffpyplayer", # For video playback
+    "imageio",    # For video loading
 ]
 # dependencies = []  # Add Python dependencies here
+
+[tool.maturin]
+manifest-path = "../nu_scaler_core/Cargo.toml"
+bindings = "pyo3"

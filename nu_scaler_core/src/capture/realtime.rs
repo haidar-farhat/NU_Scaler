@@ -54,22 +54,21 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
     {
         let width = frame.width() as usize;
         let height = frame.height() as usize;
-        // Follow example: get Result<FrameBuffer>, use ?, assign to get slice via Deref?
-        let frame_data_slice = frame.buffer()?;
+        let frame_buffer = frame.buffer()?;
+        let frame_data_slice: &[u8] = frame_buffer.as_ref(); // Use AsRef trait method
         // Clone the slice into an owned Vec
-        // FIXME: Find correct way to get Vec<u8> from FrameBuffer for windows-capture v1.4
-        // let buffer: Vec<u8> = frame_data_slice.to_vec(); 
-        
+        let buffer: Vec<u8> = frame_data_slice.to_vec();
+
         // Send the frame data (BGRA format from windows-capture)
         match self.frame_sender.lock() {
             Ok(sender) => {
-                // FIXME: Re-enable send when buffer retrieval is fixed
-                // if sender.send(Some((buffer, width, height))).is_err() {
-                //     eprintln!("[CaptureHandler] Receiver disconnected. Stopping capture implicitly.");
-                // }
-                 println!("[CaptureHandler] Frame arrived ({}x{}) - Data sending disabled.", width, height);
+                // Re-enable send
+                if sender.send(Some((buffer, width, height))).is_err() {
+                    eprintln!("[CaptureHandler] Receiver disconnected. Stopping capture implicitly.");
+                }
+                // println!("[CaptureHandler] Frame arrived ({}x{}) - Data sent.", width, height); // Optional: keep for debugging?
             },
-            Err(_) => { 
+            Err(_) => {
                 eprintln!("[CaptureHandler] Mutex poisoned. Cannot send frame.");
             }
         }
