@@ -22,78 +22,109 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
-Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
-    return $request->user();
-});
+// Apply general rate limiting to all API routes
+Route::middleware(['api.rate.limit:public'])->group(function () {
 
-// Public User Authentication (Version 1)
-Route::prefix('v1/auth')->name('api.v1.auth.')->group(function () {
-    Route::post('register', [RegisterController::class, 'register'])
-         ->middleware('throttle:registrations')
-         ->name('register');
-    // Add login route for regular users if needed, separate from admin login
-    // Route::post('login', [LoginController::class, 'login'])->name('login');
-});
-
-// Authenticated User Actions (Version 1)
-Route::prefix('v1')->middleware('auth:sanctum')->name('api.v1.')->group(function () {
-    Route::get('download', [DownloadController::class, 'getDownloadLink'])
-         ->middleware('throttle:downloads') 
-         ->name('download');
-    // Add other authenticated user routes here (e.g., profile management)
-});
-
-// Public Feedback API Endpoints (Version 1)
-Route::prefix('v1/feedback')->name('api.v1.feedback.')->group(function () {
-    Route::middleware('throttle:feedback')->group(function(){
-        Route::post('reviews', [ReviewController::class, 'store'])->name('reviews.store');
-        Route::post('bug-reports', [BugReportController::class, 'store'])->name('bug-reports.store');
-        Route::post('hardware-surveys', [HardwareSurveyController::class, 'store'])->name('hardware-surveys.store');
+    // User info endpoint (requires authentication)
+    Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
+        return $request->user();
     });
-});
-
-// Admin API endpoints (Protected with auth and admin middleware)
-Route::prefix('admin')->name('api.admin.')->group(function () {
-    // Admin Authentication
-    Route::post('login', [AuthController::class, 'login'])->name('login');
-    // Add logout route later if needed: Route::post('logout', [AuthController::class, 'logout'])->middleware('auth:sanctum')->name('logout');
-
-    // Protected Admin Routes
-    Route::middleware(['auth:sanctum', 'is_admin'])->group(function () {
-        // Feedback Listing & Detail
-        Route::prefix('feedback')->name('feedback.')->group(function () {
-            // Reviews
-            Route::get('/reviews', [FeedbackController::class, 'listReviews'])->name('reviews.list');
-            Route::get('/reviews/{review}', [FeedbackController::class, 'showReview'])->name('reviews.show');
-            
-            // Bug Reports
-            Route::get('/bug-reports', [FeedbackController::class, 'listBugReports'])->name('bug_reports.list');
-            Route::get('/bug-reports/{bugReport}', [FeedbackController::class, 'showBugReport'])->name('bug_reports.show');
-            
-            // Hardware Surveys
-            Route::get('/hardware-surveys', [FeedbackController::class, 'listHardwareSurveys'])->name('hardware_surveys.list');
-            Route::get('/hardware-surveys/{hardwareSurvey}', [FeedbackController::class, 'showHardwareSurvey'])->name('hardware_surveys.show');
+    
+    // Public User Authentication (Version 1)
+    Route::prefix('v1/auth')->name('api.v1.auth.')->group(function () {
+        Route::post('register', [RegisterController::class, 'register'])
+             ->middleware('api.rate.limit:register')
+             ->name('register');
+        // Add login route for regular users if needed, separate from admin login
+        // Route::post('login', [LoginController::class, 'login'])->middleware('api.rate.limit:login')->name('login');
+    });
+    
+    // Authenticated User Actions (Version 1)
+    Route::prefix('v1')->middleware('auth:sanctum')->name('api.v1.')->group(function () {
+        Route::get('download', [DownloadController::class, 'getDownloadLink'])
+             ->middleware('api.rate.limit:downloads') 
+             ->name('download');
+        // Add other authenticated user routes here (e.g., profile management)
+    });
+    
+    // Public Feedback API Endpoints (Version 1)
+    Route::prefix('v1/feedback')->name('api.v1.feedback.')->group(function () {
+        Route::middleware('api.rate.limit:feedback')->group(function() {
+            Route::post('reviews', [ReviewController::class, 'store'])
+                 ->middleware('api.rate.limit:reviews')
+                 ->name('reviews.store');
+                 
+            Route::post('bug-reports', [BugReportController::class, 'store'])
+                 ->middleware('api.rate.limit:bug_reports')
+                 ->name('bug-reports.store');
+                 
+            Route::post('hardware-surveys', [HardwareSurveyController::class, 'store'])
+                 ->middleware('api.rate.limit:hardware_surveys')
+                 ->name('hardware-surveys.store');
         });
-
-        // Metrics & Analytics
-        Route::prefix('metrics')->name('metrics.')->group(function () {
-            // Review metrics
-            Route::get('reviews-distribution', [MetricsController::class, 'reviewsDistribution'])
-                ->name('reviews_distribution');
-            
-            // Bug report metrics
-            Route::get('bug-reports-severity', [MetricsController::class, 'bugReportsSeverity'])
-                ->name('bug_reports_severity');
-            
-            // Hardware survey metrics
-            Route::get('hardware-os-distribution', [MetricsController::class, 'hardwareOsDistribution'])
-                ->name('hardware_os_distribution');
-            Route::get('hardware-gpu-distribution', [MetricsController::class, 'hardwareGpuDistribution'])
-                ->name('hardware_gpu_distribution');
-            
-            // Combined metrics
-            Route::get('submission-trends', [MetricsController::class, 'submissionTrends'])
-                ->name('submission_trends');
+    });
+    
+    // Admin API endpoints (Protected with auth and admin middleware)
+    Route::prefix('admin')->name('api.admin.')->group(function () {
+        // Admin Authentication
+        Route::post('login', [AuthController::class, 'login'])
+             ->middleware('api.rate.limit:login')
+             ->name('login');
+        // Add logout route later if needed
+    
+        // Protected Admin Routes
+        Route::middleware(['auth:sanctum', 'is_admin', 'api.rate.limit:admin'])->group(function () {
+            // Feedback Listing & Detail
+            Route::prefix('feedback')->name('feedback.')->group(function () {
+                // Reviews
+                Route::get('/reviews', [FeedbackController::class, 'listReviews'])
+                     ->name('reviews.list')
+                     ->middleware('can:viewAny,App\Models\Review');
+                     
+                Route::get('/reviews/{review}', [FeedbackController::class, 'showReview'])
+                     ->name('reviews.show')
+                     ->middleware('can:view,review');
+                
+                // Bug Reports
+                Route::get('/bug-reports', [FeedbackController::class, 'listBugReports'])
+                     ->name('bug_reports.list')
+                     ->middleware('can:viewAny,App\Models\BugReport');
+                     
+                Route::get('/bug-reports/{bugReport}', [FeedbackController::class, 'showBugReport'])
+                     ->name('bug_reports.show')
+                     ->middleware('can:view,bugReport');
+                
+                // Hardware Surveys
+                Route::get('/hardware-surveys', [FeedbackController::class, 'listHardwareSurveys'])
+                     ->name('hardware_surveys.list')
+                     ->middleware('can:viewAny,App\Models\HardwareSurvey');
+                     
+                Route::get('/hardware-surveys/{hardwareSurvey}', [FeedbackController::class, 'showHardwareSurvey'])
+                     ->name('hardware_surveys.show')
+                     ->middleware('can:view,hardwareSurvey');
+            });
+    
+            // Metrics & Analytics
+            Route::prefix('metrics')->name('metrics.')->middleware('api.rate.limit:metrics')->group(function () {
+                // Review metrics
+                Route::get('reviews-distribution', [MetricsController::class, 'reviewsDistribution'])
+                    ->name('reviews_distribution');
+                
+                // Bug report metrics
+                Route::get('bug-reports-severity', [MetricsController::class, 'bugReportsSeverity'])
+                    ->name('bug_reports_severity');
+                
+                // Hardware survey metrics
+                Route::get('hardware-os-distribution', [MetricsController::class, 'hardwareOsDistribution'])
+                    ->name('hardware_os_distribution');
+                    
+                Route::get('hardware-gpu-distribution', [MetricsController::class, 'hardwareGpuDistribution'])
+                    ->name('hardware_gpu_distribution');
+                
+                // Combined metrics
+                Route::get('submission-trends', [MetricsController::class, 'submissionTrends'])
+                    ->name('submission_trends');
+            });
         });
     });
 });
