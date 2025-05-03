@@ -28,22 +28,28 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
 
 // Public User Authentication (Version 1)
 Route::prefix('v1/auth')->name('api.v1.auth.')->group(function () {
-    Route::post('register', [RegisterController::class, 'register'])->name('register');
+    Route::post('register', [RegisterController::class, 'register'])
+         ->middleware('throttle:registrations')
+         ->name('register');
     // Add login route for regular users if needed, separate from admin login
     // Route::post('login', [LoginController::class, 'login'])->name('login');
 });
 
 // Authenticated User Actions (Version 1)
 Route::prefix('v1')->middleware('auth:sanctum')->name('api.v1.')->group(function () {
-    Route::get('download', [DownloadController::class, 'getDownloadLink'])->name('download');
+    Route::get('download', [DownloadController::class, 'getDownloadLink'])
+         ->middleware('throttle:downloads') 
+         ->name('download');
     // Add other authenticated user routes here (e.g., profile management)
 });
 
 // Public Feedback API Endpoints (Version 1)
 Route::prefix('v1/feedback')->name('api.v1.feedback.')->group(function () {
-    Route::post('reviews', [ReviewController::class, 'store'])->name('reviews.store');
-    Route::post('bug-reports', [BugReportController::class, 'store'])->name('bug-reports.store');
-    Route::post('hardware-surveys', [HardwareSurveyController::class, 'store'])->name('hardware-surveys.store');
+    Route::middleware('throttle:feedback')->group(function(){
+        Route::post('reviews', [ReviewController::class, 'store'])->name('reviews.store');
+        Route::post('bug-reports', [BugReportController::class, 'store'])->name('bug-reports.store');
+        Route::post('hardware-surveys', [HardwareSurveyController::class, 'store'])->name('hardware-surveys.store');
+    });
 });
 
 // Feedback API endpoints (Protected, assuming admin middleware later)
