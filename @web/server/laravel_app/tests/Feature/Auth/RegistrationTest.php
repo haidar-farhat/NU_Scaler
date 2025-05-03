@@ -20,7 +20,8 @@ class RegistrationTest extends TestCase
             'password_confirmation' => 'Password123!',
         ];
 
-        $response = $this->postJson(route('api.v1.auth.register'), $userData);
+        // Use direct URI
+        $response = $this->postJson('/api/v1/auth/register', $userData);
 
         $response
             ->assertStatus(201)

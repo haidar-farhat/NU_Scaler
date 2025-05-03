@@ -23,7 +23,7 @@ class DownloadTest extends TestCase
         $this->assertEquals(0, DownloadLog::count()); // Ensure no logs exist initially
 
         // Act
-        $response = $this->getJson(route('api.v1.download'));
+        $response = $this->getJson('/api/v1/download');
 
         // Assert
         $response
@@ -44,7 +44,7 @@ class DownloadTest extends TestCase
     /** @test */
     public function unauthenticated_user_cannot_get_download_info(): void
     {
-        $response = $this->getJson(route('api.v1.download'));
+        $response = $this->getJson('/api/v1/download');
 
         $response->assertStatus(401);
     }
