@@ -2,6 +2,7 @@
 
 namespace App\Observers;
 
+use App\Events\HardwareSurveySubmitted;
 use App\Models\HardwareSurvey;
 use Illuminate\Support\Facades\Log;
 
@@ -21,15 +22,12 @@ class HardwareSurveyObserver
 
     /**
      * Handle the HardwareSurvey "created" event.
-     * Log the submission.
+     * Dispatch event for the submission.
      */
     public function created(HardwareSurvey $hardwareSurvey): void
     {
-        Log::channel('feedback')->info('Hardware Survey submitted:', [
-            'id' => $hardwareSurvey->id,
-            'gpu' => $hardwareSurvey->gpu, // Log GPU for quick reference
-            'user_uuid' => $hardwareSurvey->user_uuid,
-        ]);
+        // Dispatch event for the hardware survey submission
+        event(new HardwareSurveySubmitted($hardwareSurvey));
     }
 
     // Other observer methods
