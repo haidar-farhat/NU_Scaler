@@ -16,11 +16,13 @@ class HardwareSurvey extends Model
      * @var array<int, string>
      */
     protected $fillable = [
-        'cpu',
-        'gpu',
-        'ram_gb',
+        'cpu_model',
+        'gpu_model',
+        'ram_size',
         'os',
         'resolution',
+        'monitor_refresh_rate',
+        'additional_info',
         'user_uuid',
     ];
 
@@ -33,7 +35,7 @@ class HardwareSurvey extends Model
      */
     public function scopeGpuContains(Builder $query, string $gpuName): Builder
     {
-        return $query->where('gpu', 'LIKE', '%'.$gpuName.'%');
+        return $query->where('gpu_model', 'LIKE', '%'.$gpuName.'%');
     }
 
     /**

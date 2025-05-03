@@ -25,10 +25,11 @@ class EventServiceProvider extends ServiceProvider
         ],
         // Feedback events
         FeedbackSubmitted::class => [
-            LogFeedbackSubmission::class,
-            NotifyAdminsAboutFeedback::class,
-            ProcessFeedbackAnalytics::class,
-            ProcessWebhooks::class,
+            // Use non-queued listeners for testing
+            // LogFeedbackSubmission::class,
+            // NotifyAdminsAboutFeedback::class,
+            // ProcessFeedbackAnalytics::class,
+            // ProcessWebhooks::class,
         ],
         // Add your other event listeners here
         // \App\Events\ReviewSubmitted::class => [

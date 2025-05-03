@@ -27,6 +27,7 @@ class HardwareSurveyApiTest extends TestCase
             'os' => 'Windows 11',
             'resolution' => '3840x2160',
             'monitor_refresh_rate' => 144,
+            'additional_info' => 'Running with dual monitors',
         ];
 
         $response = $this->postJson('/api/v1/feedback/hardware-surveys', $surveyData);
@@ -42,6 +43,7 @@ class HardwareSurveyApiTest extends TestCase
                     'os',
                     'resolution',
                     'monitor_refresh_rate',
+                    'additional_info',
                     'created_at',
                     'updated_at',
                 ],
@@ -66,12 +68,13 @@ class HardwareSurveyApiTest extends TestCase
         Sanctum::actingAs($user);
 
         $surveyData = [
-            'cpu_model' => 'AMD Ryzen 9 5950X',
-            'gpu_model' => 'AMD RX 6900 XT',
+            'cpu_model' => 'AMD Ryzen 9 5900X',
+            'gpu_model' => 'AMD Radeon RX 6800 XT',
             'ram_size' => 64,
             'os' => 'Windows 10',
             'resolution' => '3440x1440',
             'monitor_refresh_rate' => 165,
+            'additional_info' => 'Using custom cooling solution',
         ];
 
         $response = $this->postJson('/api/v1/feedback/hardware-surveys', $surveyData);
@@ -86,6 +89,8 @@ class HardwareSurveyApiTest extends TestCase
                     'ram_size',
                     'os',
                     'resolution',
+                    'monitor_refresh_rate',
+                    'additional_info',
                     'user_uuid',
                     'created_at',
                     'updated_at',
@@ -93,8 +98,8 @@ class HardwareSurveyApiTest extends TestCase
             ]);
 
         $this->assertDatabaseHas('hardware_surveys', [
-            'cpu_model' => 'AMD Ryzen 9 5950X',
-            'gpu_model' => 'AMD RX 6900 XT',
+            'cpu_model' => 'AMD Ryzen 9 5900X',
+            'gpu_model' => 'AMD Radeon RX 6800 XT',
             'ram_size' => 64,
             'user_uuid' => $user->uuid,
         ]);

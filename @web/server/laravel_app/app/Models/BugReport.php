@@ -17,8 +17,9 @@ class BugReport extends Model
      */
     protected $fillable = [
         'description',
+        'category',
         'severity',
-        'log_path',
+        'steps_to_reproduce',
         'system_info',
         'user_uuid',
     ];

@@ -11,10 +11,18 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('bug_reports', function (Blueprint $table) {
-            $table->id();
-            $table->timestamps();
-        });
+        if (!Schema::hasTable('bug_reports')) {
+            Schema::create('bug_reports', function (Blueprint $table) {
+                $table->id();
+                $table->text('description');
+                $table->string('category')->nullable();
+                $table->string('severity');
+                $table->text('steps_to_reproduce')->nullable();
+                $table->json('system_info')->nullable();
+                $table->uuid('user_uuid')->nullable();
+                $table->timestamps();
+            });
+        }
     }
 
     /**
