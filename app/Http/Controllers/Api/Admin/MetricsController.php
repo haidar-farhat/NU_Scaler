@@ -243,6 +243,355 @@ class MetricsController extends Controller
     }
     
     /**
+     * Get metrics for active users who have submitted multiple types of feedback.
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function activeFeedbackUsers(Request $request): JsonResponse
+    {
+        $timeframe = $request->get('timeframe', 'month');
+        $minSubmissions = max(1, min(10, $request->get('min_submissions', 2)));
+        
+        // Set date range based on timeframe
+        $startDate = $this->getStartDateForTimeframe($timeframe);
+        
+        // Base query for users with reviews
+        $reviewUsers = Review::query()
+            ->when($startDate, function ($query) use ($startDate) {
+                $query->where('created_at', '>=', $startDate);
+            })
+            ->whereNotNull('user_uuid')
+            ->select('user_uuid', DB::raw('count(*) as review_count'))
+            ->groupBy('user_uuid');
+            
+        // Base query for users with bug reports
+        $bugReportUsers = BugReport::query()
+            ->when($startDate, function ($query) use ($startDate) {
+                $query->where('created_at', '>=', $startDate);
+            })
+            ->whereNotNull('user_uuid')
+            ->select('user_uuid', DB::raw('count(*) as bug_report_count'))
+            ->groupBy('user_uuid');
+            
+        // Base query for users with hardware surveys
+        $hardwareSurveyUsers = HardwareSurvey::query()
+            ->when($startDate, function ($query) use ($startDate) {
+                $query->where('created_at', '>=', $startDate);
+            })
+            ->whereNotNull('user_uuid')
+            ->select('user_uuid', DB::raw('count(*) as hardware_survey_count'))
+            ->groupBy('user_uuid');
+            
+        // Combine the results using a query builder to get all user activity
+        $userActivity = DB::table(DB::raw("({$reviewUsers->toSql()}) as reviews"))
+            ->mergeBindings($reviewUsers->getQuery())
+            ->select(
+                'reviews.user_uuid',
+                'reviews.review_count',
+                DB::raw('COALESCE(bug_reports.bug_report_count, 0) as bug_report_count'),
+                DB::raw('COALESCE(hardware_surveys.hardware_survey_count, 0) as hardware_survey_count'),
+                DB::raw('(reviews.review_count + COALESCE(bug_reports.bug_report_count, 0) + COALESCE(hardware_surveys.hardware_survey_count, 0)) as total_submissions')
+            )
+            ->leftJoin(
+                DB::raw("({$bugReportUsers->toSql()}) as bug_reports"),
+                'reviews.user_uuid', '=', 'bug_reports.user_uuid'
+            )
+            ->mergeBindings($bugReportUsers->getQuery())
+            ->leftJoin(
+                DB::raw("({$hardwareSurveyUsers->toSql()}) as hardware_surveys"),
+                'reviews.user_uuid', '=', 'hardware_surveys.user_uuid'
+            )
+            ->mergeBindings($hardwareSurveyUsers->getQuery())
+            ->having('total_submissions', '>=', $minSubmissions)
+            ->orderBy('total_submissions', 'desc')
+            ->get();
+            
+        // Get metrics breakdown by submission counts
+        $submissionCounts = [];
+        for ($i = $minSubmissions; $i <= 10; $i++) {
+            $submissionCounts[$i] = $userActivity->filter(function ($user) use ($i) {
+                return $user->total_submissions == $i;
+            })->count();
+        }
+        
+        // Calculate feedback type distribution
+        $feedbackDistribution = [
+            'only_reviews' => $userActivity->filter(function ($user) {
+                return $user->review_count > 0 && $user->bug_report_count == 0 && $user->hardware_survey_count == 0;
+            })->count(),
+            'only_bug_reports' => $userActivity->filter(function ($user) {
+                return $user->review_count == 0 && $user->bug_report_count > 0 && $user->hardware_survey_count == 0;
+            })->count(),
+            'only_hardware_surveys' => $userActivity->filter(function ($user) {
+                return $user->review_count == 0 && $user->bug_report_count == 0 && $user->hardware_survey_count > 0;
+            })->count(),
+            'multiple_types' => $userActivity->filter(function ($user) {
+                $typesSubmitted = 0;
+                if ($user->review_count > 0) $typesSubmitted++;
+                if ($user->bug_report_count > 0) $typesSubmitted++;
+                if ($user->hardware_survey_count > 0) $typesSubmitted++;
+                return $typesSubmitted > 1;
+            })->count(),
+        ];
+        
+        return response()->json([
+            'total_active_users' => $userActivity->count(),
+            'submission_counts' => $submissionCounts,
+            'feedback_distribution' => $feedbackDistribution,
+            'most_active_users' => $userActivity->take(10),
+            'timeframe' => $timeframe,
+        ]);
+    }
+    
+    /**
+     * Get correlation metrics between different types of feedback.
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function feedbackCorrelation(Request $request): JsonResponse
+    {
+        $timeframe = $request->get('timeframe', 'month');
+        
+        // Set date range based on timeframe
+        $startDate = $this->getStartDateForTimeframe($timeframe);
+        
+        // Get reviews with a rating breakdown
+        $reviewStats = Review::query()
+            ->when($startDate, function ($query) use ($startDate) {
+                $query->where('created_at', '>=', $startDate);
+            })
+            ->select('rating', DB::raw('count(*) as count'))
+            ->groupBy('rating')
+            ->orderBy('rating')
+            ->get()
+            ->pluck('count', 'rating')
+            ->toArray();
+            
+        // Get bug reports with a severity breakdown
+        $bugReportStats = BugReport::query()
+            ->when($startDate, function ($query) use ($startDate) {
+                $query->where('created_at', '>=', $startDate);
+            })
+            ->select('severity', DB::raw('count(*) as count'))
+            ->groupBy('severity')
+            ->orderBy(DB::raw('FIELD(severity, "low", "medium", "high", "critical")'))
+            ->get()
+            ->pluck('count', 'severity')
+            ->toArray();
+            
+        // Get hardware survey OS distribution
+        $hardwareOsStats = HardwareSurvey::query()
+            ->when($startDate, function ($query) use ($startDate) {
+                $query->where('created_at', '>=', $startDate);
+            })
+            ->select('os', DB::raw('count(*) as count'))
+            ->groupBy('os')
+            ->orderBy('count', 'desc')
+            ->limit(5)
+            ->get()
+            ->pluck('count', 'os')
+            ->toArray();
+            
+        // Analyze correlation between ratings and bug report severity
+        $ratingBugSeverityCorrelation = $this->analyzeRatingBugSeverityCorrelation($startDate);
+        
+        // Analyze correlation between OS and ratings
+        $osRatingCorrelation = $this->analyzeOsRatingCorrelation($startDate);
+        
+        // Analyze users who submit both positive reviews and bug reports
+        $userFeedbackPatterns = $this->analyzeUserFeedbackPatterns($startDate);
+        
+        return response()->json([
+            'review_stats' => $reviewStats,
+            'bug_report_stats' => $bugReportStats,
+            'hardware_os_stats' => $hardwareOsStats,
+            'rating_bug_severity_correlation' => $ratingBugSeverityCorrelation,
+            'os_rating_correlation' => $osRatingCorrelation,
+            'user_feedback_patterns' => $userFeedbackPatterns,
+            'timeframe' => $timeframe,
+        ]);
+    }
+    
+    /**
+     * Analyze correlation between ratings and bug report severity.
+     *
+     * @param Carbon|null $startDate
+     * @return array
+     */
+    private function analyzeRatingBugSeverityCorrelation(?Carbon $startDate): array
+    {
+        // For users who submitted both reviews and bug reports, check for correlations
+        $usersWithBoth = DB::table('reviews as r')
+            ->select('r.user_uuid', 'r.rating', 'b.severity')
+            ->join('bug_reports as b', 'r.user_uuid', '=', 'b.user_uuid')
+            ->whereNotNull('r.user_uuid')
+            ->when($startDate, function ($query) use ($startDate) {
+                $query->where('r.created_at', '>=', $startDate)
+                      ->where('b.created_at', '>=', $startDate);
+            })
+            ->get();
+            
+        // Initialize correlation matrix
+        $correlationMatrix = [];
+        for ($rating = 1; $rating <= 5; $rating++) {
+            $correlationMatrix[$rating] = [
+                'low' => 0,
+                'medium' => 0,
+                'high' => 0,
+                'critical' => 0,
+            ];
+        }
+        
+        // Fill correlation matrix
+        foreach ($usersWithBoth as $userFeedback) {
+            $correlationMatrix[$userFeedback->rating][$userFeedback->severity]++;
+        }
+        
+        // Calculate percentages for easier interpretation
+        $percentageMatrix = [];
+        foreach ($correlationMatrix as $rating => $severities) {
+            $total = array_sum($severities);
+            if ($total > 0) {
+                $percentageMatrix[$rating] = [];
+                foreach ($severities as $severity => $count) {
+                    $percentageMatrix[$rating][$severity] = round(($count / $total) * 100, 1);
+                }
+            }
+        }
+        
+        return [
+            'count_matrix' => $correlationMatrix,
+            'percentage_matrix' => $percentageMatrix,
+            'total_users_with_both' => count($usersWithBoth),
+        ];
+    }
+    
+    /**
+     * Analyze correlation between OS and ratings.
+     *
+     * @param Carbon|null $startDate
+     * @return array
+     */
+    private function analyzeOsRatingCorrelation(?Carbon $startDate): array
+    {
+        // For users who submitted both hardware surveys and reviews
+        $usersWithBoth = DB::table('hardware_surveys as h')
+            ->select('h.user_uuid', 'h.os', 'r.rating')
+            ->join('reviews as r', 'h.user_uuid', '=', 'r.user_uuid')
+            ->whereNotNull('h.user_uuid')
+            ->when($startDate, function ($query) use ($startDate) {
+                $query->where('h.created_at', '>=', $startDate)
+                      ->where('r.created_at', '>=', $startDate);
+            })
+            ->get();
+            
+        // Group by OS to get average ratings
+        $osByRating = [];
+        $osUserCounts = [];
+        
+        foreach ($usersWithBoth as $userFeedback) {
+            $os = $userFeedback->os;
+            $rating = $userFeedback->rating;
+            
+            if (!isset($osByRating[$os])) {
+                $osByRating[$os] = [];
+                $osUserCounts[$os] = 0;
+            }
+            
+            $osByRating[$os][] = $rating;
+            $osUserCounts[$os]++;
+        }
+        
+        // Calculate average rating for each OS
+        $averageRatingByOs = [];
+        foreach ($osByRating as $os => $ratings) {
+            $averageRatingByOs[$os] = [
+                'average_rating' => round(array_sum($ratings) / count($ratings), 2),
+                'user_count' => $osUserCounts[$os],
+            ];
+        }
+        
+        // Sort by highest average rating
+        arsort($averageRatingByOs);
+        
+        return [
+            'average_rating_by_os' => $averageRatingByOs,
+            'total_users_with_both' => count($usersWithBoth),
+        ];
+    }
+    
+    /**
+     * Analyze user feedback patterns.
+     *
+     * @param Carbon|null $startDate
+     * @return array
+     */
+    private function analyzeUserFeedbackPatterns(?Carbon $startDate): array
+    {
+        // Get users who submitted reviews
+        $reviewUsers = Review::query()
+            ->when($startDate, function ($query) use ($startDate) {
+                $query->where('created_at', '>=', $startDate);
+            })
+            ->whereNotNull('user_uuid')
+            ->select('user_uuid')
+            ->distinct()
+            ->get()
+            ->pluck('user_uuid')
+            ->toArray();
+            
+        // Get users who submitted bug reports
+        $bugReportUsers = BugReport::query()
+            ->when($startDate, function ($query) use ($startDate) {
+                $query->where('created_at', '>=', $startDate);
+            })
+            ->whereNotNull('user_uuid')
+            ->select('user_uuid')
+            ->distinct()
+            ->get()
+            ->pluck('user_uuid')
+            ->toArray();
+            
+        // Get users who submitted hardware surveys
+        $hardwareSurveyUsers = HardwareSurvey::query()
+            ->when($startDate, function ($query) use ($startDate) {
+                $query->where('created_at', '>=', $startDate);
+            })
+            ->whereNotNull('user_uuid')
+            ->select('user_uuid')
+            ->distinct()
+            ->get()
+            ->pluck('user_uuid')
+            ->toArray();
+            
+        // Calculate intersections
+        $reviewAndBugReports = array_intersect($reviewUsers, $bugReportUsers);
+        $reviewAndHardwareSurveys = array_intersect($reviewUsers, $hardwareSurveyUsers);
+        $bugReportsAndHardwareSurveys = array_intersect($bugReportUsers, $hardwareSurveyUsers);
+        $allThree = array_intersect($reviewUsers, $bugReportUsers, $hardwareSurveyUsers);
+        
+        // Calculate unique submissions
+        $onlyReviews = array_diff($reviewUsers, $bugReportUsers, $hardwareSurveyUsers);
+        $onlyBugReports = array_diff($bugReportUsers, $reviewUsers, $hardwareSurveyUsers);
+        $onlyHardwareSurveys = array_diff($hardwareSurveyUsers, $reviewUsers, $bugReportUsers);
+        
+        return [
+            'review_users_count' => count($reviewUsers),
+            'bug_report_users_count' => count($bugReportUsers),
+            'hardware_survey_users_count' => count($hardwareSurveyUsers),
+            'review_and_bug_reports_count' => count($reviewAndBugReports),
+            'review_and_hardware_surveys_count' => count($reviewAndHardwareSurveys),
+            'bug_reports_and_hardware_surveys_count' => count($bugReportsAndHardwareSurveys),
+            'all_three_count' => count($allThree),
+            'only_reviews_count' => count($onlyReviews),
+            'only_bug_reports_count' => count($onlyBugReports),
+            'only_hardware_surveys_count' => count($onlyHardwareSurveys),
+        ];
+    }
+    
+    /**
      * Apply timeframe filter to a query.
      *
      * @param \Illuminate\Database\Eloquent\Builder $query

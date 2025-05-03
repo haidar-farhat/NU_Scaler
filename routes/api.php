@@ -124,6 +124,13 @@ Route::middleware(['api.rate.limit:public'])->group(function () {
                 // Combined metrics
                 Route::get('submission-trends', [MetricsController::class, 'submissionTrends'])
                     ->name('submission_trends');
+                    
+                // Advanced analytics
+                Route::get('active-feedback-users', [MetricsController::class, 'activeFeedbackUsers'])
+                    ->name('active_feedback_users');
+                    
+                Route::get('feedback-correlation', [MetricsController::class, 'feedbackCorrelation'])
+                    ->name('feedback_correlation');
             });
         });
     });
