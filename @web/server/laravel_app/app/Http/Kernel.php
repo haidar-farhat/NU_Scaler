@@ -36,13 +36,24 @@ class Kernel extends HttpKernel
             \Illuminate\View\Middleware\ShareErrorsFromSession::class,
             \App\Http\Middleware\VerifyCsrfToken::class,
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
+            \App\Http\Middleware\ContentSecurityPolicy::class,
         ],
 
         'api' => [
             // \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class, // Use this for SPA auth if needed
-            \Illuminate\Routing\Middleware\ThrottleRequests::class . ':api',
+            'throttle:api',
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
-            'auth:sanctum', // Ensure API requests are authenticated via Sanctum by default
+            \App\Http\Middleware\SecureApiHeaders::class,
+            \App\Http\Middleware\ApiRequestLogger::class,
+        ],
+
+        // Secured API group for sensitive routes
+        'api.secured' => [
+            'throttle:api',
+            \Illuminate\Routing\Middleware\SubstituteBindings::class,
+            \App\Http\Middleware\SecureApiHeaders::class,
+            \App\Http\Middleware\ApiRequestLogger::class,
+            \App\Http\Middleware\ValidateApiToken::class, // Require token validation
         ],
     ];
 
@@ -70,5 +81,6 @@ class Kernel extends HttpKernel
         'secure.headers' => \App\Http\Middleware\SecureApiHeaders::class, // Security headers middleware
         'api.log' => \App\Http\Middleware\ApiRequestLogger::class, // API request logging middleware
         'api.token' => \App\Http\Middleware\ValidateApiToken::class, // API token validation middleware
+        'csp' => \App\Http\Middleware\ContentSecurityPolicy::class, // Content Security Policy middleware
     ];
 }
