@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\StoreHardwareSurveyRequest; // Use the specific request
+use App\Http\Resources\Api\V1\HardwareSurveyResource;
 use App\Models\HardwareSurvey;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -34,7 +35,9 @@ class HardwareSurveyController extends Controller
 
         $hardwareSurvey = HardwareSurvey::create($validatedData);
 
-        return response()->json($hardwareSurvey, 201);
+        return (new HardwareSurveyResource($hardwareSurvey))
+            ->response()
+            ->setStatusCode(201);
     }
 
     /**
