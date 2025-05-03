@@ -102,6 +102,10 @@ Route::middleware(['api.rate.limit:public'])->group(function () {
                 Route::get('/hardware-surveys/{hardwareSurvey}', [FeedbackController::class, 'showHardwareSurvey'])
                      ->name('hardware_surveys.show')
                      ->middleware('can:view,hardwareSurvey');
+                     
+                // Trending topics in feedback
+                Route::get('/trending-topics', [FeedbackController::class, 'trendingTopics'])
+                     ->name('trending_topics');
             });
     
             // Metrics & Analytics
