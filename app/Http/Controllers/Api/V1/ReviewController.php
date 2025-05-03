@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\StoreReviewRequest; // Use the specific request
+use App\Http\Resources\Api\V1\ReviewResource;
 use App\Models\Review;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request; // Keep for potential future use
@@ -34,7 +35,9 @@ class ReviewController extends Controller
 
         $review = Review::create($validatedData);
 
-        return response()->json($review, 201); // Return created resource with 201 status
+        return (new ReviewResource($review))
+            ->response()
+            ->setStatusCode(201);
     }
 
     /**
