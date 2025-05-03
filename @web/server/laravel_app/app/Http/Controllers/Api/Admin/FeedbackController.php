@@ -7,36 +7,43 @@ use App\Models\BugReport;
 use App\Models\HardwareSurvey;
 use App\Models\Review;
 use Illuminate\Http\Request;
-use Illuminate\Http\JsonResponse;
+// Remove JsonResponse, Resources handle the response structure
+// use Illuminate\Http\JsonResponse;
+use App\Http\Resources\ReviewResource;
+use App\Http\Resources\BugReportResource;
+use App\Http\Resources\HardwareSurveyResource;
+use Illuminate\Http\Resources\Json\AnonymousResourceCollection; // Type hint for resource collections
 
 class FeedbackController extends Controller
 {
     /**
-     * Display a listing of the reviews.
+     * Display a paginated listing of the reviews.
      */
-    public function listReviews(Request $request): JsonResponse
+    public function listReviews(Request $request): AnonymousResourceCollection
     {
-        // Add pagination later if needed
-        $reviews = Review::latest()->get();
-        return response()->json($reviews);
+        $perPage = $request->query('per_page', 15); // Default 15 items per page
+        $reviews = Review::latest()->paginate($perPage);
+        return ReviewResource::collection($reviews);
     }
 
     /**
-     * Display a listing of the bug reports.
+     * Display a paginated listing of the bug reports.
      */
-    public function listBugReports(Request $request): JsonResponse
+    public function listBugReports(Request $request): AnonymousResourceCollection
     {
-        $bugReports = BugReport::latest()->get();
-        return response()->json($bugReports);
+        $perPage = $request->query('per_page', 15);
+        $bugReports = BugReport::latest()->paginate($perPage);
+        return BugReportResource::collection($bugReports);
     }
 
     /**
-     * Display a listing of the hardware surveys.
+     * Display a paginated listing of the hardware surveys.
      */
-    public function listHardwareSurveys(Request $request): JsonResponse
+    public function listHardwareSurveys(Request $request): AnonymousResourceCollection
     {
-        $surveys = HardwareSurvey::latest()->get();
-        return response()->json($surveys);
+        $perPage = $request->query('per_page', 15);
+        $surveys = HardwareSurvey::latest()->paginate($perPage);
+        return HardwareSurveyResource::collection($surveys);
     }
 
     // Note: Default store, show, update, destroy methods from --api are not needed here
