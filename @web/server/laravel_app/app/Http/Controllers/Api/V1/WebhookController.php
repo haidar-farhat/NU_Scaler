@@ -28,7 +28,6 @@ class WebhookController extends Controller
     public function __construct(WebhookService $webhookService)
     {
         $this->webhookService = $webhookService;
-        $this->middleware('auth:sanctum');
     }
 
     /**
