@@ -66,5 +66,9 @@ class Kernel extends HttpKernel
         'throttle' => \Illuminate\Routing\Middleware\ThrottleRequests::class,
         'verified' => \Illuminate\Auth\Middleware\EnsureEmailIsVerified::class,
         'is_admin' => \App\Http\Middleware\IsAdmin::class, // Added admin check middleware
+        'api.rate.limit' => \App\Http\Middleware\ApiRateLimiter::class, // Custom API rate limiter
+        'secure.headers' => \App\Http\Middleware\SecureApiHeaders::class, // Security headers middleware
+        'api.log' => \App\Http\Middleware\ApiRequestLogger::class, // API request logging middleware
+        'api.token' => \App\Http\Middleware\ValidateApiToken::class, // API token validation middleware
     ];
 }
