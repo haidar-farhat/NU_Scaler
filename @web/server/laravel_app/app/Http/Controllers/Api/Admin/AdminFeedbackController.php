@@ -22,10 +22,25 @@ class AdminFeedbackController extends Controller
             ->latest()
             ->paginate(15);
 
-        // Return the paginated results directly
-        // Laravel will automatically transform the pagination instance to JSON
-        // with 'data', 'links', and 'meta' keys
-        return response()->json($reviews);
+        // Manually construct the response to ensure it has the expected structure
+        return response()->json([
+            'data' => $reviews->items(),
+            'links' => [
+                'first' => $reviews->url(1),
+                'last' => $reviews->url($reviews->lastPage()),
+                'prev' => $reviews->previousPageUrl(),
+                'next' => $reviews->nextPageUrl(),
+            ],
+            'meta' => [
+                'current_page' => $reviews->currentPage(),
+                'from' => $reviews->firstItem(),
+                'last_page' => $reviews->lastPage(),
+                'path' => $reviews->path(),
+                'per_page' => $reviews->perPage(),
+                'to' => $reviews->lastItem(),
+                'total' => $reviews->total(),
+            ],
+        ]);
     }
 
     /**
