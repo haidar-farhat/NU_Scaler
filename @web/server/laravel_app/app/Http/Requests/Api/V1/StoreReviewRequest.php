@@ -8,10 +8,13 @@ class StoreReviewRequest extends FormRequest
 {
     /**
      * Determine if the user is authorized to make this request.
+     *
+     * @return bool
      */
     public function authorize(): bool
     {
-        return false;
+        // Public endpoint, anyone can submit a review
+        return true;
     }
 
     /**
@@ -22,7 +25,11 @@ class StoreReviewRequest extends FormRequest
     public function rules(): array
     {
         return [
-            //
+            'rating' => 'required|integer|min:1|max:5',
+            'comment' => 'nullable|string|max:5000', // Limit comment length
+            'name' => 'nullable|string|max:255',
+            'email' => 'nullable|email|max:255',
+            'user_uuid' => 'nullable|uuid|exists:users,uuid', // Optional link to a user
         ];
     }
 }

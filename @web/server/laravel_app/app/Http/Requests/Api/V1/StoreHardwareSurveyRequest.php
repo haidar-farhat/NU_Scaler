@@ -8,10 +8,13 @@ class StoreHardwareSurveyRequest extends FormRequest
 {
     /**
      * Determine if the user is authorized to make this request.
+     *
+     * @return bool
      */
     public function authorize(): bool
     {
-        return false;
+        // Public endpoint
+        return true;
     }
 
     /**
@@ -22,7 +25,12 @@ class StoreHardwareSurveyRequest extends FormRequest
     public function rules(): array
     {
         return [
-            //
+            'gpu' => 'required|string|max:255', // Making GPU required for usefulness
+            'cpu' => 'nullable|string|max:255',
+            'ram_gb' => 'nullable|integer|min:1',
+            'os' => 'nullable|string|max:255',
+            'resolution' => 'nullable|string|max:50', // e.g., 1920x1080
+            'user_uuid' => 'nullable|uuid|exists:users,uuid',
         ];
     }
 }
