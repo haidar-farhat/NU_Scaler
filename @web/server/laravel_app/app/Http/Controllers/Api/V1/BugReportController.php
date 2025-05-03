@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
+use App\Http\Requests\Api\V1\StoreBugReportRequest;
+use App\Models\BugReport;
+use Illuminate\Http\JsonResponse;
 
 class BugReportController extends Controller
 {
@@ -17,10 +19,20 @@ class BugReportController extends Controller
 
     /**
      * Store a newly created resource in storage.
+     *
+     * @param StoreBugReportRequest $request
+     * @return JsonResponse
      */
-    public function store(Request $request)
+    public function store(StoreBugReportRequest $request): JsonResponse
     {
-        //
+        $validatedData = $request->validated();
+
+        $bugReport = BugReport::create($validatedData);
+
+        return response()->json([
+            'message' => 'Bug report submitted successfully.',
+            'data' => $bugReport
+        ], 201);
     }
 
     /**
