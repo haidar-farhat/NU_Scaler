@@ -21,16 +21,11 @@ class ContentSecurityPolicy
 
         // Set Content Security Policy header
         $cspHeader = "default-src 'self'; " .
-                     "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://*.google-analytics.com; " .
-                     "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; " .
-                     "img-src 'self' data: https://*.google-analytics.com; " .
-                     "font-src 'self' https://fonts.gstatic.com; " .
-                     "connect-src 'self' https://*.google-analytics.com https://nu-scaler.com; " .
-                     "frame-src 'none'; " .
-                     "object-src 'none'; " .
-                     "base-uri 'self'; " .
-                     "form-action 'self'; " .
-                     "frame-ancestors 'none';";
+                     "script-src 'self' 'unsafe-inline'; " .
+                     "style-src 'self' 'unsafe-inline'; " .
+                     "img-src 'self' data:; " .
+                     "font-src 'self'; " .
+                     "connect-src 'self'";
 
         $response->headers->set('Content-Security-Policy', $cspHeader);
 

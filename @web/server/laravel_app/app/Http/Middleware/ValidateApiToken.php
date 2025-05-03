@@ -4,9 +4,8 @@ namespace App\Http\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
-use Laravel\Sanctum\PersonalAccessToken;
 use Symfony\Component\HttpFoundation\Response;
+use Laravel\Sanctum\PersonalAccessToken;
 
 class ValidateApiToken
 {
@@ -15,46 +14,27 @@ class ValidateApiToken
      *
      * @param  \Illuminate\Http\Request  $request
      * @param  \Closure  $next
-     * @param  string|null  $ability
-     * @return \Symfony\Component\HttpFoundation\Response
+     * @return mixed
      */
-    public function handle(Request $request, Closure $next, ?string $ability = null): Response
+    public function handle(Request $request, Closure $next)
     {
-        if (!$request->bearerToken()) {
+        $bearer = $request->bearerToken();
+
+        if (!$bearer) {
             return response()->json([
-                'message' => 'Unauthorized: API token is missing.',
-                'status' => 'error',
-                'code' => 401,
-            ], 401);
+                'message' => 'API token not provided'
+            ], Response::HTTP_UNAUTHORIZED);
         }
 
-        $token = PersonalAccessToken::findToken($request->bearerToken());
+        $token = PersonalAccessToken::findToken($bearer);
 
-        if (!$token || ($ability && !$token->can($ability))) {
+        if (!$token || ($token && !$token->can('api:access'))) {
             return response()->json([
-                'message' => 'Unauthorized: Invalid or expired API token.',
-                'status' => 'error',
-                'code' => 401,
-            ], 401);
+                'message' => 'Invalid or expired API token'
+            ], Response::HTTP_UNAUTHORIZED);
         }
 
-        // Check if token is expired (30 days from creation)
-        if ($token->created_at->diffInDays(now()) > 30) {
-            $token->delete();
-            return response()->json([
-                'message' => 'Unauthorized: Token has expired.',
-                'status' => 'error',
-                'code' => 401,
-            ], 401);
-        }
-
-        // Log token usage
-        $token->last_used_at = now();
-        $token->save();
-
-        // Set the authenticated user
-        Auth::login($token->tokenable);
-
+        // Token is valid and has required ability
         return $next($request);
     }
 }
