@@ -27,7 +27,9 @@ class AdminLoginTest extends TestCase
             'password' => 'password',
         ];
 
-        $response = $this->postJson(route('api.admin.login'), $credentials);
+        // Use direct URI instead of named route
+        // $response = $this->postJson(route('api.admin.login'), $credentials);
+        $response = $this->postJson('/api/admin/login', $credentials);
 
         $response
             ->assertStatus(200)
