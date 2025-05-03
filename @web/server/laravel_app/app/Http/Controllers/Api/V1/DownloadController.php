@@ -44,5 +44,32 @@ class DownloadController extends Controller
         return response()->json($downloadInfo);
     }
 
+    /**
+     * Get download information for the authenticated user.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getDownloadInfo(Request $request)
+    {
+        // In a real implementation, we would:
+        // 1. Log this download request
+        // 2. Generate a signed URL for the S3/storage download
+        // 3. Return download details and URL
+
+        // TODO: Implement actual download URL generation
+        // For now, return a stub response
+        return response()->json([
+            'message' => 'Download information retrieved successfully',
+            'download' => [
+                'version' => '1.0.0',
+                'size_mb' => 24.5,
+                'release_date' => '2025-05-02',
+                'url' => 'https://downloads.nu-scaler.com/releases/nu-scaler-1.0.0.zip',
+                'expires_at' => now()->addHours(1)->toIso8601String(),
+            ],
+        ]);
+    }
+
     // We might add methods later to list download history for a user or admin
 }
