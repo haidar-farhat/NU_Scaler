@@ -11,18 +11,20 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('hardware_surveys', function (Blueprint $table) {
-            $table->id();
-            $table->string('cpu_model');
-            $table->string('gpu_model');
-            $table->integer('ram_size');
-            $table->string('os');
-            $table->string('resolution');
-            $table->integer('monitor_refresh_rate')->nullable();
-            $table->text('additional_info')->nullable();
-            $table->uuid('user_uuid')->nullable();
-            $table->timestamps();
-        });
+        if (!Schema::hasTable('hardware_surveys')) {
+            Schema::create('hardware_surveys', function (Blueprint $table) {
+                $table->id();
+                $table->string('cpu_model');
+                $table->string('gpu_model');
+                $table->integer('ram_size');
+                $table->string('os');
+                $table->string('resolution');
+                $table->integer('monitor_refresh_rate')->nullable();
+                $table->text('additional_info')->nullable();
+                $table->uuid('user_uuid')->nullable();
+                $table->timestamps();
+            });
+        }
     }
 
     /**
