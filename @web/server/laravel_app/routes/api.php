@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\V1\WebhookController;
 use App\Http\Controllers\Api\Admin\AdminFeedbackController;
 use App\Http\Controllers\Api\Admin\AdminMetricsController;
 use App\Http\Controllers\Api\Admin\AdminAuthController; // Assuming separate admin auth controller
+use App\Http\Controllers\Api\Admin\LogDashboardController;
 
 /*
 |--------------------------------------------------------------------------
@@ -96,6 +97,16 @@ Route::prefix('admin')->name('api.admin.')
         Route::get('/metrics/user-growth', [AdminMetricsController::class, 'userGrowthTrends'])->name('metrics.user-growth');
         Route::get('/metrics/feedback-trends', [AdminMetricsController::class, 'feedbackTrends'])->name('metrics.feedback-trends');
         Route::get('/metrics/export', [AdminMetricsController::class, 'exportAllMetrics'])->name('metrics.export');
+
+        // Log Dashboard
+        Route::prefix('logs')->name('logs.')->group(function () {
+            Route::get('/', [LogDashboardController::class, 'index'])->name('index');
+            Route::get('/stats', [LogDashboardController::class, 'stats'])->name('stats');
+            Route::get('/search', [LogDashboardController::class, 'search'])->name('search');
+            Route::get('/type/{type}', [LogDashboardController::class, 'listFiles'])->name('list');
+            Route::get('/file/{filename}', [LogDashboardController::class, 'show'])->name('show');
+            Route::delete('/file/{filename}', [LogDashboardController::class, 'destroy'])->name('destroy');
+        });
     });
 
 // Protected Admin Routes
