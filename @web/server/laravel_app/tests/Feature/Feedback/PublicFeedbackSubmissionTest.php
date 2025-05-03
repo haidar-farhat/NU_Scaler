@@ -31,7 +31,7 @@ class PublicFeedbackSubmissionTest extends TestCase
             'email' => 'submitter@example.com',
         ];
 
-        $response = $this->postJson(route('api.v1.feedback.reviews.store'), $reviewData);
+        $response = $this->postJson('/api/v1/feedback/reviews', $reviewData);
 
         $response
             ->assertStatus(201)
