@@ -3,7 +3,7 @@
 namespace Tests\Feature\Download;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Foundation\Testing\WithFaker;
+// use Illuminate\Foundation\Testing\WithFaker;
 use Tests\TestCase;
 use App\Models\User;
 use Laravel\Sanctum\Sanctum;
@@ -12,16 +12,6 @@ use App\Models\DownloadLog;
 class DownloadTest extends TestCase
 {
     use RefreshDatabase;
-
-    /**
-     * A basic feature test example.
-     */
-    public function test_example(): void
-    {
-        $response = $this->get('/');
-
-        $response->assertStatus(200);
-    }
 
     /** @test */
     public function authenticated_user_can_get_download_info_and_log_is_created(): void
