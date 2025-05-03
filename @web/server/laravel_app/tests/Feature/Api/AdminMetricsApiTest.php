@@ -23,7 +23,7 @@ class AdminMetricsApiTest extends TestCase
     public function test_admin_can_view_dashboard_metrics(): void
     {
         // Create an admin user
-        $admin = User::factory()->create(['role' => 'admin']);
+        $admin = User::factory()->create(['is_admin' => true]);
         Sanctum::actingAs($admin);
 
         // Create some test data
@@ -85,7 +85,7 @@ class AdminMetricsApiTest extends TestCase
     public function test_admin_can_view_review_metrics(): void
     {
         // Create an admin user
-        $admin = User::factory()->create(['role' => 'admin']);
+        $admin = User::factory()->create(['is_admin' => true]);
         Sanctum::actingAs($admin);
 
         // Create some reviews with different ratings
@@ -128,7 +128,7 @@ class AdminMetricsApiTest extends TestCase
     public function test_non_admin_cannot_access_metrics(): void
     {
         // Create a regular user
-        $user = User::factory()->create(['role' => 'user']);
+        $user = User::factory()->create(['is_admin' => false]);
         Sanctum::actingAs($user);
 
         $response = $this->getJson('/api/admin/metrics/dashboard');
@@ -152,7 +152,7 @@ class AdminMetricsApiTest extends TestCase
     public function test_metrics_export(): void
     {
         // Create an admin user
-        $admin = User::factory()->create(['role' => 'admin']);
+        $admin = User::factory()->create(['is_admin' => true]);
         Sanctum::actingAs($admin);
 
         // Create some test data

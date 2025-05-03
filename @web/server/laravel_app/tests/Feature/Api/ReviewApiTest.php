@@ -112,7 +112,7 @@ class ReviewApiTest extends TestCase
     public function test_admin_can_view_all_reviews(): void
     {
         // Create an admin user
-        $admin = User::factory()->create(['role' => 'admin']);
+        $admin = User::factory()->create(['is_admin' => true]);
         Sanctum::actingAs($admin);
 
         // Create some reviews
@@ -137,7 +137,7 @@ class ReviewApiTest extends TestCase
     public function test_non_admin_cannot_access_admin_reviews(): void
     {
         // Create a regular user
-        $user = User::factory()->create(['role' => 'user']);
+        $user = User::factory()->create(['is_admin' => false]);
         Sanctum::actingAs($user);
 
         // Create some reviews
