@@ -2,6 +2,7 @@
 
 namespace App\Observers;
 
+use App\Events\BugReportSubmitted;
 use App\Models\BugReport;
 use Illuminate\Support\Facades\Log;
 
@@ -19,15 +20,12 @@ class BugReportObserver
 
     /**
      * Handle the BugReport "created" event.
-     * Log the submission.
+     * Dispatch event for the submission.
      */
     public function created(BugReport $bugReport): void
     {
-        Log::channel('feedback')->info('Bug Report submitted:', [
-            'id' => $bugReport->id,
-            'severity' => $bugReport->severity,
-            'user_uuid' => $bugReport->user_uuid,
-        ]);
+        // Dispatch event for the bug report submission
+        event(new BugReportSubmitted($bugReport));
     }
 
     // Other observer methods
