@@ -3,6 +3,8 @@
 use App\Http\Controllers\Api\V1\BugReportController;
 use App\Http\Controllers\Api\V1\HardwareSurveyController;
 use App\Http\Controllers\Api\V1\ReviewController;
+use App\Http\Controllers\Api\Admin\FeedbackController;
+use App\Http\Controllers\Api\Admin\AuthController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -22,17 +24,24 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
 });
 
 // Public Feedback API Endpoints (Version 1)
-Route::prefix('v1/feedback')->group(function () {
-    Route::post('reviews', [ReviewController::class, 'store'])->name('api.v1.feedback.reviews.store');
-    Route::post('bug-reports', [BugReportController::class, 'store'])->name('api.v1.feedback.bug-reports.store');
-    Route::post('hardware-surveys', [HardwareSurveyController::class, 'store'])->name('api.v1.feedback.hardware-surveys.store');
+Route::prefix('v1/feedback')->name('api.v1.feedback.')->group(function () {
+    Route::post('reviews', [ReviewController::class, 'store'])->name('reviews.store');
+    Route::post('bug-reports', [BugReportController::class, 'store'])->name('bug-reports.store');
+    Route::post('hardware-surveys', [HardwareSurveyController::class, 'store'])->name('hardware-surveys.store');
 });
 
 // Feedback API endpoints (Protected, assuming admin middleware later)
-Route::prefix('admin')->middleware(['auth:sanctum', 'is_admin'])->group(function () { // Use actual 'is_admin' middleware
-    Route::get('/reviews', [App\Http\Controllers\Api\Admin\FeedbackController::class, 'listReviews'])->name('api.admin.reviews.list');
-    Route::get('/bug-reports', [App\Http\Controllers\Api\Admin\FeedbackController::class, 'listBugReports'])->name('api.admin.bug_reports.list');
-    Route::get('/hardware-surveys', [App\Http\Controllers\Api\Admin\FeedbackController::class, 'listHardwareSurveys'])->name('api.admin.hardware_surveys.list');
+Route::prefix('admin')->name('api.admin.')->group(function () {
+    // Admin Authentication
+    Route::post('login', [AuthController::class, 'login'])->name('login');
+    // Add logout route later if needed: Route::post('logout', [AuthController::class, 'logout'])->middleware('auth:sanctum')->name('logout');
+
+    // Protected Admin Feedback Routes
+    Route::middleware(['auth:sanctum', 'is_admin'])->group(function () {
+        Route::get('/reviews', [FeedbackController::class, 'listReviews'])->name('reviews.list');
+        Route::get('/bug-reports', [FeedbackController::class, 'listBugReports'])->name('bug_reports.list');
+        Route::get('/hardware-surveys', [FeedbackController::class, 'listHardwareSurveys'])->name('hardware_surveys.list');
+    });
 });
 
 // Public Feedback Submission - Keep existing or add new ones if needed
