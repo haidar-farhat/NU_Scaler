@@ -45,6 +45,7 @@ class Kernel extends HttpKernel
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
             \App\Http\Middleware\SecureApiHeaders::class,
             \App\Http\Middleware\ApiRequestLogger::class,
+            \App\Http\Middleware\PreventRequestsWithoutAcceptJson::class, // Ensure JSON header
         ],
 
         // Secured API group for sensitive routes
@@ -54,6 +55,7 @@ class Kernel extends HttpKernel
             \App\Http\Middleware\SecureApiHeaders::class,
             \App\Http\Middleware\ApiRequestLogger::class,
             \App\Http\Middleware\ValidateApiToken::class, // Require token validation
+            \App\Http\Middleware\PreventRequestsWithoutAcceptJson::class, // Ensure JSON header
         ],
     ];
 
@@ -82,5 +84,6 @@ class Kernel extends HttpKernel
         'api.log' => \App\Http\Middleware\ApiRequestLogger::class, // API request logging middleware
         'api.token' => \App\Http\Middleware\ValidateApiToken::class, // API token validation middleware
         'csp' => \App\Http\Middleware\ContentSecurityPolicy::class, // Content Security Policy middleware
+        'accept.json' => \App\Http\Middleware\PreventRequestsWithoutAcceptJson::class, // Accept JSON middleware
     ];
 }
