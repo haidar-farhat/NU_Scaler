@@ -5,6 +5,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\FeedbackController;
 use App\Http\Controllers\Api\V1\DownloadController;
+use App\Http\Controllers\Api\V1\WebhookController;
 use App\Http\Controllers\Api\Admin\AdminFeedbackController;
 use App\Http\Controllers\Api\Admin\AdminMetricsController;
 use App\Http\Controllers\Api\Admin\AdminAuthController; // Assuming separate admin auth controller
@@ -51,6 +52,20 @@ Route::prefix('v1')->middleware('api.secured')->name('api.v1.')->group(function 
     Route::get('download', [DownloadController::class, 'getDownloadLink'])
          ->middleware('api.rate.limit:downloads')
          ->name('download');
+
+    // Webhook endpoints
+    Route::prefix('webhooks')->name('webhooks.')->group(function () {
+        Route::get('/', [WebhookController::class, 'index'])->name('index');
+        Route::post('/', [WebhookController::class, 'store'])->name('store');
+        Route::get('/{webhook}', [WebhookController::class, 'show'])->name('show');
+        Route::put('/{webhook}', [WebhookController::class, 'update'])->name('update');
+        Route::delete('/{webhook}', [WebhookController::class, 'destroy'])->name('destroy');
+        Route::get('/{webhook}/logs', [WebhookController::class, 'logs'])->name('logs');
+        Route::post('/{webhook}/regenerate-secret', [WebhookController::class, 'regenerateSecret'])->name('regenerate-secret');
+        Route::post('/{webhook}/test', [WebhookController::class, 'test'])->name('test');
+        Route::post('/logs/{log}/retry', [WebhookController::class, 'retry'])->name('retry');
+    });
+
     // Add other authenticated user routes here (e.g., profile management)
 });
 
