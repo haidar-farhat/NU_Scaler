@@ -29,7 +29,7 @@ Route::prefix('v1/feedback')->group(function () {
 });
 
 // Feedback API endpoints (Protected, assuming admin middleware later)
-Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function () { // Placeholder for admin middleware
+Route::prefix('admin')->middleware(['auth:sanctum', 'is_admin'])->group(function () { // Use actual 'is_admin' middleware
     Route::get('/reviews', [App\Http\Controllers\Api\Admin\FeedbackController::class, 'listReviews'])->name('api.admin.reviews.list');
     Route::get('/bug-reports', [App\Http\Controllers\Api\Admin\FeedbackController::class, 'listBugReports'])->name('api.admin.bug_reports.list');
     Route::get('/hardware-surveys', [App\Http\Controllers\Api\Admin\FeedbackController::class, 'listHardwareSurveys'])->name('api.admin.hardware_surveys.list');
