@@ -49,7 +49,7 @@ Route::prefix('v1')->group(function () {
 });
 
 // Authenticated User Actions (Version 1)
-Route::prefix('v1')->middleware('api.secured')->name('api.v1.')->group(function () {
+Route::prefix('v1')->middleware('auth:sanctum')->name('api.v1.')->group(function () {
     Route::get('download', [DownloadController::class, 'getDownloadLink'])
          ->middleware('api.rate.limit:downloads')
          ->name('download');
@@ -66,8 +66,6 @@ Route::prefix('v1')->middleware('api.secured')->name('api.v1.')->group(function 
         Route::post('/{webhook}/test', [WebhookController::class, 'test'])->name('test');
         Route::post('/logs/{log}/retry', [WebhookController::class, 'retry'])->name('retry');
     });
-
-    // Add other authenticated user routes here (e.g., profile management)
 });
 
 // Admin Routes - Using full middleware class reference to avoid alias issues
