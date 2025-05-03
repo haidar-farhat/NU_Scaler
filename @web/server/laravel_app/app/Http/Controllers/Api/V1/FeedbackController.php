@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use App\Models\Review;
 
 class FeedbackController extends Controller
 {
@@ -22,21 +23,18 @@ class FeedbackController extends Controller
             'email' => 'nullable|email|max:255',
         ]);
 
-        // TODO: Implement actual review storage
-        // In a real implementation, we would create a Review model
+        // Create a new review
+        $review = Review::create([
+            'rating' => $request->rating,
+            'comment' => $request->comment,
+            'name' => $request->name,
+            'email' => $request->email,
+            'user_uuid' => $request->user() ? $request->user()->uuid : null,
+        ]);
 
-        // Match the test expectation with the 'data' key
         return response()->json([
             'message' => 'Review submitted successfully',
-            'data' => [
-                'id' => 1, // This would be the actual ID in a real implementation
-                'rating' => $request->rating,
-                'comment' => $request->comment,
-                'name' => $request->name,
-                'email' => $request->email,
-                'created_at' => now()->toIso8601String(),
-                'updated_at' => now()->toIso8601String(),
-            ],
+            'data' => $review,
         ], 201);
     }
 

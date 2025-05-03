@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use App\Models\Review;
 
 class AdminFeedbackController extends Controller
 {
@@ -15,11 +16,13 @@ class AdminFeedbackController extends Controller
      */
     public function index(Request $request)
     {
-        // TODO: Implement feedback listing with pagination and filtering
-        return response()->json([
-            'message' => 'Feedback listing endpoint',
-            'data' => [],
-        ]);
+        // Get reviews with optional filters
+        $reviews = Review::query()
+            ->filter($request->only(['rating']))
+            ->latest()
+            ->paginate(15);
+
+        return response()->json($reviews);
     }
 
     /**
