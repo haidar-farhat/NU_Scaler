@@ -13,6 +13,11 @@ return new class extends Migration
     {
         Schema::create('reviews', function (Blueprint $table) {
             $table->id();
+            $table->unsignedTinyInteger('rating');
+            $table->text('comment')->nullable();
+            $table->string('name')->nullable();
+            $table->string('email')->nullable();
+            $table->uuid('user_uuid')->nullable()->index();
             $table->timestamps();
         });
     }
