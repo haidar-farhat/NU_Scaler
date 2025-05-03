@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\V1\BugReportController;
 use App\Http\Controllers\Api\V1\HardwareSurveyController;
 use App\Http\Controllers\Api\V1\ReviewController;
 use App\Http\Controllers\Api\V1\Auth\RegisterController;
+use App\Http\Controllers\Api\V1\DownloadController;
 use App\Http\Controllers\Api\Admin\FeedbackController;
 use App\Http\Controllers\Api\Admin\AuthController;
 use App\Http\Controllers\Api\Admin\MetricsController;
@@ -30,6 +31,12 @@ Route::prefix('v1/auth')->name('api.v1.auth.')->group(function () {
     Route::post('register', [RegisterController::class, 'register'])->name('register');
     // Add login route for regular users if needed, separate from admin login
     // Route::post('login', [LoginController::class, 'login'])->name('login');
+});
+
+// Authenticated User Actions (Version 1)
+Route::prefix('v1')->middleware('auth:sanctum')->name('api.v1.')->group(function () {
+    Route::get('download', [DownloadController::class, 'getDownloadLink'])->name('download');
+    // Add other authenticated user routes here (e.g., profile management)
 });
 
 // Public Feedback API Endpoints (Version 1)

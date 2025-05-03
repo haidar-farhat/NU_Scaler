@@ -13,7 +13,10 @@ return new class extends Migration
     {
         Schema::create('download_logs', function (Blueprint $table) {
             $table->id();
-            $table->timestamps();
+            $table->foreignId('user_id')->constrained()->cascadeOnDelete(); // Link to users table
+            $table->ipAddress('ip_address')->nullable(); // Store the IP address
+            $table->timestamp('created_at')->useCurrent(); // Only need created_at
+            // No updated_at needed for logs
         });
     }
 
