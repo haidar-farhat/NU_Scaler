@@ -17,7 +17,7 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
-Route::middleware(['auth:sanctum'])->get('/user', function (Request $request) {
+Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     return $request->user();
 });
 
@@ -30,15 +30,15 @@ Route::prefix('v1/feedback')->group(function () {
 
 // Feedback API endpoints (Protected, assuming admin middleware later)
 Route::prefix('admin')->middleware(['auth:sanctum', 'admin'])->group(function () { // Placeholder for admin middleware
-    Route::get('/reviews', [App\\Http\\Controllers\\Api\\Admin\\FeedbackController::class, 'listReviews'])->name('api.admin.reviews.list');
-    Route::get('/bug-reports', [App\\Http\\Controllers\\Api\\Admin\\FeedbackController::class, 'listBugReports'])->name('api.admin.bug_reports.list');
-    Route::get('/hardware-surveys', [App\\Http\\Controllers\\Api\\Admin\\FeedbackController::class, 'listHardwareSurveys'])->name('api.admin.hardware_surveys.list');
+    Route::get('/reviews', [App\Http\Controllers\Api\Admin\FeedbackController::class, 'listReviews'])->name('api.admin.reviews.list');
+    Route::get('/bug-reports', [App\Http\Controllers\Api\Admin\FeedbackController::class, 'listBugReports'])->name('api.admin.bug_reports.list');
+    Route::get('/hardware-surveys', [App\Http\Controllers\Api\Admin\FeedbackController::class, 'listHardwareSurveys'])->name('api.admin.hardware_surveys.list');
 });
 
 // Public Feedback Submission - Keep existing or add new ones if needed
-Route::post('/feedback/review', [App\\Http\\Controllers\\Api\\FeedbackController::class, 'submitReview'])->name('api.feedback.review');
-Route::post('/feedback/bug-report', [App\\Http\\Controllers\\Api\\FeedbackController::class, 'submitBugReport'])->name('api.feedback.bug_report');
-Route::post('/feedback/hardware-survey', [App\\Http\\Controllers\\Api\\FeedbackController::class, 'submitHardwareSurvey'])->name('api.feedback.hardware_survey');
+Route::post('/feedback/review', [App\Http\Controllers\Api\FeedbackController::class, 'submitReview'])->name('api.feedback.review');
+Route::post('/feedback/bug-report', [App\Http\Controllers\Api\FeedbackController::class, 'submitBugReport'])->name('api.feedback.bug_report');
+Route::post('/feedback/hardware-survey', [App\Http\Controllers\Api\FeedbackController::class, 'submitHardwareSurvey'])->name('api.feedback.hardware_survey');
 
 // TODO: Add Auth routes (register, login)
 // TODO: Add Download routes
