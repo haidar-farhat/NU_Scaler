@@ -8,6 +8,7 @@ use App\Events\ReviewSubmitted;
 use App\Listeners\LogBugReportSubmission;
 use App\Listeners\LogHardwareSurveySubmission;
 use App\Listeners\LogReviewSubmission;
+use App\Listeners\NotifyAboutCriticalBugReport;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Auth\Listeners\SendEmailVerificationNotification;
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as ServiceProvider;
@@ -29,6 +30,7 @@ class EventServiceProvider extends ServiceProvider
         ],
         BugReportSubmitted::class => [
             LogBugReportSubmission::class,
+            NotifyAboutCriticalBugReport::class,
         ],
         HardwareSurveySubmitted::class => [
             LogHardwareSurveySubmission::class,
