@@ -84,4 +84,20 @@ class AdminMetricsController extends Controller
             ],
         ]);
     }
+
+    /**
+     * Get reviews distribution by rating
+     *
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function reviewsDistribution()
+    {
+        // TODO: Implement actual query for reviews distribution
+        // For now, return a stub response with sample data
+        return response()->json([
+            ['rating' => 1, 'count' => 5],
+            ['rating' => 3, 'count' => 10],
+            ['rating' => 5, 'count' => 2],
+        ]);
+    }
 }
