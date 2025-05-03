@@ -51,7 +51,6 @@ Route::prefix('v1')->group(function () {
 // Authenticated User Actions (Version 1)
 Route::prefix('v1')->middleware('auth:sanctum')->name('api.v1.')->group(function () {
     Route::get('download', [DownloadController::class, 'getDownloadLink'])
-         ->middleware('api.rate.limit:downloads')
          ->name('download');
 
     // Webhook endpoints
@@ -108,9 +107,9 @@ Route::prefix('admin')->name('api.admin.')
     });
 
 // Protected Admin Routes
-Route::middleware(['auth:sanctum', 'is_admin', 'api.rate.limit:admin'])->group(function () {
+Route::middleware(['auth:sanctum', 'is_admin'])->group(function () {
     // Replace with the following for enhanced security:
-    // Route::middleware(['api.secured', 'is_admin', 'api.rate.limit:admin'])->group(function () {
+    // Route::middleware(['api.secured', 'is_admin'])->group(function () {
 
     // Admin Routes....
 });
