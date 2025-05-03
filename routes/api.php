@@ -52,7 +52,7 @@ Route::prefix('v1/feedback')->name('api.v1.feedback.')->group(function () {
     });
 });
 
-// Feedback API endpoints (Protected, assuming admin middleware later)
+// Admin API endpoints (Protected with auth and admin middleware)
 Route::prefix('admin')->name('api.admin.')->group(function () {
     // Admin Authentication
     Route::post('login', [AuthController::class, 'login'])->name('login');
@@ -60,16 +60,40 @@ Route::prefix('admin')->name('api.admin.')->group(function () {
 
     // Protected Admin Routes
     Route::middleware(['auth:sanctum', 'is_admin'])->group(function () {
-        // Feedback Listing
-        Route::get('/reviews', [FeedbackController::class, 'listReviews'])->name('reviews.list');
-        Route::get('/bug-reports', [FeedbackController::class, 'listBugReports'])->name('bug_reports.list');
-        Route::get('/hardware-surveys', [FeedbackController::class, 'listHardwareSurveys'])->name('hardware_surveys.list');
+        // Feedback Listing & Detail
+        Route::prefix('feedback')->name('feedback.')->group(function () {
+            // Reviews
+            Route::get('/reviews', [FeedbackController::class, 'listReviews'])->name('reviews.list');
+            Route::get('/reviews/{review}', [FeedbackController::class, 'showReview'])->name('reviews.show');
+            
+            // Bug Reports
+            Route::get('/bug-reports', [FeedbackController::class, 'listBugReports'])->name('bug_reports.list');
+            Route::get('/bug-reports/{bugReport}', [FeedbackController::class, 'showBugReport'])->name('bug_reports.show');
+            
+            // Hardware Surveys
+            Route::get('/hardware-surveys', [FeedbackController::class, 'listHardwareSurveys'])->name('hardware_surveys.list');
+            Route::get('/hardware-surveys/{hardwareSurvey}', [FeedbackController::class, 'showHardwareSurvey'])->name('hardware_surveys.show');
+        });
 
-        // Metrics
+        // Metrics & Analytics
         Route::prefix('metrics')->name('metrics.')->group(function () {
-            Route::get('reviews-distribution', [MetricsController::class, 'reviewsDistribution'])->name('reviews_distribution');
-            Route::get('bug-reports-severity', [MetricsController::class, 'bugReportsSeverity'])->name('bug_reports_severity');
-            // Add more metric routes here (e.g., hardware OS distribution)
+            // Review metrics
+            Route::get('reviews-distribution', [MetricsController::class, 'reviewsDistribution'])
+                ->name('reviews_distribution');
+            
+            // Bug report metrics
+            Route::get('bug-reports-severity', [MetricsController::class, 'bugReportsSeverity'])
+                ->name('bug_reports_severity');
+            
+            // Hardware survey metrics
+            Route::get('hardware-os-distribution', [MetricsController::class, 'hardwareOsDistribution'])
+                ->name('hardware_os_distribution');
+            Route::get('hardware-gpu-distribution', [MetricsController::class, 'hardwareGpuDistribution'])
+                ->name('hardware_gpu_distribution');
+            
+            // Combined metrics
+            Route::get('submission-trends', [MetricsController::class, 'submissionTrends'])
+                ->name('submission_trends');
         });
     });
 });
