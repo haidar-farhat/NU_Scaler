@@ -43,6 +43,7 @@ class Kernel extends HttpKernel
             'throttle:api',
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
             \App\Http\Middleware\SecureApiHeaders::class,
+            \App\Http\Middleware\ApiRequestLogger::class,
         ],
     ];
 
@@ -68,5 +69,6 @@ class Kernel extends HttpKernel
         'is_admin' => \App\Http\Middleware\IsAdmin::class, // Added admin check middleware
         'api.rate.limit' => \App\Http\Middleware\ApiRateLimiter::class, // Custom API rate limiter
         'secure.headers' => \App\Http\Middleware\SecureApiHeaders::class, // Security headers middleware
+        'api.log' => \App\Http\Middleware\ApiRequestLogger::class, // API request logging middleware
     ];
 } 
