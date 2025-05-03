@@ -1,3 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Optional: Add any custom base styles below */
+body {
+  font-family: 'Inter', sans-serif; /* Example: Setting a default font */
+  @apply antialiased;
+}
+
 :root {
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
