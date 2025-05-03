@@ -28,11 +28,13 @@ Route::prefix('v1')->group(function () {
     Route::post('/login', [AuthController::class, 'login'])->name('api.v1.login');
     Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum')->name('api.v1.logout'); // Needs auth
 
-    // Feedback Submission
-    Route::post('/feedback', [FeedbackController::class, 'store'])->name('api.v1.feedback.store'); // Public submission
+    // Feedback Submission - Updated to match test expectations
+    Route::post('/feedback/reviews', [FeedbackController::class, 'storeReview'])->name('api.v1.feedback.reviews.store');
+    Route::post('/feedback/bug-reports', [FeedbackController::class, 'storeBugReport'])->name('api.v1.feedback.bug-reports.store');
+    Route::post('/feedback/hardware-surveys', [FeedbackController::class, 'storeHardwareSurvey'])->name('api.v1.feedback.hardware-surveys.store');
 
-    // Download Info (Protected by auth)
-    Route::get('/download-info', [DownloadController::class, 'show'])->middleware('auth:sanctum')->name('api.v1.download.info');
+    // Download Info (Protected by auth) - Updated to match test expectations
+    Route::get('/download', [DownloadController::class, 'getDownloadLink'])->middleware('auth:sanctum')->name('api.v1.download');
 
     // Route to get authenticated user info
     Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
