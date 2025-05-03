@@ -573,4 +573,157 @@ class FeedbackController extends Controller
         $this->applyHardwareSurveyFilters($query, $request);
         return $query->count();
     }
+
+    /**
+     * Get trending topics from feedback.
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function trendingTopics(Request $request): JsonResponse
+    {
+        $timeframe = $request->input('timeframe', 'month');
+        $limit = min(20, max(5, $request->input('limit', 10)));
+        
+        // Determine start date based on timeframe
+        $startDate = null;
+        
+        switch ($timeframe) {
+            case 'day':
+                $startDate = Carbon::today();
+                break;
+            case 'week':
+                $startDate = Carbon::now()->subWeek();
+                break;
+            case 'month':
+                $startDate = Carbon::now()->subMonth();
+                break;
+            case 'quarter':
+                $startDate = Carbon::now()->subQuarter();
+                break;
+            case 'year':
+                $startDate = Carbon::now()->subYear();
+                break;
+        }
+        
+        // Extract common keywords from reviews
+        $reviewKeywords = $this->extractKeywordsFromText(
+            Review::query()
+                ->when($startDate, function ($query) use ($startDate) {
+                    $query->where('created_at', '>=', $startDate);
+                })
+                ->select('comment')
+                ->get()
+                ->pluck('comment')
+                ->toArray()
+        );
+        
+        // Extract common keywords from bug reports
+        $bugReportKeywords = $this->extractKeywordsFromText(
+            BugReport::query()
+                ->when($startDate, function ($query) use ($startDate) {
+                    $query->where('created_at', '>=', $startDate);
+                })
+                ->select('description', 'steps_to_reproduce')
+                ->get()
+                ->map(function ($item) {
+                    return $item->description . ' ' . $item->steps_to_reproduce;
+                })
+                ->toArray()
+        );
+        
+        // Extract keywords by review rating
+        $keywordsByRating = [];
+        for ($rating = 1; $rating <= 5; $rating++) {
+            $keywordsByRating[$rating] = $this->extractKeywordsFromText(
+                Review::query()
+                    ->where('rating', $rating)
+                    ->when($startDate, function ($query) use ($startDate) {
+                        $query->where('created_at', '>=', $startDate);
+                    })
+                    ->select('comment')
+                    ->get()
+                    ->pluck('comment')
+                    ->toArray()
+            );
+        }
+        
+        // Extract keywords by bug severity
+        $keywordsBySeverity = [];
+        foreach (['low', 'medium', 'high', 'critical'] as $severity) {
+            $keywordsBySeverity[$severity] = $this->extractKeywordsFromText(
+                BugReport::query()
+                    ->where('severity', $severity)
+                    ->when($startDate, function ($query) use ($startDate) {
+                        $query->where('created_at', '>=', $startDate);
+                    })
+                    ->select('description', 'steps_to_reproduce')
+                    ->get()
+                    ->map(function ($item) {
+                        return $item->description . ' ' . $item->steps_to_reproduce;
+                    })
+                    ->toArray()
+            );
+        }
+        
+        return response()->json([
+            'trending_topics' => [
+                'reviews' => array_slice($reviewKeywords, 0, $limit),
+                'bug_reports' => array_slice($bugReportKeywords, 0, $limit),
+                'by_rating' => array_map(function ($keywords) use ($limit) {
+                    return array_slice($keywords, 0, $limit);
+                }, $keywordsByRating),
+                'by_severity' => array_map(function ($keywords) use ($limit) {
+                    return array_slice($keywords, 0, $limit);
+                }, $keywordsBySeverity),
+            ],
+            'timeframe' => $timeframe,
+        ]);
+    }
+    
+    /**
+     * Extract keywords from an array of text.
+     *
+     * @param array $texts
+     * @return array
+     */
+    private function extractKeywordsFromText(array $texts): array
+    {
+        $combinedText = implode(' ', $texts);
+        
+        // Remove common stop words
+        $stopWords = ['a', 'an', 'the', 'and', 'or', 'but', 'is', 'are', 'was', 'were', 
+                     'to', 'of', 'in', 'for', 'with', 'on', 'at', 'by', 'this', 'that',
+                     'it', 'not', 'be', 'have', 'has', 'had', 'do', 'does', 'did',
+                     'i', 'my', 'me', 'mine', 'you', 'your', 'yours', 'he', 'she', 'him',
+                     'her', 'his', 'they', 'them', 'their', 'we', 'us', 'our'];
+                     
+        // Remove punctuation and convert to lowercase
+        $cleanedText = strtolower(preg_replace('/[^\p{L}\p{N}\s]/u', '', $combinedText));
+        
+        // Split into words
+        $words = preg_split('/\s+/', $cleanedText, -1, PREG_SPLIT_NO_EMPTY);
+        
+        // Filter out stop words and words less than 3 characters
+        $words = array_filter($words, function ($word) use ($stopWords) {
+            return !in_array($word, $stopWords) && strlen($word) >= 3;
+        });
+        
+        // Count word frequencies
+        $wordCounts = array_count_values($words);
+        
+        // Sort by frequency, descending
+        arsort($wordCounts);
+        
+        // Convert to proper format
+        $keywords = [];
+        foreach ($wordCounts as $word => $count) {
+            $keywords[] = [
+                'keyword' => $word,
+                'count' => $count,
+            ];
+        }
+        
+        return $keywords;
+    }
 } 
