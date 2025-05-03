@@ -2,6 +2,10 @@
 
 namespace App\Providers;
 
+use App\Events\FeedbackSubmitted;
+use App\Listeners\LogFeedbackSubmission;
+use App\Listeners\NotifyAdminsAboutFeedback;
+use App\Listeners\ProcessFeedbackAnalytics;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Auth\Listeners\SendEmailVerificationNotification;
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as ServiceProvider;
@@ -17,6 +21,12 @@ class EventServiceProvider extends ServiceProvider
     protected $listen = [
         Registered::class => [
             SendEmailVerificationNotification::class,
+        ],
+        // Feedback events
+        FeedbackSubmitted::class => [
+            LogFeedbackSubmission::class,
+            NotifyAdminsAboutFeedback::class,
+            ProcessFeedbackAnalytics::class,
         ],
         // Add your other event listeners here
         // \App\Events\ReviewSubmitted::class => [
