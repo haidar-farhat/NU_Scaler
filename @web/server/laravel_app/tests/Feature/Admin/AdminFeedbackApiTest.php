@@ -31,7 +31,7 @@ class AdminFeedbackApiTest extends TestCase
         Review::factory()->count(3)->create(['rating' => 5]);
 
         // Act: Call the endpoint
-        $response = $this->getJson(route('api.admin.reviews.list'));
+        $response = $this->getJson('/api/admin/reviews');
 
         // Assert
         $response

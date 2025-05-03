@@ -31,7 +31,7 @@ class AdminMetricsApiTest extends TestCase
         Review::factory()->count(2)->create(['rating' => 5]);
 
         // Act
-        $response = $this->getJson(route('api.admin.metrics.reviews_distribution'));
+        $response = $this->getJson('/api/admin/metrics/reviews-distribution');
 
         // Assert
         $response
