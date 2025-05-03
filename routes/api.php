@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\V1\HardwareSurveyController;
 use App\Http\Controllers\Api\V1\ReviewController;
 use App\Http\Controllers\Api\Admin\FeedbackController;
 use App\Http\Controllers\Api\Admin\AuthController;
+use App\Http\Controllers\Api\Admin\MetricsController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -36,11 +37,19 @@ Route::prefix('admin')->name('api.admin.')->group(function () {
     Route::post('login', [AuthController::class, 'login'])->name('login');
     // Add logout route later if needed: Route::post('logout', [AuthController::class, 'logout'])->middleware('auth:sanctum')->name('logout');
 
-    // Protected Admin Feedback Routes
+    // Protected Admin Routes
     Route::middleware(['auth:sanctum', 'is_admin'])->group(function () {
+        // Feedback Listing
         Route::get('/reviews', [FeedbackController::class, 'listReviews'])->name('reviews.list');
         Route::get('/bug-reports', [FeedbackController::class, 'listBugReports'])->name('bug_reports.list');
         Route::get('/hardware-surveys', [FeedbackController::class, 'listHardwareSurveys'])->name('hardware_surveys.list');
+
+        // Metrics
+        Route::prefix('metrics')->name('metrics.')->group(function () {
+            Route::get('reviews-distribution', [MetricsController::class, 'reviewsDistribution'])->name('reviews_distribution');
+            Route::get('bug-reports-severity', [MetricsController::class, 'bugReportsSeverity'])->name('bug_reports_severity');
+            // Add more metric routes here (e.g., hardware OS distribution)
+        });
     });
 });
 
