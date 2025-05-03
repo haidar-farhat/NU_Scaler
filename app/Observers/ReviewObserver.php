@@ -2,6 +2,7 @@
 
 namespace App\Observers;
 
+use App\Events\ReviewSubmitted;
 use App\Models\Review;
 use Illuminate\Support\Facades\Log;
 
@@ -20,15 +21,12 @@ class ReviewObserver
 
     /**
      * Handle the Review "created" event.
-     * Log the submission to the feedback channel.
+     * Dispatch event for the submission.
      */
     public function created(Review $review): void
     {
-        Log::channel('feedback')->info('Review submitted:', [
-            'id' => $review->id,
-            'rating' => $review->rating,
-            'user_uuid' => $review->user_uuid,
-        ]);
+        // Dispatch event for the review submission
+        event(new ReviewSubmitted($review));
     }
 
     // Other observer methods (updated, deleted, etc.) can be added here if needed
