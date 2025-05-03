@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\StoreBugReportRequest; // Use the specific request
+use App\Http\Resources\Api\V1\BugReportResource;
 use App\Models\BugReport;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -36,7 +37,9 @@ class BugReportController extends Controller
 
         $bugReport = BugReport::create($validatedData);
 
-        return response()->json($bugReport, 201);
+        return (new BugReportResource($bugReport))
+            ->response()
+            ->setStatusCode(201);
     }
 
     /**
