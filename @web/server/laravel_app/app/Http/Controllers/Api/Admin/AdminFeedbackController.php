@@ -22,7 +22,10 @@ class AdminFeedbackController extends Controller
             ->latest()
             ->paginate(15);
 
-        return response()->json($reviews);
+        // Laravel's paginate() will automatically include the pagination metadata
+        // when converted to JSON, but we need to ensure we don't wrap it in another
+        // array that would change the expected structure
+        return $reviews;
     }
 
     /**
