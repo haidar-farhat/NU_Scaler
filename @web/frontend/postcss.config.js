@@ -1,6 +1,7 @@
 export default {
   plugins: {
-    tailwindcss: {},
-    autoprefixer: {},
+    // Temporarily commented out until dependencies are properly installed
+    // tailwindcss: {},
+    // autoprefixer: {},
   },
 } 
