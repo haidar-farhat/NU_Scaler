@@ -62,10 +62,20 @@ Route::prefix('admin')->name('api.admin.')
 
         // Feedback Management
         Route::get('/reviews', [AdminFeedbackController::class, 'index'])->name('reviews.index');
-        // Add other admin feedback routes (show, delete?) as needed
+        Route::get('/reviews/{review}', [AdminFeedbackController::class, 'show'])->name('reviews.show');
+        Route::get('/bug-reports', [AdminFeedbackController::class, 'indexBugReports'])->name('bug-reports.index');
+        Route::get('/bug-reports/{bugReport}', [AdminFeedbackController::class, 'showBugReport'])->name('bug-reports.show');
+        Route::get('/hardware-surveys', [AdminFeedbackController::class, 'indexHardwareSurveys'])->name('hardware-surveys.index');
+        Route::get('/hardware-surveys/{hardwareSurvey}', [AdminFeedbackController::class, 'showHardwareSurvey'])->name('hardware-surveys.show');
 
-        // Metrics
-        Route::get('/metrics/reviews-distribution', [AdminMetricsController::class, 'reviewsDistribution'])->name('metrics.reviews');
+        // Metrics and Analytics
+        Route::get('/metrics/dashboard', [AdminMetricsController::class, 'dashboard'])->name('metrics.dashboard');
+        Route::get('/metrics/reviews', [AdminMetricsController::class, 'reviewMetrics'])->name('metrics.reviews');
+        Route::get('/metrics/bug-reports', [AdminMetricsController::class, 'bugReportMetrics'])->name('metrics.bug-reports');
+        Route::get('/metrics/hardware-surveys', [AdminMetricsController::class, 'hardwareSurveyMetrics'])->name('metrics.hardware-surveys');
+        Route::get('/metrics/user-growth', [AdminMetricsController::class, 'userGrowthTrends'])->name('metrics.user-growth');
+        Route::get('/metrics/feedback-trends', [AdminMetricsController::class, 'feedbackTrends'])->name('metrics.feedback-trends');
+        Route::get('/metrics/export', [AdminMetricsController::class, 'exportAllMetrics'])->name('metrics.export');
     });
 
 // Protected Admin Routes

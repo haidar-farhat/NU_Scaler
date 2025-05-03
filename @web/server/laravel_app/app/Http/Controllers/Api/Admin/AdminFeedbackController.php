@@ -3,90 +3,173 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
+use App\Models\BugReport;
+use App\Models\HardwareSurvey;
 use App\Models\Review;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class AdminFeedbackController extends Controller
 {
     /**
-     * Display a listing of feedback items.
+     * Display a listing of reviews.
      *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\JsonResponse
+     * @param Request $request
+     * @return JsonResponse
      */
-    public function index(Request $request)
+    public function index(Request $request): JsonResponse
     {
         // Get reviews with optional filters
         $reviews = Review::query()
-            ->filter($request->only(['rating']))
+            ->when($request->filled('rating'), function ($query) use ($request) {
+                return $query->where('rating', $request->rating);
+            })
+            ->when($request->filled('search'), function ($query) use ($request) {
+                return $query->where('comment', 'like', '%' . $request->search . '%');
+            })
+            ->when($request->filled('from_date'), function ($query) use ($request) {
+                return $query->whereDate('created_at', '>=', $request->from_date);
+            })
+            ->when($request->filled('to_date'), function ($query) use ($request) {
+                return $query->whereDate('created_at', '<=', $request->to_date);
+            })
             ->latest()
-            ->paginate(15);
+            ->paginate($request->per_page ?? 15);
 
-        // Manually construct the response to ensure it has the expected structure
-        return response()->json([
-            'data' => $reviews->items(),
-            'links' => [
-                'first' => $reviews->url(1),
-                'last' => $reviews->url($reviews->lastPage()),
-                'prev' => $reviews->previousPageUrl(),
-                'next' => $reviews->nextPageUrl(),
-            ],
-            'meta' => [
-                'current_page' => $reviews->currentPage(),
-                'from' => $reviews->firstItem(),
-                'last_page' => $reviews->lastPage(),
-                'path' => $reviews->path(),
-                'per_page' => $reviews->perPage(),
-                'to' => $reviews->lastItem(),
-                'total' => $reviews->total(),
-            ],
-        ]);
+        return response()->json($reviews);
     }
 
     /**
-     * Display the specified feedback item.
+     * Display the specified review.
      *
-     * @param  int  $id
-     * @return \Illuminate\Http\JsonResponse
+     * @param Review $review
+     * @return JsonResponse
      */
-    public function show($id)
+    public function show(Review $review): JsonResponse
     {
-        // TODO: Implement feedback detail view
-        return response()->json([
-            'message' => 'Feedback detail endpoint',
-            'id' => $id,
-            'data' => null,
-        ]);
+        return response()->json(['data' => $review]);
     }
 
     /**
-     * Update the specified feedback item.
+     * Display a listing of bug reports.
      *
-     * @param  \Illuminate\Http\Request  $request
-     * @param  int  $id
-     * @return \Illuminate\Http\JsonResponse
+     * @param Request $request
+     * @return JsonResponse
      */
-    public function update(Request $request, $id)
+    public function indexBugReports(Request $request): JsonResponse
     {
-        // TODO: Implement feedback update
-        return response()->json([
-            'message' => 'Feedback updated successfully',
-            'id' => $id,
-        ]);
+        // Get bug reports with optional filters
+        $bugReports = BugReport::query()
+            ->when($request->filled('severity'), function ($query) use ($request) {
+                return $query->where('severity', $request->severity);
+            })
+            ->when($request->filled('category'), function ($query) use ($request) {
+                return $query->where('category', $request->category);
+            })
+            ->when($request->filled('search'), function ($query) use ($request) {
+                return $query->where('description', 'like', '%' . $request->search . '%');
+            })
+            ->when($request->filled('from_date'), function ($query) use ($request) {
+                return $query->whereDate('created_at', '>=', $request->from_date);
+            })
+            ->when($request->filled('to_date'), function ($query) use ($request) {
+                return $query->whereDate('created_at', '<=', $request->to_date);
+            })
+            ->latest()
+            ->paginate($request->per_page ?? 15);
+
+        return response()->json($bugReports);
     }
 
     /**
-     * Remove the specified feedback item.
+     * Display the specified bug report.
      *
-     * @param  int  $id
-     * @return \Illuminate\Http\JsonResponse
+     * @param BugReport $bugReport
+     * @return JsonResponse
      */
-    public function destroy($id)
+    public function showBugReport(BugReport $bugReport): JsonResponse
     {
-        // TODO: Implement feedback deletion
-        return response()->json([
-            'message' => 'Feedback deleted successfully',
-            'id' => $id,
-        ]);
+        return response()->json(['data' => $bugReport]);
+    }
+
+    /**
+     * Display a listing of hardware surveys.
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function indexHardwareSurveys(Request $request): JsonResponse
+    {
+        // Get hardware surveys with optional filters
+        $hardwareSurveys = HardwareSurvey::query()
+            ->when($request->filled('os'), function ($query) use ($request) {
+                return $query->where('os', 'like', '%' . $request->os . '%');
+            })
+            ->when($request->filled('gpu_model'), function ($query) use ($request) {
+                return $query->where('gpu_model', 'like', '%' . $request->gpu_model . '%');
+            })
+            ->when($request->filled('cpu_model'), function ($query) use ($request) {
+                return $query->where('cpu_model', 'like', '%' . $request->cpu_model . '%');
+            })
+            ->when($request->filled('min_ram'), function ($query) use ($request) {
+                return $query->where('ram_size', '>=', $request->min_ram);
+            })
+            ->when($request->filled('from_date'), function ($query) use ($request) {
+                return $query->whereDate('created_at', '>=', $request->from_date);
+            })
+            ->when($request->filled('to_date'), function ($query) use ($request) {
+                return $query->whereDate('created_at', '<=', $request->to_date);
+            })
+            ->latest()
+            ->paginate($request->per_page ?? 15);
+
+        return response()->json($hardwareSurveys);
+    }
+
+    /**
+     * Display the specified hardware survey.
+     *
+     * @param HardwareSurvey $hardwareSurvey
+     * @return JsonResponse
+     */
+    public function showHardwareSurvey(HardwareSurvey $hardwareSurvey): JsonResponse
+    {
+        return response()->json(['data' => $hardwareSurvey]);
+    }
+
+    /**
+     * Remove the specified review.
+     *
+     * @param Review $review
+     * @return JsonResponse
+     */
+    public function destroyReview(Review $review): JsonResponse
+    {
+        $review->delete();
+        return response()->json(['message' => 'Review deleted successfully']);
+    }
+
+    /**
+     * Remove the specified bug report.
+     *
+     * @param BugReport $bugReport
+     * @return JsonResponse
+     */
+    public function destroyBugReport(BugReport $bugReport): JsonResponse
+    {
+        $bugReport->delete();
+        return response()->json(['message' => 'Bug report deleted successfully']);
+    }
+
+    /**
+     * Remove the specified hardware survey.
+     *
+     * @param HardwareSurvey $hardwareSurvey
+     * @return JsonResponse
+     */
+    public function destroyHardwareSurvey(HardwareSurvey $hardwareSurvey): JsonResponse
+    {
+        $hardwareSurvey->delete();
+        return response()->json(['message' => 'Hardware survey deleted successfully']);
     }
 }
