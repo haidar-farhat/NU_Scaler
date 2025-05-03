@@ -2,27 +2,26 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Events\FeedbackSubmitted;
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
+use App\Http\Requests\BugReportRequest;
+use App\Http\Requests\HardwareSurveyRequest;
+use App\Http\Requests\ReviewRequest;
+use App\Models\BugReport;
+use App\Models\HardwareSurvey;
 use App\Models\Review;
+use Illuminate\Http\JsonResponse;
 
 class FeedbackController extends Controller
 {
     /**
      * Store a new review.
      *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\JsonResponse
+     * @param ReviewRequest $request
+     * @return JsonResponse
      */
-    public function storeReview(Request $request)
+    public function storeReview(ReviewRequest $request): JsonResponse
     {
-        $request->validate([
-            'rating' => 'required|integer|min:1|max:5',
-            'comment' => 'required|string|max:1000',
-            'name' => 'nullable|string|max:255',
-            'email' => 'nullable|email|max:255',
-        ]);
-
         // Create a new review
         $review = Review::create([
             'rating' => $request->rating,
@@ -31,6 +30,9 @@ class FeedbackController extends Controller
             'email' => $request->email,
             'user_uuid' => $request->user() ? $request->user()->uuid : null,
         ]);
+
+        // Dispatch the event
+        event(new FeedbackSubmitted($review, 'review'));
 
         return response()->json([
             'message' => 'Review submitted successfully',
@@ -41,57 +43,55 @@ class FeedbackController extends Controller
     /**
      * Store a new bug report.
      *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\JsonResponse
+     * @param BugReportRequest $request
+     * @return JsonResponse
      */
-    public function storeBugReport(Request $request)
+    public function storeBugReport(BugReportRequest $request): JsonResponse
     {
-        $request->validate([
-            'description' => 'required|string|max:2000',
-            'severity' => 'required|string|in:low,medium,high,critical',
-            'system_info' => 'required|array',
+        // Create a new bug report
+        $bugReport = BugReport::create([
+            'description' => $request->description,
+            'category' => $request->category,
+            'severity' => $request->severity,
+            'steps_to_reproduce' => $request->steps_to_reproduce,
+            'system_info' => $request->system_info,
+            'user_uuid' => $request->user() ? $request->user()->uuid : null,
         ]);
 
-        // TODO: Implement actual bug report storage
+        // Dispatch the event
+        event(new FeedbackSubmitted($bugReport, 'bug-report'));
 
         return response()->json([
             'message' => 'Bug report submitted successfully',
-            'bug_report' => [
-                'id' => 1, // This would be the actual ID in a real implementation
-                'description' => $request->description,
-                'severity' => $request->severity,
-            ],
+            'data' => $bugReport,
         ], 201);
     }
 
     /**
      * Store a new hardware survey.
      *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\JsonResponse
+     * @param HardwareSurveyRequest $request
+     * @return JsonResponse
      */
-    public function storeHardwareSurvey(Request $request)
+    public function storeHardwareSurvey(HardwareSurveyRequest $request): JsonResponse
     {
-        $request->validate([
-            'cpu' => 'required|string|max:255',
-            'gpu' => 'required|string|max:255',
-            'ram_gb' => 'required|integer|min:1',
-            'os' => 'required|string|max:255',
-            'resolution' => 'required|string|max:50',
+        // Create a new hardware survey
+        $hardwareSurvey = HardwareSurvey::create([
+            'cpu_model' => $request->cpu_model,
+            'gpu_model' => $request->gpu_model,
+            'ram_size' => $request->ram_size,
+            'os' => $request->os,
+            'resolution' => $request->resolution,
+            'monitor_refresh_rate' => $request->monitor_refresh_rate,
+            'user_uuid' => $request->user() ? $request->user()->uuid : null,
         ]);
 
-        // TODO: Implement actual hardware survey storage
+        // Dispatch the event
+        event(new FeedbackSubmitted($hardwareSurvey, 'hardware-survey'));
 
         return response()->json([
             'message' => 'Hardware survey submitted successfully',
-            'hardware_survey' => [
-                'id' => 1, // This would be the actual ID in a real implementation
-                'cpu' => $request->cpu,
-                'gpu' => $request->gpu,
-                'ram_gb' => $request->ram_gb,
-                'os' => $request->os,
-                'resolution' => $request->resolution,
-            ],
+            'data' => $hardwareSurvey,
         ], 201);
     }
 }
