@@ -27,7 +27,12 @@ Route::prefix('v1')->group(function () {
     Route::post('/login', [AuthController::class, 'login'])->name('api.v1.login');
     Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum')->name('api.v1.logout');
 
-    // Feedback Submission - Updated to match test expectations
+    // Feedback Submission - Public with caching for analytics
+    Route::middleware('cache.response:300')->group(function () {
+        Route::get('/feedback/stats', [FeedbackController::class, 'publicStats'])->name('api.v1.feedback.stats');
+    });
+
+    // Feedback submission endpoints - Not cached because they're POST requests
     Route::post('/feedback/reviews', [FeedbackController::class, 'storeReview'])->name('api.v1.feedback.reviews.store');
     Route::post('/feedback/bug-reports', [FeedbackController::class, 'storeBugReport'])->name('api.v1.feedback.bug-reports.store');
     Route::post('/feedback/hardware-surveys', [FeedbackController::class, 'storeHardwareSurvey'])->name('api.v1.feedback.hardware-surveys.store');

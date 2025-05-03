@@ -86,5 +86,6 @@ class Kernel extends HttpKernel
         'csp' => \App\Http\Middleware\ContentSecurityPolicy::class, // Content Security Policy middleware
         'accept.json' => \App\Http\Middleware\PreventRequestsWithoutAcceptJson::class, // Accept JSON middleware
         'api.throttle' => \App\Http\Middleware\ApiRequestThrottle::class, // Advanced API request throttling
+        'cache.response' => \App\Http\Middleware\CacheResponse::class, // API response caching
     ];
 }
