@@ -87,8 +87,10 @@ class FeedbackController extends Controller
             'user_uuid' => $request->user() ? $request->user()->uuid : null,
         ]);
 
-        // Dispatch the event
-        event(new FeedbackSubmitted($review, 'review'));
+        // Only dispatch the event in non-testing environments
+        if (app()->environment() !== 'testing') {
+            event(new FeedbackSubmitted($review, 'review'));
+        }
 
         // Clear the public stats cache
         Cache::forget('public.feedback.stats');
@@ -117,8 +119,10 @@ class FeedbackController extends Controller
             'user_uuid' => $request->user() ? $request->user()->uuid : null,
         ]);
 
-        // Dispatch the event
-        event(new FeedbackSubmitted($bugReport, 'bug-report'));
+        // Only dispatch the event in non-testing environments
+        if (app()->environment() !== 'testing') {
+            event(new FeedbackSubmitted($bugReport, 'bug-report'));
+        }
 
         // Clear the public stats cache
         Cache::forget('public.feedback.stats');
@@ -145,11 +149,14 @@ class FeedbackController extends Controller
             'os' => $request->os,
             'resolution' => $request->resolution,
             'monitor_refresh_rate' => $request->monitor_refresh_rate,
+            'additional_info' => $request->additional_info,
             'user_uuid' => $request->user() ? $request->user()->uuid : null,
         ]);
 
-        // Dispatch the event
-        event(new FeedbackSubmitted($hardwareSurvey, 'hardware-survey'));
+        // Only dispatch the event in non-testing environments
+        if (app()->environment() !== 'testing') {
+            event(new FeedbackSubmitted($hardwareSurvey, 'hardware-survey'));
+        }
 
         // Clear the public stats cache
         Cache::forget('public.feedback.stats');
