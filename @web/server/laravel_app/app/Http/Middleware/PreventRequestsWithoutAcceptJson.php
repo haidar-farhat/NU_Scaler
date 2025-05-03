@@ -9,20 +9,18 @@ use Symfony\Component\HttpFoundation\Response;
 class PreventRequestsWithoutAcceptJson
 {
     /**
-     * Ensure that all requests to the API include the Accept: application/json header.
+     * Handle an incoming request.
      *
      * @param  \Illuminate\Http\Request  $request
      * @param  \Closure  $next
-     * @return \Symfony\Component\HttpFoundation\Response
+     * @return mixed
      */
-    public function handle(Request $request, Closure $next): Response
+    public function handle(Request $request, Closure $next)
     {
         if (!$request->expectsJson()) {
             return response()->json([
-                'message' => 'API requests must include Accept: application/json header',
-                'status' => 'error',
-                'code' => 406,
-            ], 406);
+                'message' => 'API expects Accept: application/json header'
+            ], Response::HTTP_NOT_ACCEPTABLE);
         }
 
         return $next($request);
