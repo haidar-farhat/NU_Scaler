@@ -85,5 +85,6 @@ class Kernel extends HttpKernel
         'api.token' => \App\Http\Middleware\ValidateApiToken::class, // API token validation middleware
         'csp' => \App\Http\Middleware\ContentSecurityPolicy::class, // Content Security Policy middleware
         'accept.json' => \App\Http\Middleware\PreventRequestsWithoutAcceptJson::class, // Accept JSON middleware
+        'api.throttle' => \App\Http\Middleware\ApiRequestThrottle::class, // Advanced API request throttling
     ];
 }

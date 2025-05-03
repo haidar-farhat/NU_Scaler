@@ -43,7 +43,28 @@ class RouteServiceProvider extends ServiceProvider
     {
         // Default API limiter (applied via 'api' middleware group in Kernel)
         RateLimiter::for('api', function (Request $request) {
-            return Limit::perMinute(60)->by($request->user()?->id ?: $request->ip());
+            // Use authenticated user for rate limiting when available
+            $user = $request->user();
+
+            // Rate limits based on API version and user type
+            if ($request->is('api/v1/*')) {
+                // V1 API has higher limits
+                return $user && $user->is_admin
+                    ? Limit::perMinute(120)
+                    : Limit::perMinute(60)->by($user?->id ?: $request->ip());
+            }
+
+            // Admin API endpoints
+            if ($request->is('api/admin/*')) {
+                return $user && $user->is_admin
+                    ? Limit::perMinute(500)
+                    : Limit::perMinute(5)->by($request->ip());
+            }
+
+            // General API throttling (default)
+            return $user
+                ? Limit::perMinute(60)->by($user->id)
+                : Limit::perMinute(30)->by($request->ip());
         });
 
         // Stricter limiter for registration attempts
