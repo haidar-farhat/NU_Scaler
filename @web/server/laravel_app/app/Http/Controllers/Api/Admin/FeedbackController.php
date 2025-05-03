@@ -21,9 +21,14 @@ class FeedbackController extends Controller
      */
     public function listReviews(Request $request): AnonymousResourceCollection
     {
-        $perPage = $request->query('per_page', 15); // Default 15 items per page
-        $reviews = Review::latest()->paginate($perPage);
-        return ReviewResource::collection($reviews);
+        $perPage = $request->query('per_page', 15);
+        $filters = $request->query(); // Get all query parameters for filtering
+
+        $reviews = Review::latest()
+                         ->filter($filters) // Apply filters from model scope
+                         ->paginate($perPage);
+
+        return ReviewResource::collection($reviews->withQueryString()); // Append query string to pagination links
     }
 
     /**
@@ -32,8 +37,13 @@ class FeedbackController extends Controller
     public function listBugReports(Request $request): AnonymousResourceCollection
     {
         $perPage = $request->query('per_page', 15);
-        $bugReports = BugReport::latest()->paginate($perPage);
-        return BugReportResource::collection($bugReports);
+        $filters = $request->only(['severity']); // Only allow filtering by severity for now
+
+        $bugReports = BugReport::latest()
+                             ->filter($filters)
+                             ->paginate($perPage);
+
+        return BugReportResource::collection($bugReports->withQueryString());
     }
 
     /**
@@ -42,8 +52,13 @@ class FeedbackController extends Controller
     public function listHardwareSurveys(Request $request): AnonymousResourceCollection
     {
         $perPage = $request->query('per_page', 15);
-        $surveys = HardwareSurvey::latest()->paginate($perPage);
-        return HardwareSurveyResource::collection($surveys);
+        $filters = $request->only(['gpu', 'os']); // Allow filtering by gpu and os
+
+        $surveys = HardwareSurvey::latest()
+                               ->filter($filters)
+                               ->paginate($perPage);
+
+        return HardwareSurveyResource::collection($surveys->withQueryString());
     }
 
     // Note: Default store, show, update, destroy methods from --api are not needed here
