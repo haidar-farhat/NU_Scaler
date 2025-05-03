@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\V1\BugReportController;
 use App\Http\Controllers\Api\V1\HardwareSurveyController;
 use App\Http\Controllers\Api\V1\ReviewController;
+use App\Http\Controllers\Api\V1\Auth\RegisterController;
 use App\Http\Controllers\Api\Admin\FeedbackController;
 use App\Http\Controllers\Api\Admin\AuthController;
 use App\Http\Controllers\Api\Admin\MetricsController;
@@ -22,6 +23,13 @@ use Illuminate\Support\Facades\Route;
 
 Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     return $request->user();
+});
+
+// Public User Authentication (Version 1)
+Route::prefix('v1/auth')->name('api.v1.auth.')->group(function () {
+    Route::post('register', [RegisterController::class, 'register'])->name('register');
+    // Add login route for regular users if needed, separate from admin login
+    // Route::post('login', [LoginController::class, 'login'])->name('login');
 });
 
 // Public Feedback API Endpoints (Version 1)
@@ -53,11 +61,10 @@ Route::prefix('admin')->name('api.admin.')->group(function () {
     });
 });
 
-// Public Feedback Submission - Keep existing or add new ones if needed
-Route::post('/feedback/review', [App\Http\Controllers\Api\FeedbackController::class, 'submitReview'])->name('api.feedback.review');
-Route::post('/feedback/bug-report', [App\Http\Controllers\Api\FeedbackController::class, 'submitBugReport'])->name('api.feedback.bug_report');
-Route::post('/feedback/hardware-survey', [App\Http\Controllers\Api\FeedbackController::class, 'submitHardwareSurvey'])->name('api.feedback.hardware_survey');
+// TODO: Remove older public feedback routes if v1 replaces them?
+// Route::post('/feedback/review', [App\Http\Controllers\Api\FeedbackController::class, 'submitReview'])->name('api.feedback.review');
+// Route::post('/feedback/bug-report', [App\Http\Controllers\Api\FeedbackController::class, 'submitBugReport'])->name('api.feedback.bug_report');
+// Route::post('/feedback/hardware-survey', [App\Http\Controllers\Api\FeedbackController::class, 'submitHardwareSurvey'])->name('api.feedback.hardware_survey');
 
-// TODO: Add Auth routes (register, login)
 // TODO: Add Download routes
-// TODO: Add Admin routes 
+// TODO: Add Admin routes
