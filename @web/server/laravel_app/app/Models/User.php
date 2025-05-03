@@ -22,7 +22,7 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
-        'role',
+        // 'role', // Removed role, using is_admin boolean instead
     ];
 
     /**
