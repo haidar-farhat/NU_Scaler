@@ -22,18 +22,17 @@ use App\Http\Controllers\Api\Admin\AdminAuthController; // Assuming separate adm
 
 // Public Routes (V1 - Assuming versioning)
 Route::prefix('v1')->group(function () {
-    // Authentication
-    Route::post('/register', [AuthController::class, 'register'])->name('api.v1.register');
-    // Assuming a standard login route exists, though not explicitly in failing tests
+    // Authentication - Updated to match test expectations
+    Route::post('/auth/register', [AuthController::class, 'register'])->name('api.v1.register');
     Route::post('/login', [AuthController::class, 'login'])->name('api.v1.login');
-    Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum')->name('api.v1.logout'); // Needs auth
+    Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum')->name('api.v1.logout');
 
     // Feedback Submission - Updated to match test expectations
     Route::post('/feedback/reviews', [FeedbackController::class, 'storeReview'])->name('api.v1.feedback.reviews.store');
     Route::post('/feedback/bug-reports', [FeedbackController::class, 'storeBugReport'])->name('api.v1.feedback.bug-reports.store');
     Route::post('/feedback/hardware-surveys', [FeedbackController::class, 'storeHardwareSurvey'])->name('api.v1.feedback.hardware-surveys.store');
 
-    // Download Info (Protected by auth) - Updated to match test expectations
+    // Download Info (Protected by auth)
     Route::get('/download', [DownloadController::class, 'getDownloadLink'])->middleware('auth:sanctum')->name('api.v1.download');
 
     // Route to get authenticated user info
