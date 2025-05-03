@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
+use App\Http\Requests\Api\V1\StoreHardwareSurveyRequest;
+use App\Models\HardwareSurvey;
+use Illuminate\Http\JsonResponse;
 
 class HardwareSurveyController extends Controller
 {
@@ -16,11 +18,21 @@ class HardwareSurveyController extends Controller
     }
 
     /**
-     * Store a newly created resource in storage.
+     * Store a newly created hardware survey in storage.
+     *
+     * @param StoreHardwareSurveyRequest $request
+     * @return JsonResponse
      */
-    public function store(Request $request)
+    public function store(StoreHardwareSurveyRequest $request): JsonResponse
     {
-        //
+        $validatedData = $request->validated();
+
+        $hardwareSurvey = HardwareSurvey::create($validatedData);
+
+        return response()->json([
+            'message' => 'Hardware survey submitted successfully.',
+            'data' => $hardwareSurvey
+        ], 201);
     }
 
     /**

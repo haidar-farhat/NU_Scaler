@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
+use App\Http\Requests\Api\V1\StoreReviewRequest;
+use App\Models\Review;
+use Illuminate\Http\JsonResponse;
 
 class ReviewController extends Controller
 {
@@ -16,11 +18,25 @@ class ReviewController extends Controller
     }
 
     /**
-     * Store a newly created resource in storage.
+     * Store a newly created review in storage.
+     *
+     * @param StoreReviewRequest $request
+     * @return JsonResponse
      */
-    public function store(Request $request)
+    public function store(StoreReviewRequest $request): JsonResponse
     {
-        //
+        // Validation handled by StoreReviewRequest
+        $validatedData = $request->validated();
+
+        // Create the review
+        $review = Review::create($validatedData);
+
+        // Return a success response (201 Created)
+        // Optionally return the created resource
+        return response()->json([
+            'message' => 'Review submitted successfully.',
+            'data' => $review // Or just ['id' => $review->id]
+        ], 201);
     }
 
     /**
