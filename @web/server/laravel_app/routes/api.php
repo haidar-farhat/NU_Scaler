@@ -43,12 +43,12 @@ Route::prefix('v1')->group(function () {
 
 // Admin Routes
 // Prefixing with 'admin' - Note: The final URL will be /api/admin/...
-Route::prefix('admin')->name('api.admin.')->middleware(['auth:sanctum', 'admin']) // Assuming 'admin' middleware checks role
+Route::prefix('admin')->name('api.admin.')->middleware(['auth:sanctum', 'is_admin']) // Corrected middleware alias to 'is_admin'
     ->group(function () {
         // Admin Auth (Login might be separate or handled differently)
         // The test hits /login/admin - let's map it, assuming a dedicated controller/method
         // Note: The login route itself shouldn't typically require auth middleware
-        Route::post('/login', [AdminAuthController::class, 'login'])->name('login')->withoutMiddleware(['auth:sanctum', 'admin']);
+        Route::post('/login', [AdminAuthController::class, 'login'])->name('login')->withoutMiddleware(['auth:sanctum', 'is_admin']);
 
         // Feedback Management
         Route::get('/reviews', [AdminFeedbackController::class, 'index'])->name('reviews.index');
