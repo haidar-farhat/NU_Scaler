@@ -80,6 +80,15 @@ return [
             'level' => 'info', // Log info level and above
             'replace_placeholders' => true,
         ],
+        
+        // Custom channel for API request logging
+        'api' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/api.log'),
+            'level' => env('API_LOG_LEVEL', 'info'),
+            'days' => 30,
+            'replace_placeholders' => true,
+        ],
 
         'slack' => [
             'driver' => 'slack',
