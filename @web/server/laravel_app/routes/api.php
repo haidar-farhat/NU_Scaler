@@ -41,6 +41,13 @@ Route::prefix('v1')->group(function () {
     })->name('api.v1.user');
 });
 
+// Authenticated User Actions (Version 1)
+Route::prefix('v1')->middleware('api.secured')->name('api.v1.')->group(function () {
+    Route::get('download', [DownloadController::class, 'getDownloadLink'])
+         ->middleware('api.rate.limit:downloads')
+         ->name('download');
+    // Add other authenticated user routes here (e.g., profile management)
+});
 
 // Admin Routes - Using full middleware class reference to avoid alias issues
 Route::prefix('admin')->name('api.admin.')
@@ -59,6 +66,14 @@ Route::prefix('admin')->name('api.admin.')
 
         // Metrics
         Route::get('/metrics/reviews-distribution', [AdminMetricsController::class, 'reviewsDistribution'])->name('metrics.reviews');
+    });
+
+// Protected Admin Routes
+Route::middleware(['auth:sanctum', 'is_admin', 'api.rate.limit:admin'])->group(function () {
+    // Replace with the following for enhanced security:
+    // Route::middleware(['api.secured', 'is_admin', 'api.rate.limit:admin'])->group(function () {
+
+    // Admin Routes....
 });
 
 // Fallback route for unmatched API requests (optional but good practice)
