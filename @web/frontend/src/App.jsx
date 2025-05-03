@@ -1,35 +1,64 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import React, { Suspense, lazy } from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+
+// Layout component (optional, for shared structure like header/footer)
+// import Layout from './components/Layout'; 
+
+// Eagerly load common pages
+import LandingPage from './pages/LandingPage';
+import LoginPage from './auth/LoginPage';
+import RegisterPage from './auth/RegisterPage';
+import DownloadPage from './pages/DownloadPage';
+import ProtectedRoute from './auth/ProtectedRoute';
+
+// Lazy load less common or heavier pages (like admin)
+const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'));
+
+// Simple loading spinner component (you can replace with a fancier one)
+const LoadingSpinner = () => (
+  <div className="min-h-screen flex items-center justify-center">
+    <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-indigo-600"></div>
+  </div>
+);
 
 function App() {
-  const [count, setCount] = useState(0)
-
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.jsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+    <BrowserRouter>
+      {/* <Layout> You could wrap Routes in a Layout component */}
+      <Suspense fallback={<LoadingSpinner />}>
+        <Routes>
+          {/* Public Routes */}
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+
+          {/* Protected Routes */}
+          <Route 
+            path="/download" 
+            element={
+              <ProtectedRoute>
+                <DownloadPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route 
+            path="/admin" 
+            element={
+              <ProtectedRoute role="admin">
+                <AdminDashboard />
+              </ProtectedRoute>
+            }
+          />
+          
+          {/* Add other routes here */}
+
+          {/* Optional: 404 Not Found Route */}
+          {/* <Route path="*" element={<NotFoundPage />} /> */}
+        </Routes>
+      </Suspense>
+      {/* </Layout> */}
+    </BrowserRouter>
+  );
 }
 
-export default App
+export default App;
