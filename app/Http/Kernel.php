@@ -42,6 +42,7 @@ class Kernel extends HttpKernel
             // \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class, // Use this for SPA auth if needed
             'throttle:api',
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
+            \App\Http\Middleware\SecureApiHeaders::class,
         ],
     ];
 
@@ -66,5 +67,6 @@ class Kernel extends HttpKernel
         'verified' => \Illuminate\Auth\Middleware\EnsureEmailIsVerified::class,
         'is_admin' => \App\Http\Middleware\IsAdmin::class, // Added admin check middleware
         'api.rate.limit' => \App\Http\Middleware\ApiRateLimiter::class, // Custom API rate limiter
+        'secure.headers' => \App\Http\Middleware\SecureApiHeaders::class, // Security headers middleware
     ];
 } 
