@@ -126,7 +126,7 @@ class HardwareSurveyApiTest extends TestCase
     public function test_admin_can_view_all_hardware_surveys(): void
     {
         // Create an admin user
-        $admin = User::factory()->create(['role' => 'admin']);
+        $admin = User::factory()->create(['is_admin' => true]);
         Sanctum::actingAs($admin);
 
         // Create some hardware surveys
@@ -151,7 +151,7 @@ class HardwareSurveyApiTest extends TestCase
     public function test_non_admin_cannot_access_admin_hardware_surveys(): void
     {
         // Create a regular user
-        $user = User::factory()->create(['role' => 'user']);
+        $user = User::factory()->create(['is_admin' => false]);
         Sanctum::actingAs($user);
 
         // Create some hardware surveys
