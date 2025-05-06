@@ -16,6 +16,7 @@ class HardwareSurvey extends Model
      * @var array<int, string>
      */
     protected $fillable = [
+        'user_id',
         'cpu_model',
         'gpu_model',
         'ram_size',
