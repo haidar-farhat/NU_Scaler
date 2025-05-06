@@ -54,7 +54,7 @@ def test_upscaling(input_width=320, input_height=240, scale_factor=2.0):
     # Initialize upscaler with dimensions
     print(f"Configuring upscaler: {input_width}x{input_height} → {output_width}x{output_height}")
     upscaler.initialize(input_width, input_height, output_width, output_height)
-    upscaler.set_upscale_scale(scale_factor)
+    print(f"Current upscale scale: {upscaler.get_upscale_scale()}")
     
     # Convert numpy array to bytes
     input_bytes = input_img.tobytes()
