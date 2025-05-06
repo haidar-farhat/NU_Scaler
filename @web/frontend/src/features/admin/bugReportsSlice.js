@@ -1,9 +1,8 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
-import api from '../../api/axios';
+import { fetchAdminData } from './baseAdminSlice';
 
 export const fetchBugReports = createAsyncThunk('bugReports/fetch', async (params = {}) => {
-  const res = await api.get('/admin/bug-reports', { params });
-  return res.data;
+  return await fetchAdminData('bug-reports', params);
 });
 
 const bugReportsSlice = createSlice({
