@@ -46,7 +46,11 @@ const adminUsersSlice = createSlice({
       })
       .addCase(fetchUsers.fulfilled, (state, action) => {
         state.loading = false;
-        state.users = action.payload.data || action.payload;
+        if (action.payload && action.payload.data) {
+          state.users = action.payload.data;
+        } else {
+          state.users = action.payload || [];
+        }
       })
       .addCase(fetchUsers.rejected, (state, action) => {
         state.loading = false;
