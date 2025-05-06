@@ -324,31 +324,9 @@ impl WgpuUpscaler {
         false
     }
     
-    /// Get the device reference
-    fn device(&self) -> Option<&Device> {
-        if let Some(resources) = &self.gpu_resources {
-            Some(&resources.device)
-        } else {
-            self.device.as_ref()
-        }
-    }
-    
-    /// Get the queue reference
-    fn queue(&self) -> Option<&Queue> {
-        if let Some(resources) = &self.gpu_resources {
-            Some(&resources.queue)
-        } else {
-            self.queue.as_ref()
-        }
-    }
-    
-    pub fn set_thread_count(&mut self, n: u32) {
-        self.thread_count = n;
-        println!("[WgpuUpscaler] Set thread count: {}", n);
-        // Configure Rayon thread pool if needed
-        if n > 1 {
-            let _ = rayon::ThreadPoolBuilder::new().num_threads(n as usize).build_global();
-        }
+    /// Get a clone of the device, if available
+    fn get_device_clone(&self) -> Option<Arc<Device>> {
+        self.device.as_ref().map(|d| d.clone())
     }
     
     pub fn set_buffer_pool_size(&mut self, n: u32) {
@@ -362,9 +340,8 @@ impl WgpuUpscaler {
         }
 
         // First get the device if available
-        let device_opt = self.device();
-        let device = match device_opt {
-            Some(d) => d.clone(),
+        let device = match self.get_device_clone() {
+            Some(d) => d,
             None => return,
         };
         
@@ -454,9 +431,8 @@ impl WgpuUpscaler {
                 let n = self.buffer_pool_size.max(8);
                 
                 // First get the device if available
-                let device_opt = self.device();
-                let device = match device_opt {
-                    Some(d) => d.clone(),
+                let device = match self.get_device_clone() {
+                    Some(d) => d,
                     None => return,
                 };
                 
