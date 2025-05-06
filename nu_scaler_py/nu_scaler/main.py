@@ -197,15 +197,21 @@ class LiveFeedScreen(QWidget):
         self.window_box.clear()
         if nu_scaler_core is not None:
             try:
-                windows = nu_scaler_core.PyScreenCapture.list_windows()
-                print(f"[GUI] Received windows: {windows}")
-                if windows:
-                    self.window_box.addItems(windows)
+                # Make sure we have a PyScreenCapture class
+                if hasattr(nu_scaler_core, 'PyScreenCapture') and hasattr(nu_scaler_core.PyScreenCapture, 'list_windows'):
+                    windows = nu_scaler_core.PyScreenCapture.list_windows()
+                    print(f"[GUI] Received windows: {windows}")
+                    if windows:
+                        self.window_box.addItems(windows)
+                    else:
+                        self.window_box.addItem("No windows found")
                 else:
-                    self.window_box.addItem("No windows found")
+                    print("[GUI] PyScreenCapture.list_windows method not available")
+                    self.window_box.addItem("API method missing")
             except Exception as e:
                 print(f"[GUI] Error listing windows: {e}")
-                self.window_box.addItem("Error listing windows")
+                traceback.print_exc()
+                self.window_box.addItem(f"Error: {str(e)[:30]}...")
         else:
             print("[GUI] Rust core not available for listing windows.")
             self.window_box.addItem("Rust core missing")
