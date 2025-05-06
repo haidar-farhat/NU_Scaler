@@ -85,6 +85,11 @@ class LiveFeedScreen(QWidget):
         # Upscaling controls
         upscale_controls = QGroupBox("Upscaling Settings")
         upscale_form = QFormLayout(upscale_controls)
+        
+        # Add technology selector
+        self.technology_box = QComboBox()
+        self.technology_box.addItems(["Auto (Best for GPU)", "FSR 3.0", "DLSS", "Basic"])
+        
         self.quality_box = QComboBox()
         self.quality_box.addItems(["ultra", "quality", "balanced", "performance"])
         self.algorithm_box = QComboBox()
@@ -94,10 +99,17 @@ class LiveFeedScreen(QWidget):
         self.scale_slider.setValue(20)
         self.scale_slider.valueChanged.connect(self.update_scale_label)
         self.scale_label = QLabel("2.0×")
+        
+        # Technology selector is first option
+        upscale_form.addRow("Technology:", self.technology_box)
         upscale_form.addRow("Quality:", self.quality_box)
         upscale_form.addRow("Algorithm:", self.algorithm_box)
         upscale_form.addRow("Scale Factor:", self.scale_slider)
         upscale_form.addRow("", self.scale_label)
+        
+        # Connect technology selector to handle enabling/disabling appropriate options
+        self.technology_box.currentTextChanged.connect(self.update_technology_ui)
+        
         right_layout.addWidget(upscale_controls)
         right_layout.addStretch()
         # Status bar
@@ -205,21 +217,68 @@ class LiveFeedScreen(QWidget):
         self.stop_btn.setEnabled(False)
         self.status_bar.setText("Capture stopped")
 
+    def update_technology_ui(self, technology):
+        """Update UI based on selected upscaling technology"""
+        if technology == "FSR 3.0":
+            # FSR works with all quality settings, but algorithm is fixed
+            self.quality_box.setEnabled(True)
+            self.algorithm_box.setEnabled(False)
+            self.algorithm_box.setCurrentText("bilinear")  # FSR uses its own internal algorithm
+        elif technology == "DLSS":
+            # DLSS uses quality settings but algorithm is fixed
+            self.quality_box.setEnabled(True)
+            self.algorithm_box.setEnabled(False)
+            self.algorithm_box.setCurrentText("bilinear")  # DLSS uses its own internal algorithm
+        elif technology == "Basic":
+            # Basic allows choosing the algorithm
+            self.quality_box.setEnabled(True)
+            self.algorithm_box.setEnabled(True)
+        else:  # Auto (Best for GPU)
+            # Auto mode - quality enabled, algorithm disabled
+            self.quality_box.setEnabled(True)
+            self.algorithm_box.setEnabled(False)
+            
     def init_upscaler(self, in_w, in_h, scale):
-        quality = self.quality_box.currentText()
-        algorithm = self.algorithm_box.currentText()
-        out_w = int(in_w * scale)
-        out_h = int(in_h * scale)
+        if nu_scaler_core is None:
+            print("[GUI] Rust core not available for upscaler.")
+            self.status_bar.setText("Rust core missing")
+            return False
+            
         try:
-            self.upscaler = nu_scaler_core.PyWgpuUpscaler(quality, algorithm)
+            # Get scale settings from UI
+            out_w = int(in_w * scale)
+            out_h = int(in_h * scale)
+            quality = self.quality_box.currentText()
+            algorithm = self.algorithm_box.currentText()
+            technology = self.technology_box.currentText()
+            
+            # Use appropriate upscaler based on technology selection
+            if technology == "Auto (Best for GPU)":
+                # Use core's automatic detection for best technology
+                self.upscaler = nu_scaler_core.create_best_upscaler(quality)
+                print(f"[GUI] Created auto-detected best upscaler: {quality}")
+            elif technology == "FSR 3.0":
+                # Use FSR technology
+                self.upscaler = nu_scaler_core.create_fsr_upscaler(quality)
+                print(f"[GUI] Created FSR 3.0 upscaler: {quality}")
+            elif technology == "DLSS":
+                # Use DLSS technology
+                self.upscaler = nu_scaler_core.create_dlss_upscaler(quality)
+                print(f"[GUI] Created DLSS upscaler: {quality}")
+            else:
+                # Use basic WGPU upscaler with specified algorithm
+                self.upscaler = nu_scaler_core.PyWgpuUpscaler(quality, algorithm)
+                print(f"[GUI] Created basic upscaler: {quality}, {algorithm}")
+                
+            # Initialize the upscaler with dimensions
             self.upscaler.initialize(in_w, in_h, out_w, out_h)
-            self.upscale_scale = scale
             self.upscaler_initialized = True
-            self.log_signal.emit(f"Upscaler initialized: {in_w}x{in_h} -> {out_w}x{out_h} ({quality}, {algorithm})")
+            print(f"[GUI] Upscaler initialized: {in_w}x{in_h} -> {out_w}x{out_h}")
             return True
         except Exception as e:
-            self.log_signal.emit(f"Upscaler init error: {e}")
-            self.stop_capture()
+            print(f"[GUI] Error initializing upscaler: {e}")
+            self.status_bar.setText(f"Error initializing upscaler: {e}")
+            self.log_signal.emit(f"Error initializing upscaler: {e}")
             return False
 
     def update_frame(self):
