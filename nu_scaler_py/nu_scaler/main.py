@@ -88,7 +88,7 @@ class LiveFeedScreen(QWidget):
         self.capture = None
         self.upscaler = None
         self.timer = QTimer(self)
-        self.timer.setInterval(33)  # ~30 FPS
+        self.timer.setInterval(100)  # Lowered to 10 FPS for diagnosis
         self.timer.timeout.connect(self.update_frame)
         self.last_frame_time = None
         self.last_timer_time = None
@@ -104,6 +104,9 @@ class LiveFeedScreen(QWidget):
         self.show_memory_stats = True
         self._upscale_thread = None
         self._upscale_worker = None
+        self._last_in_w = None
+        self._last_in_h = None
+        self._last_scale = None
         print('[DEBUG] LiveFeedScreen: Before init_ui')
         self.init_ui()
         print('[DEBUG] LiveFeedScreen: After init_ui')
@@ -120,9 +123,29 @@ class LiveFeedScreen(QWidget):
         self.heartbeat_timer.start()
         # Resource monitor timer
         self.resource_timer = QTimer(self)
-        self.resource_timer.setInterval(5000)
+        self.resource_timer.setInterval(1000)
         self.resource_timer.timeout.connect(self._resource_debug)
         self.resource_timer.start()
+        # Start watchdog thread
+        self._watchdog_running = True
+        self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True)
+        self._watchdog_thread.start()
+
+    def _watchdog_loop(self):
+        while self._watchdog_running:
+            try:
+                print(f"[WATCHDOG] Still alive at {time.strftime('%H:%M:%S')}")
+                process = psutil.Process(os.getpid())
+                mem = process.memory_info().rss / (1024 * 1024)
+                thread_count = threading.active_count()
+                print(f"[WATCHDOG] Memory: {mem:.1f} MB | Threads: {thread_count}")
+            except Exception as e:
+                print(f"[WATCHDOG] Error: {e}")
+            time.sleep(1)
+
+    def closeEvent(self, event):
+        self._watchdog_running = False
+        super().closeEvent(event)
 
     def _heartbeat(self):
         print(f"[HEARTBEAT] GUI event loop alive at {time.strftime('%H:%M:%S')}")
@@ -472,15 +495,7 @@ class LiveFeedScreen(QWidget):
 
     def update_frame(self):
         try:
-            now = time.perf_counter()
-            if self.last_timer_time is not None:
-                print(f"[DEBUG] Timer interval: {(now - self.last_timer_time)*1000:.2f} ms")
-            self.last_timer_time = now
             if not self.capture:
-                return
-            # Only start a new upscale if no thread is running
-            if getattr(self, '_upscale_thread', None) is not None:
-                print('[DEBUG] Skipping frame: upscale worker still running')
                 return
             frame_result = self.capture.get_frame()
             if frame_result is None:
@@ -489,25 +504,30 @@ class LiveFeedScreen(QWidget):
             frame_bytes_obj, in_w, in_h = frame_result
             frame = frame_bytes_obj
 
-            # Initialize upscaler on first frame or if dimensions change
+            # Only re-initialize upscaler if input size or scale changes
+            scale = self.scale_slider.value() / 10.0
+            reinit_needed = False
             if not self.upscaler or not self.upscaler_initialized:
-                scale = self.scale_slider.value() / 10.0
+                print(f"[DEBUG] Upscaler needs init: not initialized yet")
+                reinit_needed = True
+            elif (self._last_in_w != in_w or self._last_in_h != in_h):
+                print(f"[DEBUG] Upscaler needs re-init: input size changed {self._last_in_w}x{self._last_in_h} -> {in_w}x{in_h}")
+                reinit_needed = True
+            elif (self._last_scale != scale):
+                print(f"[DEBUG] Upscaler needs re-init: scale changed {self._last_scale} -> {scale}")
+                reinit_needed = True
+
+            if reinit_needed:
+                self._last_in_w = in_w
+                self._last_in_h = in_h
+                self._last_scale = scale
                 if not self.init_upscaler(in_w, in_h, scale):
                     return # Stop if upscaler failed to init
 
-            # Re-initialize if scale factor changes
-            current_scale = self.scale_slider.value() / 10.0
-            if abs(current_scale - self.upscale_scale) > 0.01:
-                self.upscale_scale = current_scale
-                try:
-                    if hasattr(self.upscaler, 'upscale_scale'):
-                        self.upscaler.upscale_scale = current_scale
-                    out_w = int(in_w * current_scale)
-                    out_h = int(in_h * current_scale)
-                    self.upscaler.initialize(in_w, in_h, out_w, out_h)
-                except Exception as e:
-                    print(f"Error re-initializing upscaler: {e}")
-                    return
+            # Only start a new upscale if no worker is running
+            if self._upscale_thread is not None:
+                print("[DEBUG] Skipping frame: upscale worker still running")
+                return
 
             # Calculate output dimensions
             scale = self.upscale_scale
