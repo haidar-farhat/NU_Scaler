@@ -65,12 +65,11 @@ class UpscaleWorker(QObject):
     @Slot()
     def run(self):
         import time
-        print("[DEBUG] UpscaleWorker: Starting run")
+        print("[DEBUG] UpscaleWorker: Starting run (no initialize)")
         t0 = time.perf_counter()
         try:
-            print("[DEBUG] UpscaleWorker: Before initialize")
-            self.upscaler.initialize(self.in_w, self.in_h, self.out_w, self.out_h)
-            print("[DEBUG] UpscaleWorker: After initialize, before upscale")
+            # Do NOT call self.upscaler.initialize here!
+            print("[DEBUG] UpscaleWorker: Before upscale")
             out_bytes = self.upscaler.upscale(self.frame)
             print("[DEBUG] UpscaleWorker: After upscale")
             t1 = time.perf_counter()
