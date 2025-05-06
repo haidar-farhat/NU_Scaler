@@ -36,9 +36,10 @@ class DownloadController extends Controller
         }
 
         $downloadInfo = [
-            'message' => 'Download initiated successfully.',
-            'installer_url' => 'https://example.com/downloads/nuscaler-latest.exe',
-            'version' => '1.0.0',
+            'message' => 'Download link generated successfully.',
+            'download_url' => 'https://example.com/downloads/nuscaler-latest',
+            'version' => '2.1.0',
+            'expires_at' => now()->addDay()->toIso8601String(),
         ];
 
         return response()->json($downloadInfo);
