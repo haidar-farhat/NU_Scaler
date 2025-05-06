@@ -344,12 +344,13 @@ impl PyAdvancedWgpuUpscaler {
         Ok(())
     }
     
-    /// Get current VRAM statistics
-    pub fn get_vram_stats(&self) -> PyResult<PyVramStats> {
-        if let Some(resources) = &self.gpu_resources {
-            Ok(resources.get_vram_stats().into())
-        } else {
-            Err(pyo3::exceptions::PyRuntimeError::new_err("GPU resources not initialized"))
+    /// Get VRAM stats (total, used, free)
+    pub fn get_vram_stats(&self) -> PyResult<VramStats> {
+        match &self.gpu_resources {
+            Some(res) => Ok(res.get_vram_stats()),
+            None => Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "No GPU resources available"
+            )),
         }
     }
     
