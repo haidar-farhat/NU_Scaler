@@ -292,6 +292,13 @@ impl PyAdvancedWgpuUpscaler {
         let gpu_resources = match pollster::block_on(detector.create_device_queue()) {
             Ok((device, queue)) => {
                 let resources = Arc::new(GpuResources::new(device, queue, primary_gpu));
+                
+                // Force GPU activation on Windows to improve performance
+                #[cfg(target_os = "windows")]
+                if let Err(e) = resources.memory_pool.force_gpu_usage() {
+                    println!("Warning: Failed to force GPU activation: {}", e);
+                }
+                
                 upscaler.set_gpu_resources(resources.clone());
                 Some(resources)
             },
@@ -310,18 +317,100 @@ impl PyAdvancedWgpuUpscaler {
     
     /// Initialize the upscaler with the given dimensions
     pub fn initialize(&mut self, input_width: u32, input_height: u32, output_width: u32, output_height: u32) -> PyResult<()> {
+        // Prime the GPU by pre-allocating a few buffers
+        if let Some(resources) = &self.gpu_resources {
+            // Force buffer allocation for these dimensions to ensure GPU is properly initialized
+            let input_size = (input_width * input_height * 4) as usize;
+            let output_size = (output_width * output_height * 4) as usize;
+            
+            // Use the memory pool to allocate buffers
+            let _input_buffer = resources.memory_pool.get_buffer(
+                input_size,
+                BufferUsages::STORAGE | BufferUsages::COPY_DST,
+                Some("Input Buffer Priming"),
+            );
+            
+            let _output_buffer = resources.memory_pool.get_buffer(
+                output_size,
+                BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+                Some("Output Buffer Priming"),
+            );
+            
+            // Update VRAM usage stats
+            let _ = resources.memory_pool.update_vram_usage();
+        }
+        
         if let Err(e) = self.inner.initialize(input_width, input_height, output_width, output_height) {
             Err(pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to initialize upscaler: {}", e)))
         } else {
             self.upscale_scale = output_width as f32 / input_width as f32;
+            
+            // After initialization, update the memory strategy based on image size
+            if let Some(resources) = &self.gpu_resources {
+                let total_pixels = input_width as usize * input_height as usize;
+                if total_pixels > 4 * 1920 * 1080 {
+                    // For very large images, be more conservative
+                    resources.memory_pool.set_allocation_strategy(AllocationStrategy::Conservative);
+                } else if total_pixels > 1920 * 1080 {
+                    // For medium images, be balanced
+                    resources.memory_pool.set_allocation_strategy(AllocationStrategy::Balanced);
+                } else {
+                    // For small images, be aggressive
+                    resources.memory_pool.set_allocation_strategy(AllocationStrategy::Aggressive);
+                }
+                
+                // Update VRAM usage stats after initialization
+                let _ = resources.memory_pool.update_vram_usage();
+            }
+            
             Ok(())
+        }
+    }
+    
+    /// Force GPU activation to maximize performance
+    pub fn force_gpu_activation(&self) -> PyResult<()> {
+        if let Some(resources) = &self.gpu_resources {
+            #[cfg(target_os = "windows")]
+            if let Err(e) = resources.memory_pool.force_gpu_usage() {
+                return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                    format!("Failed to force GPU activation: {}", e)
+                ));
+            }
+            
+            // Update VRAM usage stats
+            if let Err(e) = resources.memory_pool.update_vram_usage() {
+                return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                    format!("Failed to update VRAM stats: {}", e)
+                ));
+            }
+            
+            Ok(())
+        } else {
+            Err(pyo3::exceptions::PyRuntimeError::new_err("No GPU resources available"))
         }
     }
     
     /// Upscale an image
     pub fn upscale(&self, input: &[u8]) -> PyResult<PyObject> {
+        // Pre-upscale update if needed
+        if let Some(resources) = &self.gpu_resources {
+            // Check memory pressure and adjust if needed
+            let memory_level = resources.memory_pool.get_current_memory_pressure();
+            if memory_level == MemoryPressure::Critical || memory_level == MemoryPressure::High {
+                // For high memory pressure, force cleanup
+                resources.cleanup_memory();
+            }
+        }
+        
+        // Perform upscaling
         match self.inner.upscale(input) {
             Ok(output) => Python::with_gil(|py| {
+                // Post-upscale update
+                if let Some(resources) = &self.gpu_resources {
+                    // Update stats occasionally
+                    let _ = resources.memory_pool.update_vram_usage();
+                }
+                
                 Ok(PyBytes::new(py, &output).into())
             }),
             Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to upscale: {}", e))),
@@ -502,6 +591,11 @@ impl PyAdvancedWgpuUpscaler {
         match &self.gpu_resources {
             Some(res) => {
                 res.cleanup_memory();
+                
+                // Force GPU activation after cleanup to ensure GPU stays active
+                #[cfg(target_os = "windows")]
+                let _ = res.memory_pool.force_gpu_usage();
+                
                 match res.memory_pool.update_vram_usage() {
                     Ok(_) => Ok(()),
                     Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
