@@ -183,13 +183,28 @@ class AdminFeedbackController extends Controller
         $format = $request->query('format', 'csv');
         $reviews = \App\Models\Review::all();
         $filename = 'reviews_' . now()->format('Ymd_His');
+
         if ($format === 'xlsx') {
-            if (class_exists('Maatwebsite\\Excel\\Excel')) {
-                return \Maatwebsite\Excel\Facades\Excel::download(new \App\Exports\GenericExport($reviews), "$filename.xlsx");
-            } else {
-                return response()->json(['message' => 'Excel export not available.'], 400);
+            try {
+                // Create a new Excel export with our legacy adapter
+                $export = new \App\Exports\LegacyExcelExport($reviews);
+
+                // Load Excel
+                $excel = app('excel');
+
+                // Create Excel file
+                return $excel->create($filename, function($excel) use ($export) {
+                    $excel->sheet('Reviews', function($sheet) use ($export) {
+                        $sheet->fromArray($export->getSheetContent());
+                    });
+                })->download('xlsx');
+            } catch (\Exception $e) {
+                // Log the error for debugging
+                \Illuminate\Support\Facades\Log::error('Excel export failed: ' . $e->getMessage());
+                return response()->json(['message' => 'Excel export failed: ' . $e->getMessage()], 500);
             }
         }
+
         // CSV fallback
         $headers = [
             'Content-Type' => 'text/csv',
@@ -215,13 +230,29 @@ class AdminFeedbackController extends Controller
         $format = $request->query('format', 'csv');
         $reports = \App\Models\BugReport::all();
         $filename = 'bug_reports_' . now()->format('Ymd_His');
+
         if ($format === 'xlsx') {
-            if (class_exists('Maatwebsite\\Excel\\Excel')) {
-                return \Maatwebsite\Excel\Facades\Excel::download(new \App\Exports\GenericExport($reports), "$filename.xlsx");
-            } else {
-                return response()->json(['message' => 'Excel export not available.'], 400);
+            try {
+                // Create a new Excel export with our legacy adapter
+                $export = new \App\Exports\LegacyExcelExport($reports);
+
+                // Load Excel
+                $excel = app('excel');
+
+                // Create Excel file
+                return $excel->create($filename, function($excel) use ($export) {
+                    $excel->sheet('Bug Reports', function($sheet) use ($export) {
+                        $sheet->fromArray($export->getSheetContent());
+                    });
+                })->download('xlsx');
+            } catch (\Exception $e) {
+                // Log the error for debugging
+                \Illuminate\Support\Facades\Log::error('Excel export failed: ' . $e->getMessage());
+                return response()->json(['message' => 'Excel export failed: ' . $e->getMessage()], 500);
             }
         }
+
+        // CSV fallback
         $headers = [
             'Content-Type' => 'text/csv',
             'Content-Disposition' => "attachment; filename=$filename.csv",
@@ -246,13 +277,29 @@ class AdminFeedbackController extends Controller
         $format = $request->query('format', 'csv');
         $surveys = \App\Models\HardwareSurvey::all();
         $filename = 'hardware_surveys_' . now()->format('Ymd_His');
+
         if ($format === 'xlsx') {
-            if (class_exists('Maatwebsite\\Excel\\Excel')) {
-                return \Maatwebsite\Excel\Facades\Excel::download(new \App\Exports\GenericExport($surveys), "$filename.xlsx");
-            } else {
-                return response()->json(['message' => 'Excel export not available.'], 400);
+            try {
+                // Create a new Excel export with our legacy adapter
+                $export = new \App\Exports\LegacyExcelExport($surveys);
+
+                // Load Excel
+                $excel = app('excel');
+
+                // Create Excel file
+                return $excel->create($filename, function($excel) use ($export) {
+                    $excel->sheet('Hardware Surveys', function($sheet) use ($export) {
+                        $sheet->fromArray($export->getSheetContent());
+                    });
+                })->download('xlsx');
+            } catch (\Exception $e) {
+                // Log the error for debugging
+                \Illuminate\Support\Facades\Log::error('Excel export failed: ' . $e->getMessage());
+                return response()->json(['message' => 'Excel export failed: ' . $e->getMessage()], 500);
             }
         }
+
+        // CSV fallback
         $headers = [
             'Content-Type' => 'text/csv',
             'Content-Disposition' => "attachment; filename=$filename.csv",
