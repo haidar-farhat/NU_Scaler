@@ -444,6 +444,74 @@ impl PyAdvancedWgpuUpscaler {
             Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to set quality: {}", e))),
         }
     }
+    
+    /// Force update GPU memory usage
+    pub fn update_gpu_stats(&self) -> PyResult<()> {
+        match &self.gpu_resources {
+            Some(res) => {
+                match res.memory_pool.update_vram_usage() {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                        "Failed to update GPU stats: {}", e
+                    )))
+                }
+            },
+            None => Err(pyo3::exceptions::PyRuntimeError::new_err("No GPU resources available"))
+        }
+    }
+    
+    /// Get detailed GPU information
+    pub fn get_gpu_info(&self) -> PyResult<PyObject> {
+        Python::with_gil(|py| {
+            let info = pyo3::types::PyDict::new(py);
+            
+            if let Some(res) = &self.gpu_resources {
+                if let Some(gpu_info) = &res.gpu_info {
+                    info.set_item("name", gpu_info.name.clone())?;
+                    info.set_item("vendor", format!("{:?}", gpu_info.vendor))?;
+                    info.set_item("device_type", format!("{:?}", gpu_info.device_type))?;
+                    info.set_item("backend", format!("{:?}", gpu_info.backend))?;
+                    info.set_item("vendor_id", format!("0x{:X}", gpu_info.vendor_id))?;
+                    info.set_item("device_id", format!("0x{:X}", gpu_info.device_id))?;
+                    info.set_item("driver_info", gpu_info.driver_info.clone())?;
+                    info.set_item("is_discrete", gpu_info.is_discrete)?;
+                    
+                    // Add buffer allocation stats
+                    info.set_item("allocated_buffers", res.memory_pool.get_allocated_buffers_count())?;
+                    info.set_item("allocated_bytes", res.memory_pool.get_allocated_bytes())?;
+                    
+                    // Get VRAM stats
+                    let stats = res.get_vram_stats();
+                    info.set_item("total_vram_mb", stats.total_mb)?;
+                    info.set_item("used_vram_mb", stats.used_mb)?;
+                    info.set_item("free_vram_mb", stats.free_mb)?;
+                    
+                    return Ok(info.into());
+                }
+            }
+            
+            info.set_item("name", "No GPU detected")?;
+            info.set_item("error", "GPU info not available")?;
+            
+            Ok(info.into())
+        })
+    }
+    
+    /// Force a manual cleanup of GPU resources
+    pub fn force_cleanup(&self) -> PyResult<()> {
+        match &self.gpu_resources {
+            Some(res) => {
+                res.cleanup_memory();
+                match res.memory_pool.update_vram_usage() {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                        "Failed to update GPU stats after cleanup: {}", e
+                    )))
+                }
+            },
+            None => Err(pyo3::exceptions::PyRuntimeError::new_err("No GPU resources available"))
+        }
+    }
 }
 
 /// Create an advanced GPU-managed upscaler with automatic memory management
