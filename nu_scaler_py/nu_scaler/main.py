@@ -301,6 +301,9 @@ class LiveFeedScreen(QWidget):
 
         try:
             out_bytes = self.upscaler.upscale(frame) # Frame is now RGBA
+            
+            # Get scale factor from upscaler directly
+            self.upscale_scale = self.upscaler.get_upscale_scale()
             out_w = int(in_w * self.upscale_scale)
             out_h = int(in_h * self.upscale_scale)
 

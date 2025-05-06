@@ -24,6 +24,7 @@ pub fn initialize() {
 #[pyclass]
 pub struct PyWgpuUpscaler {
     inner: WgpuUpscaler,
+    upscale_scale: f32,
 }
 
 #[pymethods]
@@ -44,13 +45,38 @@ impl PyWgpuUpscaler {
             "bilinear" => UpscaleAlgorithm::Bilinear,
             _ => UpscaleAlgorithm::Nearest,
         };
-        Ok(Self { inner: WgpuUpscaler::new(q, alg) })
+        Ok(Self { 
+            inner: WgpuUpscaler::new(q, alg),
+            upscale_scale: 2.0,
+        })
     }
 
     /// Initialize the upscaler with input/output dimensions
     pub fn initialize(&mut self, input_width: u32, input_height: u32, output_width: u32, output_height: u32) -> PyResult<()> {
+        if input_width > 0 && input_height > 0 {
+            let width_scale = output_width as f32 / input_width as f32;
+            let height_scale = output_height as f32 / input_height as f32;
+            self.upscale_scale = (width_scale + height_scale) / 2.0;
+        }
+        
         self.inner.initialize(input_width, input_height, output_width, output_height)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    #[getter]
+    pub fn get_upscale_scale(&self) -> PyResult<f32> {
+        Ok(self.upscale_scale)
+    }
+
+    #[setter]
+    pub fn set_upscale_scale(&mut self, scale: f32) -> PyResult<()> {
+        if scale < 1.0 || scale > 4.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "Scale factor must be between 1.0 and 4.0"
+            ));
+        }
+        self.upscale_scale = scale;
+        Ok(())
     }
 
     /// Upscale a frame (input: bytes, returns: bytes)
