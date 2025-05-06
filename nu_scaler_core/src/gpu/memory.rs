@@ -308,81 +308,52 @@ impl MemoryPool {
         }
     }
     
-    /// Query VRAM stats on Windows
+    /// Query VRAM stats on Windows using DXGI
     #[cfg(target_os = "windows")]
     fn query_vram_windows(&self) -> Option<VramStats> {
-        use windows::Win32::Graphics::Dxgi::*;
-        use windows::Win32::System::Com::*;
+        use windows::Win32::Graphics::Dxgi;
         use windows::core::Interface;
-        
+        use std::time::Instant;
+
         unsafe {
-            // Initialize COM
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-            
             // Create DXGI factory
-            let mut factory: Option<IDXGIFactory1> = None;
-            if CreateDXGIFactory1(&IDXGIFactory1::IID, factory.set_abi() as *mut _).is_ok() {
-                if let Some(factory) = factory {
-                    // Get adapter
-                    let mut adapter: Option<IDXGIAdapter1> = None;
-                    if factory.EnumAdapters1(0, adapter.set_abi() as *mut _).is_ok() {
-                        if let Some(adapter) = adapter {
-                            // Get adapter description
-                            let mut desc = DXGI_ADAPTER_DESC1::default();
-                            if adapter.GetDesc1(&mut desc).is_ok() {
-                                // Get memory info
-                                let total_mb = desc.DedicatedVideoMemory as f32 / (1024.0 * 1024.0);
-                                
-                                // Try to get current usage
-                                let mut video_memory: Option<IDXGIAdapter3> = None;
-                                if adapter.cast(&IDXGIAdapter3::IID, video_memory.set_abi() as *mut _).is_ok() {
-                                    if let Some(video_memory) = video_memory {
-                                        let mut budget = DXGI_QUERY_VIDEO_MEMORY_INFO::default();
-                                        if video_memory.QueryVideoMemoryInfo(
-                                            0, 
-                                            DXGI_MEMORY_SEGMENT_GROUP_LOCAL,
-                                            &mut budget
-                                        ).is_ok() {
-                                            // Convert values to MB
-                                            let used_mb = (budget.CurrentUsage as f32) / (1024.0 * 1024.0);
-                                            let free_mb = total_mb - used_mb;
-                                            
-                                            // Release COM objects
-                                            drop(video_memory);
-                                            drop(adapter);
-                                            drop(factory);
-                                            
-                                            let mut stats = self.stats.lock().unwrap();
-                                            return Some(VramStats {
-                                                total_mb,
-                                                used_mb,
-                                                free_mb,
-                                                app_allocated_mb: stats.app_allocated_mb,
-                                                timestamp: Instant::now(),
-                                            });
-                                        }
-                                    }
-                                }
-                                
-                                // Fallback to just total memory
-                                let mut stats = self.stats.lock().unwrap();
-                                return Some(VramStats {
-                                    total_mb,
-                                    used_mb: stats.used_mb,
-                                    free_mb: total_mb - stats.used_mb,
-                                    app_allocated_mb: stats.app_allocated_mb,
-                                    timestamp: Instant::now(),
-                                });
-                            }
+            let factory_result = Dxgi::CreateDXGIFactory1::<Dxgi::IDXGIFactory1>();
+            if let Ok(factory) = factory_result {
+                // Get first adapter
+                if let Ok(adapter) = factory.EnumAdapters1(0) {
+                    // Try to get IDXGIAdapter3 for VRAM info
+                    let adapter3: Result<Dxgi::IDXGIAdapter3, _> = adapter.cast();
+                    if let Ok(adapter3) = adapter3 {
+                        let mut dedicated_vram: u64 = 0;
+                        let mut usage_vram: u64 = 0;
+
+                        if let Ok(desc) = adapter.GetDesc1() {
+                            dedicated_vram = desc.DedicatedVideoMemory;
                         }
+
+                        // Get current usage
+                        if let Ok(budget) = adapter3.QueryVideoMemoryInfo(0, Dxgi::DXGI_MEMORY_SEGMENT_GROUP_LOCAL) {
+                            usage_vram = budget.CurrentUsage;
+                        }
+
+                        // Convert to MB
+                        let total_mb = dedicated_vram as f32 / (1024.0 * 1024.0);
+                        let used_mb = usage_vram as f32 / (1024.0 * 1024.0);
+                        let free_mb = total_mb - used_mb;
+
+                        let mut stats = self.stats.lock().unwrap();
+                        return Some(VramStats {
+                            total_mb,
+                            used_mb,
+                            free_mb,
+                            app_allocated_mb: stats.app_allocated_mb,
+                            timestamp: Instant::now(),
+                        });
                     }
                 }
             }
-            
-            // Release COM
-            CoUninitialize();
         }
-        
+
         None
     }
     
