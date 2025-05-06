@@ -71,7 +71,7 @@ class AuthController extends Controller
         $tokenName = 'api-token-' . now()->timestamp;
         $token = $user->createToken($tokenName)->plainTextToken;
 
-        \Log::info('User login successful', [
+        Log::info('User login successful', [
             'user_id' => $user->id,
             'email' => $user->email,
             'is_admin' => $user->is_admin ?? false,
