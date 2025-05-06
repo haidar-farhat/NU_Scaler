@@ -11,6 +11,7 @@ import { fetchSurveys } from '../../features/admin/surveysSlice';
 import { fetchUserGrowth } from '../../features/admin/userGrowthSlice';
 import { Link } from 'react-router-dom';
 import { useToast } from '../../components/ToastContext';
+import { useDataExport } from '../../features/admin/useDataExport';
 
 const exportBtnStyle = {
   marginRight: 8,
@@ -31,6 +32,7 @@ const AdminDashboard = () => {
   const { list: surveys, loading: surveysLoading, error: surveysError } = useSelector(state => state.surveys);
   const { list: userGrowth, loading: userGrowthLoading, error: userGrowthError } = useSelector(state => state.userGrowth);
   const { showToast } = useToast();
+  const { exportData, loading: exportLoading, error: exportError } = useDataExport();
 
   useEffect(() => {
     dispatch(fetchReviews());
@@ -73,15 +75,47 @@ const AdminDashboard = () => {
         <SummaryCards title="New Users" value={userGrowth.length} icon="👤" />
       </div>
       <div style={{ marginBottom: 8 }}>
-        <button style={exportBtnStyle} onClick={() => handleExport('reviews', 'csv')}>Export Reviews CSV</button>
-        <button style={exportBtnStyle} onClick={() => handleExport('reviews', 'xlsx')}>Export Reviews Excel</button>
+        <button
+          style={exportBtnStyle}
+          onClick={() => exportData('reviews', 'csv')}
+          disabled={exportLoading}
+          aria-busy={exportLoading}
+          title="Export all reviews as CSV"
+        >
+          {exportLoading ? 'Exporting...' : 'Export Reviews CSV'}
+        </button>
+        <button
+          style={exportBtnStyle}
+          onClick={() => exportData('reviews', 'xlsx')}
+          disabled={exportLoading}
+          aria-busy={exportLoading}
+          title="Export all reviews as Excel (XLSX)"
+        >
+          {exportLoading ? 'Exporting...' : 'Export Reviews Excel'}
+        </button>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {reviewsLoading ? <div>Loading reviews...</div> : reviewsError ? <div className="text-red-600">{reviewsError}</div> : <ReviewsTable reviews={reviews} />}
         <div>
           <div style={{ marginBottom: 8 }}>
-            <button style={exportBtnStyle} onClick={() => handleExport('bugReports', 'csv')}>Export Bug Reports CSV</button>
-            <button style={exportBtnStyle} onClick={() => handleExport('bugReports', 'xlsx')}>Export Bug Reports Excel</button>
+            <button
+              style={exportBtnStyle}
+              onClick={() => exportData('bugReports', 'csv')}
+              disabled={exportLoading}
+              aria-busy={exportLoading}
+              title="Export all bug reports as CSV"
+            >
+              {exportLoading ? 'Exporting...' : 'Export Bug Reports CSV'}
+            </button>
+            <button
+              style={exportBtnStyle}
+              onClick={() => exportData('bugReports', 'xlsx')}
+              disabled={exportLoading}
+              aria-busy={exportLoading}
+              title="Export all bug reports as Excel (XLSX)"
+            >
+              {exportLoading ? 'Exporting...' : 'Export Bug Reports Excel'}
+            </button>
           </div>
           {bugReportsLoading ? <div>Loading bug reports...</div> : bugReportsError ? <div className="text-red-600">{bugReportsError}</div> : <BugReportsTable bugReports={bugReports} />}
         </div>
@@ -89,13 +123,30 @@ const AdminDashboard = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
         <div>
           <div style={{ marginBottom: 8 }}>
-            <button style={exportBtnStyle} onClick={() => handleExport('surveys', 'csv')}>Export Surveys CSV</button>
-            <button style={exportBtnStyle} onClick={() => handleExport('surveys', 'xlsx')}>Export Surveys Excel</button>
+            <button
+              style={exportBtnStyle}
+              onClick={() => exportData('surveys', 'csv')}
+              disabled={exportLoading}
+              aria-busy={exportLoading}
+              title="Export all surveys as CSV"
+            >
+              {exportLoading ? 'Exporting...' : 'Export Surveys CSV'}
+            </button>
+            <button
+              style={exportBtnStyle}
+              onClick={() => exportData('surveys', 'xlsx')}
+              disabled={exportLoading}
+              aria-busy={exportLoading}
+              title="Export all surveys as Excel (XLSX)"
+            >
+              {exportLoading ? 'Exporting...' : 'Export Surveys Excel'}
+            </button>
           </div>
           {surveysLoading ? <div>Loading surveys...</div> : surveysError ? <div className="text-red-600">{surveysError}</div> : <SurveysChart data={surveys} />}
         </div>
         {userGrowthLoading ? <div>Loading user growth...</div> : userGrowthError ? <div className="text-red-600">{userGrowthError}</div> : <UserGrowthChart data={userGrowth} />}
       </div>
+      {exportError && <div style={{ color: 'red', marginTop: 8 }}>{exportError}</div>}
       <div style={{ marginBottom: 24 }}>
         <Link to="/admin/users" style={{ fontWeight: 'bold', color: '#007bff', textDecoration: 'none' }}>
           Manage Users
