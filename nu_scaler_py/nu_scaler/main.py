@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QListWidget, QStackedWidget, QFrame,
     QPushButton, QComboBox, QSpinBox, QCheckBox, QSlider, QGroupBox, QFormLayout, QProgressBar, QFileDialog
 )
-from PySide6.QtCore import Qt, QTimer, Signal, QThread, QObject
+from PySide6.QtCore import Qt, QTimer, Signal, QThread, QObject, Slot
 from PySide6.QtGui import QPixmap, QImage, QAction
 import time
 import random
@@ -45,6 +45,33 @@ print(f"[main.py] nu_scaler_core available: {nu_scaler_core is not None}")
 # Add import for GPU optimization
 from nu_scaler.gpu_optimizer import optimize_upscaler, force_gpu_activation
 
+class UpscaleWorker(QObject):
+    finished = Signal(bytes, int, int, float)
+    error = Signal(str)
+
+    def __init__(self, upscaler, frame, in_w, in_h, out_w, out_h, scale):
+        super().__init__()
+        self.upscaler = upscaler
+        self.frame = frame
+        self.in_w = in_w
+        self.in_h = in_h
+        self.out_w = out_w
+        self.out_h = out_h
+        self.scale = scale
+
+    @Slot()
+    def run(self):
+        import time
+        t0 = time.perf_counter()
+        try:
+            # Optionally re-initialize upscaler if needed
+            self.upscaler.initialize(self.in_w, self.in_h, self.out_w, self.out_h)
+            out_bytes = self.upscaler.upscale(self.frame)
+            t1 = time.perf_counter()
+            self.finished.emit(out_bytes, self.out_w, self.out_h, t1 - t0)
+        except Exception as e:
+            self.error.emit(str(e))
+
 class LiveFeedScreen(QWidget):
     log_signal = Signal(str)
     profiler_signal = Signal(float, float, int, int)
@@ -66,6 +93,8 @@ class LiveFeedScreen(QWidget):
         self.vram_usage = 0.0
         self.total_vram = 0.0
         self.show_memory_stats = True
+        self._upscale_thread = None
+        self._upscale_worker = None
         self.init_ui()
 
     def init_ui(self):
@@ -405,7 +434,6 @@ class LiveFeedScreen(QWidget):
     def update_frame(self):
         if not self.capture:
             return
-        t0 = time.perf_counter()
         frame_result = self.capture.get_frame()
         if frame_result is None:
             return # No frame yet
@@ -418,17 +446,14 @@ class LiveFeedScreen(QWidget):
             scale = self.scale_slider.value() / 10.0
             if not self.init_upscaler(in_w, in_h, scale):
                 return # Stop if upscaler failed to init
-        
+
         # Re-initialize if scale factor changes
         current_scale = self.scale_slider.value() / 10.0
         if abs(current_scale - self.upscale_scale) > 0.01:
             self.upscale_scale = current_scale
-            # Use upscaler.upscale_scale directly if available, otherwise use set_upscale_scale method
             try:
-                # First try direct attribute assignment if available
                 if hasattr(self.upscaler, 'upscale_scale'):
                     self.upscaler.upscale_scale = current_scale
-                # Re-initialize with new output size
                 out_w = int(in_w * current_scale)
                 out_h = int(in_h * current_scale)
                 self.upscaler.initialize(in_w, in_h, out_w, out_h)
@@ -436,69 +461,51 @@ class LiveFeedScreen(QWidget):
                 print(f"Error re-initializing upscaler: {e}")
                 return
 
-        try:
-            # Protect against GPU buffer errors by catching specific exceptions
-            try:
-                out_bytes = self.upscaler.upscale(frame) # Frame is now RGBA
-            except Exception as e:
-                # If we get a WGPU buffer error, try to reinitialize the upscaler
-                if "Buffer Id" in str(e) and "still mapped" in str(e):
-                    print("[GUI] Buffer mapping error detected. Attempting to recover...")
-                    self.upscaler = None
-                    self.upscaler_initialized = False
-                    scale = self.scale_slider.value() / 10.0
-                    self.init_upscaler(in_w, in_h, scale)
-                    # Try again with the new upscaler
-                    out_bytes = self.upscaler.upscale(frame)
-                else:
-                    # Re-raise other exceptions
-                    raise
-            
-            # Get scale factor from upscaler directly if possible
-            scale = self.upscale_scale
-            if hasattr(self.upscaler, 'upscale_scale'):
-                scale = self.upscaler.upscale_scale
-                
-            # Calculate output dimensions
-            out_w = int(in_w * scale)
-            out_h = int(in_h * scale)
-            
-            # Clean up memory if using advanced upscaler
-            if self.advanced_upscaling and hasattr(self.upscaler, 'cleanup_memory'):
-                # Only call cleanup_memory occasionally to avoid constant cleanup
-                if random.random() < 0.05:  # ~5% chance each frame
-                    self.upscaler.cleanup_memory()
-            
-            # Convert result to QImage/QPixmap and display
-            if out_bytes:
-                qimg = QImage(out_bytes, out_w, out_h, QImage.Format_RGBA8888)
-                pixmap = QPixmap.fromImage(qimg)
-                self.output_preview.setPixmap(pixmap)
-                
-                # Update FPS
-                t1 = time.perf_counter()
-                dt = t1 - t0
-                if dt > 0:
-                    inst_fps = 1.0 / dt
-                    # Smooth FPS calculation
-                    self.fps = 0.95 * self.fps + 0.05 * inst_fps if self.fps > 0 else inst_fps
-                self.overlay.setText(f"Input: {in_w}×{in_h}\nUpscaled: {out_w}×{out_h}\nFPS: {self.fps:.1f}")
-                self.status_bar.setText(f"Frame Time: {(t1 - t0) * 1000:.1f} ms   FPS: {self.fps:.1f}   Resolution: {in_w}×{in_h} → {out_w}×{out_h}")
-                self.profiler_signal.emit(dt * 1000, self.fps, in_w, in_h)
-                if self.fps < 30:
-                    self.warning_signal.emit(f"Warning: Low FPS ({self.fps:.1f})", True)
-                else:
-                    self.warning_signal.emit("", False)
-                
-                # Update frame time
-                self.last_frame_time = t0
-        except Exception as e:
-            traceback.print_exc()
-            print(f"[GUI] Error in upscaling: {e}")
-            self.status_bar.setText(f"Error: {str(e)}")
-            # Don't immediately stop on error, just reset the upscaler for the next frame
-            self.upscaler = None
-            self.upscaler_initialized = False
+        # Calculate output dimensions
+        scale = self.upscale_scale
+        out_w = int(in_w * scale)
+        out_h = int(in_h * scale)
+
+        # If a previous upscale thread is running, skip this frame
+        if hasattr(self, '_upscale_thread') and self._upscale_thread is not None and self._upscale_thread.isRunning():
+            return
+
+        # Start worker thread for upscaling
+        self._upscale_thread = QThread()
+        self._upscale_worker = UpscaleWorker(self.upscaler, frame, in_w, in_h, out_w, out_h, scale)
+        self._upscale_worker.moveToThread(self._upscale_thread)
+        self._upscale_thread.started.connect(self._upscale_worker.run)
+        self._upscale_worker.finished.connect(self.on_upscale_finished)
+        self._upscale_worker.error.connect(self.on_upscale_error)
+        self._upscale_worker.finished.connect(self._upscale_thread.quit)
+        self._upscale_worker.finished.connect(self._upscale_worker.deleteLater)
+        self._upscale_thread.finished.connect(self._upscale_thread.deleteLater)
+        self._upscale_thread.start()
+
+    def on_upscale_finished(self, out_bytes, out_w, out_h, elapsed):
+        # Update the GUI with the upscaled image
+        if out_bytes:
+            qimg = QImage(out_bytes, out_w, out_h, QImage.Format_RGBA8888)
+            pixmap = QPixmap.fromImage(qimg)
+            self.output_preview.setPixmap(pixmap)
+            # Update FPS
+            inst_fps = 1.0 / elapsed if elapsed > 0 else 0.0
+            self.fps = 0.95 * self.fps + 0.05 * inst_fps if self.fps > 0 else inst_fps
+            self.overlay.setText(f"Input: {out_w//self.upscale_scale:.0f}×{out_h//self.upscale_scale:.0f}\nUpscaled: {out_w}×{out_h}\nFPS: {self.fps:.1f}")
+            self.status_bar.setText(f"Frame Time: {elapsed * 1000:.1f} ms   FPS: {self.fps:.1f}   Resolution: {out_w//self.upscale_scale:.0f}×{out_h//self.upscale_scale:.0f} → {out_w}×{out_h}")
+            self.profiler_signal.emit(elapsed * 1000, self.fps, out_w//self.upscale_scale, out_h//self.upscale_scale)
+            if self.fps < 30:
+                self.warning_signal.emit(f"Warning: Low FPS ({self.fps:.1f})", True)
+            else:
+                self.warning_signal.emit("", False)
+            self.last_frame_time = time.perf_counter()
+
+    def on_upscale_error(self, error_msg):
+        import traceback
+        print(f"[GUI] Error in upscaling: {error_msg}")
+        self.status_bar.setText(f"Error: {str(error_msg)}")
+        self.upscaler = None
+        self.upscaler_initialized = False
 
 class SettingsScreen(QWidget):
     def __init__(self, live_feed_screen=None):
