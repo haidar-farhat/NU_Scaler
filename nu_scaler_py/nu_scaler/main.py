@@ -42,6 +42,9 @@ except Exception as e:
 
 print(f"[main.py] nu_scaler_core available: {nu_scaler_core is not None}")
 
+# Add import for GPU optimization
+from nu_scaler.gpu_optimizer import optimize_upscaler, force_gpu_activation
+
 class LiveFeedScreen(QWidget):
     log_signal = Signal(str)
     profiler_signal = Signal(float, float, int, int)
@@ -361,98 +364,43 @@ class LiveFeedScreen(QWidget):
             print(f"Error updating memory stats: {e}")
     
     def init_upscaler(self, in_w, in_h, scale):
+        """
+        Initialize the upscaler with the given dimensions and scale factor.
+        """
+        print("[GUI] Initializing upscaler...")
+        out_w = int(in_w * scale)
+        out_h = int(in_h * scale)
+        
+        # First check if Rust core is available
         if nu_scaler_core is None:
-            print("[GUI] Rust core not available for upscaler.")
-            self.status_bar.setText("Rust core missing")
-            return False
-            
-        try:
-            # Get scale settings from UI
-            out_w = int(in_w * scale)
-            out_h = int(in_h * scale)
-            quality = self.quality_box.currentText()
-            algorithm = self.algorithm_box.currentText()
-            technology = self.technology_box.currentText()
-            
-            # Use the appropriate upscaler based on settings
-            if self.advanced_upscaling:
-                # Use the advanced GPU-optimized upscaler with memory management
-                print(f"Creating advanced upscaler with quality: {quality}")
-                try:
-                    self.upscaler = nu_scaler_core.create_advanced_upscaler(quality.lower())
-                except (AttributeError, Exception) as e:
-                    print(f"[GUI] Error initializing advanced upscaler: {e}")
-                    print("[GUI] Falling back to best available upscaler")
-                    try:
-                        self.upscaler = nu_scaler_core.create_best_upscaler(quality.lower())
-                    except (AttributeError, Exception) as e2:
-                        print(f"[GUI] Error with fallback upscaler: {e2}")
-                        print("[GUI] Falling back to basic upscaler")
-                        # Use the basic upscaler as final fallback
-                        self.upscaler = nu_scaler_core.PyWgpuUpscaler(quality.lower(), "bilinear")
-                    
-                    # Disable advanced-only options when falling back
-                    self.memory_strategy_box.setEnabled(False)
-                    self.adaptive_quality_check.setEnabled(False)
-                    self.advanced_check.setChecked(False)
-                    self.advanced_check.setEnabled(False)
-                    self.log_signal.emit("Advanced GPU optimization not available, using standard upscaler")
-                
-                # Set adaptive quality based on checkbox
-                if hasattr(self.upscaler, 'set_adaptive_quality'):
-                    self.upscaler.set_adaptive_quality(self.adaptive_quality_check.isChecked())
-                
-                # Set memory strategy if not auto
-                strategy_text = self.memory_strategy_box.currentText()
-                if strategy_text != "Auto" and hasattr(self.upscaler, 'set_memory_strategy'):
-                    self.upscaler.set_memory_strategy(strategy_text.lower())
+            print("[GUI] Rust core not available, using dummy upscaler")
+            self.upscaler = DummyUpscaler()
+        else:
+            # Use advanced upscaler if available
+            if hasattr(nu_scaler_core, 'create_advanced_upscaler'):
+                quality = self.quality_box.currentText().lower()
+                self.upscaler = nu_scaler_core.create_advanced_upscaler(quality)
+                print(f"[GUI] Created advanced upscaler with quality: {quality}")
             else:
-                # Use appropriate upscaler based on technology selection
-                if technology == "Auto (Best for GPU)":
-                    # Use core's automatic detection for best technology
-                    try:
-                        self.upscaler = nu_scaler_core.create_best_upscaler(quality.lower())
-                    except (AttributeError, Exception) as e:
-                        print(f"[GUI] Error with best upscaler: {e}")
-                        # Fall back to basic upscaler
-                        self.upscaler = nu_scaler_core.PyWgpuUpscaler(quality.lower(), "bilinear")
-                elif technology == "FSR 3.0":
-                    # Use FSR upscaler
-                    try:
-                        self.upscaler = nu_scaler_core.create_fsr_upscaler(quality.lower())
-                    except (AttributeError, Exception) as e:
-                        print(f"[GUI] Error initializing FSR upscaler: {e}")
-                        print("[GUI] Falling back to basic upscaler")
-                        self.upscaler = nu_scaler_core.PyWgpuUpscaler(quality.lower(), "bilinear")
-                elif technology == "DLSS":
-                    # Use DLSS upscaler
-                    try:
-                        self.upscaler = nu_scaler_core.create_dlss_upscaler(quality.lower())
-                    except (AttributeError, Exception) as e:
-                        print(f"[GUI] Error initializing DLSS upscaler: {e}")
-                        print("[GUI] Falling back to basic upscaler")
-                        self.upscaler = nu_scaler_core.PyWgpuUpscaler(quality.lower(), "bilinear")
-                else:
-                    # Default to basic upscaler
-                    self.upscaler = nu_scaler_core.PyWgpuUpscaler(quality.lower(), algorithm.lower())
+                # Fall back to regular upscaler
+                print(f"[GUI] Created regular upscaler")
+                self.upscaler = nu_scaler_core.PyWgpuUpscaler("quality", "bilinear")
+                
+        # Force GPU activation to maximize performance
+        if hasattr(nu_scaler_core, 'PyAdvancedWgpuUpscaler') and isinstance(self.upscaler, nu_scaler_core.PyAdvancedWgpuUpscaler):
+            print("[GUI] Forcing GPU activation for better performance...")
+            force_gpu_activation(self.upscaler)
+                
+        # Initialize the upscaler
+        self.upscaler.initialize(in_w, in_h, out_w, out_h)
+        # Don't try to call set_upscale_scale which doesn't exist
+        # Instead, just note that the upscaler scale is set during initialization
+        # based on the dimensions
+        print(f"Upscaler scale factor: {self.upscaler.upscale_scale}")
             
-            # Initialize the upscaler
-            self.upscaler.initialize(in_w, in_h, out_w, out_h)
-            # Don't try to call set_upscale_scale which doesn't exist
-            # Instead, just note that the upscaler scale is set during initialization
-            # based on the dimensions
-            print(f"Upscaler scale factor: {self.upscaler.upscale_scale}")
-            self.upscaler_initialized = True
-            
-            # Update memory stats right away
-            self.update_memory_stats()
-            
-            return True
-        except Exception as e:
-            traceback.print_exc()
-            print(f"[GUI] Error initializing upscaler: {e}")
-            self.status_bar.setText(f"Error: {str(e)}")
-            return False
+        self.upscaler_initialized = True
+        self.upscale_scale = scale
+        return True
 
     def update_frame(self):
         if not self.capture:
