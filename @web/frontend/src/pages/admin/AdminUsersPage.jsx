@@ -32,10 +32,21 @@ export default function AdminUsersPage() {
   const [dialog, setDialog] = useState({ open: false, type: '', targetUser: null });
 
   useEffect(() => {
+    console.log('AdminUsersPage mounted, dispatching fetchUsers');
     dispatch(fetchUsers())
       .unwrap()
-      .catch(e => showToast(e.message || 'Failed to load users', 'error'));
+      .then(data => {
+        console.log('Users fetched successfully:', data);
+      })
+      .catch(e => {
+        console.error('Error fetching users:', e);
+        showToast(e.message || 'Failed to load users', 'error');
+      });
   }, [dispatch, showToast]);
+
+  useEffect(() => {
+    console.log('Users in component state:', users);
+  }, [users]);
 
   const openDialog = (type, targetUser) => setDialog({ open: true, type, targetUser });
   const closeDialog = () => setDialog({ open: false, type: '', targetUser: null });
