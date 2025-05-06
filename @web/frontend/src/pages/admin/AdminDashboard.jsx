@@ -3,7 +3,7 @@ import { useSelector, useDispatch } from 'react-redux';
 import SummaryCards from './SummaryCards';
 import ReviewsTable from './ReviewsTable';
 import BugReportsTable from './BugReportsTable';
-import SurveysChart from './SurveysChart';
+import SurveysTable from './SurveysTable';
 import UserGrowthChart from './UserGrowthChart';
 import { fetchReviews } from '../../features/admin/reviewsSlice';
 import { fetchBugReports } from '../../features/admin/bugReportsSlice';
@@ -27,9 +27,9 @@ const exportBtnStyle = {
 
 const AdminDashboard = () => {
   const dispatch = useDispatch();
-  const { list: reviews, loading: reviewsLoading, error: reviewsError } = useSelector(state => state.reviews);
-  const { list: bugReports, loading: bugReportsLoading, error: bugReportsError } = useSelector(state => state.bugReports);
-  const { list: surveys, loading: surveysLoading, error: surveysError } = useSelector(state => state.surveys);
+  const { list: reviews, meta: reviewsMeta, loading: reviewsLoading, error: reviewsError } = useSelector(state => state.reviews);
+  const { list: bugReports, meta: bugReportsMeta, loading: bugReportsLoading, error: bugReportsError } = useSelector(state => state.bugReports);
+  const { list: surveys, meta: surveysMeta, loading: surveysLoading, error: surveysError } = useSelector(state => state.surveys);
   const { list: userGrowth, loading: userGrowthLoading, error: userGrowthError } = useSelector(state => state.userGrowth);
   const { showToast } = useToast();
   const { exportData, loading: exportLoading, error: exportError } = useDataExport();
@@ -66,6 +66,14 @@ const AdminDashboard = () => {
     }
   };
 
+  // Filter/pagination handlers
+  const handleReviewsFilter = (params) => dispatch(fetchReviews(params));
+  const handleReviewsPage = (page) => dispatch(fetchReviews({ ...reviewsMeta, page }));
+  const handleBugReportsFilter = (params) => dispatch(fetchBugReports(params));
+  const handleBugReportsPage = (page) => dispatch(fetchBugReports({ ...bugReportsMeta, page }));
+  const handleSurveysFilter = (params) => dispatch(fetchSurveys(params));
+  const handleSurveysPage = (page) => dispatch(fetchSurveys({ ...surveysMeta, page }));
+
   return (
     <div className="p-6">
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
@@ -95,7 +103,14 @@ const AdminDashboard = () => {
         </button>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {reviewsLoading ? <div>Loading reviews...</div> : reviewsError ? <div className="text-red-600">{reviewsError}</div> : <ReviewsTable reviews={reviews} />}
+        {reviewsLoading ? <div>Loading reviews...</div> : reviewsError ? <div className="text-red-600">{reviewsError}</div> :
+          <ReviewsTable
+            reviews={reviews}
+            meta={reviewsMeta}
+            loading={reviewsLoading}
+            onFilter={handleReviewsFilter}
+            onPageChange={handleReviewsPage}
+          />}
         <div>
           <div style={{ marginBottom: 8 }}>
             <button
@@ -117,7 +132,14 @@ const AdminDashboard = () => {
               {exportLoading ? 'Exporting...' : 'Export Bug Reports Excel'}
             </button>
           </div>
-          {bugReportsLoading ? <div>Loading bug reports...</div> : bugReportsError ? <div className="text-red-600">{bugReportsError}</div> : <BugReportsTable bugReports={bugReports} />}
+          {bugReportsLoading ? <div>Loading bug reports...</div> : bugReportsError ? <div className="text-red-600">{bugReportsError}</div> :
+            <BugReportsTable
+              bugReports={bugReports}
+              meta={bugReportsMeta}
+              loading={bugReportsLoading}
+              onFilter={handleBugReportsFilter}
+              onPageChange={handleBugReportsPage}
+            />}
         </div>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
@@ -142,7 +164,14 @@ const AdminDashboard = () => {
               {exportLoading ? 'Exporting...' : 'Export Surveys Excel'}
             </button>
           </div>
-          {surveysLoading ? <div>Loading surveys...</div> : surveysError ? <div className="text-red-600">{surveysError}</div> : <SurveysChart data={surveys} />}
+          {surveysLoading ? <div>Loading surveys...</div> : surveysError ? <div className="text-red-600">{surveysError}</div> :
+            <SurveysTable
+              surveys={surveys}
+              meta={surveysMeta}
+              loading={surveysLoading}
+              onFilter={handleSurveysFilter}
+              onPageChange={handleSurveysPage}
+            />}
         </div>
         {userGrowthLoading ? <div>Loading user growth...</div> : userGrowthError ? <div className="text-red-600">{userGrowthError}</div> : <UserGrowthChart data={userGrowth} />}
       </div>
