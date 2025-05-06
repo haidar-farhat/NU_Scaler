@@ -150,7 +150,7 @@ class LiveFeedScreen(QWidget):
         self.memory_strategy_box.setCurrentText("Auto")
         self.memory_strategy_box.currentIndexChanged.connect(self.set_memory_strategy)
         memory_strategy_layout.addWidget(self.memory_strategy_box)
-        upscale_controls.layout().addLayout(memory_strategy_layout)
+        upscale_controls.layout().addRow("", memory_strategy_layout)
         
         # Add adaptive quality checkbox
         self.adaptive_quality_check = QCheckBox("Adaptive Quality", self)
