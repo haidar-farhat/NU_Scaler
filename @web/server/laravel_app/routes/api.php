@@ -81,10 +81,13 @@ Route::prefix('admin')->name('api.admin.')
 
         // Feedback Management
         Route::get('/reviews', [AdminFeedbackController::class, 'index'])->name('reviews.index');
+        Route::get('/reviews/export', [AdminFeedbackController::class, 'exportReviews'])->name('reviews.export');
         Route::get('/reviews/{review}', [AdminFeedbackController::class, 'show'])->name('reviews.show');
         Route::get('/bug-reports', [AdminFeedbackController::class, 'indexBugReports'])->name('bug-reports.index');
+        Route::get('/bug-reports/export', [AdminFeedbackController::class, 'exportBugReports'])->name('bug-reports.export');
         Route::get('/bug-reports/{bugReport}', [AdminFeedbackController::class, 'showBugReport'])->name('bug-reports.show');
         Route::get('/hardware-surveys', [AdminFeedbackController::class, 'indexHardwareSurveys'])->name('hardware-surveys.index');
+        Route::get('/hardware-surveys/export', [AdminFeedbackController::class, 'exportHardwareSurveys'])->name('hardware-surveys.export');
         Route::get('/hardware-surveys/{hardwareSurvey}', [AdminFeedbackController::class, 'showHardwareSurvey'])->name('hardware-surveys.show');
 
         // Metrics and Analytics
