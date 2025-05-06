@@ -23,6 +23,27 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
+// Add this near the top of the file
+Route::post('/direct-register', function() {
+    return response()->json([
+        'success' => true,
+        'message' => 'Direct registration test successful',
+        'data' => [
+            'name' => request('name', 'Test User'),
+            'email' => request('email', 'test@example.com'),
+            'timestamp' => now()->toIso8601String()
+        ]
+    ]);
+})->withoutMiddleware(['throttle']); // Bypass throttling
+
+// Also add an OPTIONS handler since browsers send this first
+Route::options('/direct-register', function() {
+    return response('', 204)
+        ->header('Access-Control-Allow-Origin', '*')
+        ->header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+        ->header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-CSRF-TOKEN');
+});
+
 // Direct test route - no middleware at all (not even the api group middleware)
 Route::get('/direct-test', [TestController::class, 'testCors']);
 
