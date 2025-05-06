@@ -8,6 +8,8 @@ use App\Models\HardwareSurvey;
 use App\Models\Review;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\StreamedResponse;
+use Illuminate\Support\Facades\Response;
 
 class AdminFeedbackController extends Controller
 {
@@ -171,5 +173,99 @@ class AdminFeedbackController extends Controller
     {
         $hardwareSurvey->delete();
         return response()->json(['message' => 'Hardware survey deleted successfully']);
+    }
+
+    /**
+     * Export reviews as CSV or Excel.
+     */
+    public function exportReviews(Request $request)
+    {
+        $format = $request->query('format', 'csv');
+        $reviews = \App\Models\Review::all();
+        $filename = 'reviews_' . now()->format('Ymd_His');
+        if ($format === 'xlsx') {
+            if (class_exists('Maatwebsite\\Excel\\Excel')) {
+                return \Maatwebsite\Excel\Facades\Excel::download(new \App\Exports\GenericExport($reviews), "$filename.xlsx");
+            } else {
+                return response()->json(['message' => 'Excel export not available.'], 400);
+            }
+        }
+        // CSV fallback
+        $headers = [
+            'Content-Type' => 'text/csv',
+            'Content-Disposition' => "attachment; filename=$filename.csv",
+        ];
+        $columns = array_keys($reviews->first() ? $reviews->first()->toArray() : []);
+        $callback = function() use ($reviews, $columns) {
+            $out = fopen('php://output', 'w');
+            fputcsv($out, $columns);
+            foreach ($reviews as $row) {
+                fputcsv($out, array_map(fn($col) => $row[$col], $columns));
+            }
+            fclose($out);
+        };
+        return Response::stream($callback, 200, $headers);
+    }
+
+    /**
+     * Export bug reports as CSV or Excel.
+     */
+    public function exportBugReports(Request $request)
+    {
+        $format = $request->query('format', 'csv');
+        $reports = \App\Models\BugReport::all();
+        $filename = 'bug_reports_' . now()->format('Ymd_His');
+        if ($format === 'xlsx') {
+            if (class_exists('Maatwebsite\\Excel\\Excel')) {
+                return \Maatwebsite\Excel\Facades\Excel::download(new \App\Exports\GenericExport($reports), "$filename.xlsx");
+            } else {
+                return response()->json(['message' => 'Excel export not available.'], 400);
+            }
+        }
+        $headers = [
+            'Content-Type' => 'text/csv',
+            'Content-Disposition' => "attachment; filename=$filename.csv",
+        ];
+        $columns = array_keys($reports->first() ? $reports->first()->toArray() : []);
+        $callback = function() use ($reports, $columns) {
+            $out = fopen('php://output', 'w');
+            fputcsv($out, $columns);
+            foreach ($reports as $row) {
+                fputcsv($out, array_map(fn($col) => $row[$col], $columns));
+            }
+            fclose($out);
+        };
+        return Response::stream($callback, 200, $headers);
+    }
+
+    /**
+     * Export hardware surveys as CSV or Excel.
+     */
+    public function exportHardwareSurveys(Request $request)
+    {
+        $format = $request->query('format', 'csv');
+        $surveys = \App\Models\HardwareSurvey::all();
+        $filename = 'hardware_surveys_' . now()->format('Ymd_His');
+        if ($format === 'xlsx') {
+            if (class_exists('Maatwebsite\\Excel\\Excel')) {
+                return \Maatwebsite\Excel\Facades\Excel::download(new \App\Exports\GenericExport($surveys), "$filename.xlsx");
+            } else {
+                return response()->json(['message' => 'Excel export not available.'], 400);
+            }
+        }
+        $headers = [
+            'Content-Type' => 'text/csv',
+            'Content-Disposition' => "attachment; filename=$filename.csv",
+        ];
+        $columns = array_keys($surveys->first() ? $surveys->first()->toArray() : []);
+        $callback = function() use ($surveys, $columns) {
+            $out = fopen('php://output', 'w');
+            fputcsv($out, $columns);
+            foreach ($surveys as $row) {
+                fputcsv($out, array_map(fn($col) => $row[$col], $columns));
+            }
+            fclose($out);
+        };
+        return Response::stream($callback, 200, $headers);
     }
 }
