@@ -802,6 +802,350 @@ class UIAccessibilityScreen(QWidget):
         from PySide6.QtWidgets import QMessageBox
         QMessageBox.information(self, "Load Config", "Config load not yet implemented.")
 
+class BenchmarkWorker(QObject):
+    progress = Signal(int)
+    finished = Signal(list)
+    error = Signal(str)
+    
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+    
+    def run_single_benchmark(self):
+        try:
+            result = run_benchmark(
+                technology=self.config['technology'],
+                quality=self.config['quality'],
+                input_width=self.config['input_width'],
+                input_height=self.config['input_height'],
+                scale_factor=self.config['scale_factor'],
+                frame_count=self.config['frame_count']
+            )
+            self.finished.emit([result] if result else [])
+        except Exception as e:
+            traceback.print_exc()
+            self.error.emit(f"Benchmark error: {str(e)}")
+    
+    def run_comparison(self):
+        try:
+            # Emit progress updates as we go
+            self.progress.emit(10)  # Started
+            
+            results = run_comparison_benchmark(
+                input_width=self.config['input_width'],
+                input_height=self.config['input_height'],
+                scale_factor=self.config['scale_factor'],
+                frame_count=self.config['frame_count']
+            )
+            
+            self.progress.emit(100)  # Completed
+            self.finished.emit(results)
+        except Exception as e:
+            traceback.print_exc()
+            self.error.emit(f"Comparison benchmark error: {str(e)}")
+
+class BenchmarkScreen(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.thread = None
+        self.worker = None
+        self.results = []
+        
+        # Main layout
+        layout = QVBoxLayout(self)
+        
+        # Configuration section
+        config_group = QGroupBox("Benchmark Configuration")
+        config_form = QFormLayout(config_group)
+        
+        # Upscaling technology selection
+        self.tech_combo = QComboBox()
+        self.tech_combo.addItems(["Auto (Best for GPU)", "FSR", "DLSS", "Basic"])
+        
+        # Quality selection
+        self.quality_combo = QComboBox()
+        self.quality_combo.addItems(["ultra", "quality", "balanced", "performance"])
+        
+        # Resolution settings
+        self.width_spin = QSpinBox()
+        self.width_spin.setRange(640, 3840)
+        self.width_spin.setValue(1920)
+        self.width_spin.setSingleStep(160)
+        
+        self.height_spin = QSpinBox()
+        self.height_spin.setRange(480, 2160)
+        self.height_spin.setValue(1080)
+        self.height_spin.setSingleStep(90)
+        
+        # Resolution presets
+        self.res_preset = QComboBox()
+        self.res_preset.addItems(["Custom", "720p", "1080p", "1440p", "4K"])
+        self.res_preset.currentTextChanged.connect(self.apply_resolution_preset)
+        
+        # Scale factor
+        self.scale_slider = QSlider(Qt.Horizontal)
+        self.scale_slider.setRange(10, 40)
+        self.scale_slider.setValue(20)
+        self.scale_label = QLabel("2.0×")
+        self.scale_slider.valueChanged.connect(
+            lambda: self.scale_label.setText(f"{self.scale_slider.value()/10.0:.1f}×")
+        )
+        
+        # Frame count
+        self.frame_count = QSpinBox()
+        self.frame_count.setRange(10, 1000)
+        self.frame_count.setValue(100)
+        self.frame_count.setSingleStep(10)
+        
+        # Add all to config form
+        config_form.addRow("Technology:", self.tech_combo)
+        config_form.addRow("Quality:", self.quality_combo)
+        config_form.addRow("Resolution preset:", self.res_preset)
+        
+        res_layout = QHBoxLayout()
+        res_layout.addWidget(self.width_spin)
+        res_layout.addWidget(QLabel("×"))
+        res_layout.addWidget(self.height_spin)
+        config_form.addRow("Resolution:", res_layout)
+        
+        config_form.addRow("Scale Factor:", self.scale_slider)
+        config_form.addRow("", self.scale_label)
+        config_form.addRow("Frame Count:", self.frame_count)
+        
+        # Benchmark buttons
+        button_layout = QHBoxLayout()
+        self.run_btn = QPushButton("Run Benchmark")
+        self.run_btn.clicked.connect(self.run_single_benchmark)
+        
+        self.compare_btn = QPushButton("Run Comparison")
+        self.compare_btn.clicked.connect(self.run_comparison_benchmark)
+        
+        self.plot_btn = QPushButton("Plot Results")
+        self.plot_btn.clicked.connect(self.plot_results)
+        self.plot_btn.setEnabled(False)  # Disabled until we have results
+        
+        self.export_btn = QPushButton("Export Results")
+        self.export_btn.clicked.connect(self.export_results)
+        self.export_btn.setEnabled(False)  # Disabled until we have results
+        
+        button_layout.addWidget(self.run_btn)
+        button_layout.addWidget(self.compare_btn)
+        button_layout.addWidget(self.plot_btn)
+        button_layout.addWidget(self.export_btn)
+        
+        # Progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        
+        # Results display
+        self.results_group = QGroupBox("Benchmark Results")
+        results_layout = QVBoxLayout(self.results_group)
+        self.results_text = QLabel("Run a benchmark to see results here.")
+        self.results_text.setWordWrap(True)
+        results_layout.addWidget(self.results_text)
+        
+        # Add all widgets to main layout
+        layout.addWidget(config_group)
+        layout.addLayout(button_layout)
+        layout.addWidget(self.progress_bar)
+        layout.addWidget(self.results_group)
+        
+        # Check if benchmarking is available
+        if run_benchmark is None:
+            self.run_btn.setEnabled(False)
+            self.compare_btn.setEnabled(False)
+            self.results_text.setText("ERROR: Benchmarking not available. nu_scaler_core module is missing.")
+    
+    def apply_resolution_preset(self, preset):
+        """Apply a resolution preset."""
+        if preset == "720p":
+            self.width_spin.setValue(1280)
+            self.height_spin.setValue(720)
+        elif preset == "1080p":
+            self.width_spin.setValue(1920)
+            self.height_spin.setValue(1080)
+        elif preset == "1440p":
+            self.width_spin.setValue(2560)
+            self.height_spin.setValue(1440)
+        elif preset == "4K":
+            self.width_spin.setValue(3840)
+            self.height_spin.setValue(2160)
+        # For "Custom", do nothing and let the user set values
+    
+    def get_config(self):
+        """Get benchmark configuration from UI."""
+        tech_map = {
+            "Auto (Best for GPU)": "auto",
+            "FSR": "fsr",
+            "DLSS": "dlss",
+            "Basic": "wgpu"
+        }
+        
+        return {
+            'technology': tech_map.get(self.tech_combo.currentText(), "auto"),
+            'quality': self.quality_combo.currentText(),
+            'input_width': self.width_spin.value(),
+            'input_height': self.height_spin.value(),
+            'scale_factor': self.scale_slider.value() / 10.0,
+            'frame_count': self.frame_count.value()
+        }
+    
+    def run_single_benchmark(self):
+        """Run a single benchmark with the current configuration."""
+        if run_benchmark is None:
+            return
+        
+        self.set_ui_running(True)
+        self.results_text.setText("Running benchmark...")
+        self.progress_bar.setValue(0)
+        
+        # Create worker and thread
+        config = self.get_config()
+        self.worker = BenchmarkWorker(config)
+        self.thread = QThread()
+        
+        # Move worker to thread
+        self.worker.moveToThread(self.thread)
+        
+        # Connect signals
+        self.thread.started.connect(self.worker.run_single_benchmark)
+        self.worker.finished.connect(self.on_benchmark_finished)
+        self.worker.error.connect(self.on_benchmark_error)
+        self.worker.finished.connect(self.thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
+        
+        # Start the thread
+        self.thread.start()
+    
+    def run_comparison_benchmark(self):
+        """Run a comparison benchmark across technologies."""
+        if run_comparison_benchmark is None:
+            return
+        
+        self.set_ui_running(True)
+        self.results_text.setText("Running comparison benchmark across upscaling technologies...")
+        self.progress_bar.setValue(0)
+        
+        # Create worker and thread
+        config = self.get_config()
+        self.worker = BenchmarkWorker(config)
+        self.thread = QThread()
+        
+        # Move worker to thread
+        self.worker.moveToThread(self.thread)
+        
+        # Connect signals
+        self.thread.started.connect(self.worker.run_comparison)
+        self.worker.progress.connect(self.progress_bar.setValue)
+        self.worker.finished.connect(self.on_benchmark_finished)
+        self.worker.error.connect(self.on_benchmark_error)
+        self.worker.finished.connect(self.thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
+        
+        # Start the thread
+        self.thread.start()
+    
+    def on_benchmark_finished(self, results):
+        """Handle benchmark completion."""
+        self.results = results
+        self.set_ui_running(False)
+        
+        if not results:
+            self.results_text.setText("Benchmark completed but no results were returned.")
+            return
+        
+        # Format results for display
+        text = ""
+        for i, result in enumerate(results):
+            text += f"--- Result {i+1} ---\n{str(result)}\n\n"
+        
+        self.results_text.setText(text)
+        self.plot_btn.setEnabled(True)
+        self.export_btn.setEnabled(True)
+    
+    def on_benchmark_error(self, error_msg):
+        """Handle benchmark errors."""
+        self.set_ui_running(False)
+        self.results_text.setText(f"ERROR: {error_msg}")
+    
+    def set_ui_running(self, is_running):
+        """Update UI state based on whether benchmark is running."""
+        self.run_btn.setEnabled(not is_running)
+        self.compare_btn.setEnabled(not is_running)
+        self.tech_combo.setEnabled(not is_running)
+        self.quality_combo.setEnabled(not is_running)
+        self.width_spin.setEnabled(not is_running)
+        self.height_spin.setEnabled(not is_running)
+        self.res_preset.setEnabled(not is_running)
+        self.scale_slider.setEnabled(not is_running)
+        self.frame_count.setEnabled(not is_running)
+    
+    def plot_results(self):
+        """Plot benchmark results using matplotlib."""
+        if not self.results:
+            return
+        
+        try:
+            plot_benchmark_results(self.results, "Nu Scaler Benchmark Results")
+        except Exception as e:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Plot Error", f"Error plotting results: {str(e)}")
+    
+    def export_results(self):
+        """Export results to a file."""
+        if not self.results:
+            return
+        
+        try:
+            from PySide6.QtWidgets import QFileDialog
+            
+            filename, _ = QFileDialog.getSaveFileName(
+                self, "Export Results", "", "CSV Files (*.csv);;Text Files (*.txt);;All Files (*)"
+            )
+            
+            if not filename:
+                return
+            
+            if filename.endswith('.csv'):
+                self.export_to_csv(filename)
+            else:
+                self.export_to_text(filename)
+                
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "Export", f"Results exported to {filename}")
+                
+        except Exception as e:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Export Error", f"Error exporting results: {str(e)}")
+    
+    def export_to_csv(self, filename):
+        """Export results to CSV format."""
+        with open(filename, 'w') as f:
+            # Write header
+            f.write("Upscaler,Technology,Quality,InputWidth,InputHeight,OutputWidth,OutputHeight,"
+                   "ScaleFactor,FrameTimeMs,FPS,FramesProcessed,TotalDurationMs\n")
+            
+            # Write data rows
+            for result in self.results:
+                f.write(f"{result.upscaler_name},{result.technology},{result.quality},"
+                        f"{result.input_width},{result.input_height},{result.output_width},"
+                        f"{result.output_height},{result.scale_factor},{result.avg_frame_time_ms},"
+                        f"{result.fps},{result.frames_processed},{result.total_duration_ms}\n")
+    
+    def export_to_text(self, filename):
+        """Export results to plain text format."""
+        with open(filename, 'w') as f:
+            f.write("Nu Scaler Benchmark Results\n")
+            f.write("===========================\n\n")
+            
+            for i, result in enumerate(self.results):
+                f.write(f"Result {i+1}:\n")
+                f.write(str(result))
+                f.write("\n\n")
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -811,6 +1155,7 @@ class MainWindow(QMainWindow):
         self.sidebar.addItems([
             "Live Feed",
             "Settings",
+            "Benchmark",
             "Debug",
             "Advanced",
             "UI & Accessibility"
@@ -822,14 +1167,16 @@ class MainWindow(QMainWindow):
         self.debug_screen = DebugScreen()
         self.advanced_screen = AdvancedScreen(live_feed_screen=self.live_feed_screen)
         self.ui_screen = UIAccessibilityScreen()
+        self.benchmark_screen = BenchmarkScreen()
         self.screens = {
             0: self.live_feed_screen,
             1: SettingsScreen(live_feed_screen=self.live_feed_screen),
-            2: self.debug_screen,
-            3: self.advanced_screen,
-            4: self.ui_screen,
+            2: self.benchmark_screen,
+            3: self.debug_screen,
+            4: self.advanced_screen,
+            5: self.ui_screen,
         }
-        for i in range(5):
+        for i in range(6):
             self.stack.addWidget(self.screens[i])
         self.sidebar.currentRowChanged.connect(self.stack.setCurrentIndex)
         main_widget = QWidget()
