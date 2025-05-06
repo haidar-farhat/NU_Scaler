@@ -4,8 +4,10 @@ import axios from '../../api/axios';
 export const fetchUsers = createAsyncThunk('adminUsers/fetchUsers', async (_, { rejectWithValue }) => {
   try {
     const res = await axios.get('/admin/users');
-    return res.data.data || res.data;
+    console.log('Fetching users response:', res.data);
+    return res.data;
   } catch (err) {
+    console.error('Error fetching users:', err);
     return rejectWithValue(err.response?.data || err.message);
   }
 });
