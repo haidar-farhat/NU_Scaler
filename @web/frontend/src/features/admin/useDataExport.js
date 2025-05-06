@@ -1,69 +1,58 @@
-import { useState, useCallback } from 'react';
-import { useToast } from '../../components/ToastContext';
-import { useSelector } from 'react-redux';
+import { useState } from 'react';
+import adminApiService from '../../api/adminApi';
 
-export function useDataExport() {
+export const useDataExport = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const { showToast } = useToast();
-  const { token } = useSelector(state => state.auth);
 
-  const exportData = useCallback(async (type, format) => {
+  const exportData = async (type, format = 'csv') => {
     setLoading(true);
     setError(null);
-    
-    const urlMap = {
-      reviews: '/api/admin/reviews/export',
-      bugReports: '/api/admin/bug-reports/export',
-      surveys: '/api/admin/hardware-surveys/export',
-    };
-    
-    // Add http://localhost:8000 prefix if needed
-    const baseUrl = 'http://localhost:8000';
-    const url = `${baseUrl}${urlMap[type]}?format=${format}`;
-    
-    // Get the token
-    const authToken = token || localStorage.getItem('token');
-    console.log('Export request with token:', authToken ? `${authToken.substring(0, 10)}...` : 'No token');
-    
+
     try {
-      const res = await fetch(url, {
-        headers: { 
-          'Authorization': `Bearer ${authToken}`,
-          'Accept': 'application/json, application/octet-stream',
-          'Content-Type': 'application/json'
-        },
-        credentials: 'include' // Important for CORS and authentication cookies
+      let response;
+      
+      // Use our centralized admin API service to handle exports
+      switch (type) {
+        case 'reviews':
+          response = await adminApiService.exportReviews(format);
+          break;
+        case 'bugReports':
+          response = await adminApiService.exportBugReports(format);
+          break;
+        case 'surveys':
+          response = await adminApiService.exportHardwareSurveys(format);
+          break;
+        default:
+          throw new Error(`Unknown export type: ${type}`);
+      }
+
+      // Create and trigger download
+      const filename = `${type}_${new Date().toISOString().split('T')[0]}.${format}`;
+      const blob = new Blob([response.data], { 
+        type: format === 'csv' 
+          ? 'text/csv' 
+          : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
       });
       
-      if (!res.ok) {
-        console.error('Export failed:', res.status, res.statusText);
-        let msg = `Export failed: ${res.status} ${res.statusText}`;
-        try {
-          const err = await res.json();
-          msg = err.message || msg;
-        } catch (e) {
-          console.error('Error parsing error response:', e);
-        }
-        throw new Error(msg);
-      }
-      
-      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = window.URL.createObjectURL(blob);
-      a.download = `${type}_${new Date().toISOString().slice(0,19).replace(/[-T:]/g,'')}.${format === 'xlsx' ? 'xlsx' : 'csv'}`;
+      a.href = url;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
+      window.URL.revokeObjectURL(url);
       a.remove();
-      showToast('Export started. Check your downloads.', 'success');
-    } catch (e) {
-      console.error('Export error:', e);
-      setError(e.message || 'Export failed');
-      showToast(e.message || 'Export failed', 'error');
-    } finally {
+      
       setLoading(false);
+      return true;
+    } catch (err) {
+      console.error('Export error:', err);
+      setError(`Export failed: ${err.message}`);
+      setLoading(false);
+      return false;
     }
-  }, [token, showToast]);
+  };
 
   return { exportData, loading, error };
-} 
+}; 
