@@ -49,8 +49,8 @@ class LiveFeedScreen(QWidget):
     log_signal = Signal(str)
     profiler_signal = Signal(float, float, int, int)
     warning_signal = Signal(str, bool)
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self.capture = None
         self.upscaler = None
         self.timer = QTimer(self)
