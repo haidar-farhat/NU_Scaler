@@ -111,7 +111,8 @@ impl GpuDetector {
     /// Enumerate all WGPU adapters
     async fn enumerate_adapters(&self) -> Result<Vec<Adapter>> {
         let adapters = self.instance.enumerate_adapters(Backends::PRIMARY);
-        Ok(adapters.collect())
+        let adapter_vec: Vec<_> = adapters.collect();
+        Ok(adapter_vec)
     }
     
     /// Determine the primary GPU to use
@@ -205,7 +206,7 @@ impl GpuDetector {
                     GpuVendor::Unknown => "Unknown",
                 };
                 
-                format!("{} {} GPU: {} ({})", gpu_type, vendor, gpu.name, gpu.backend)
+                format!("{} {} GPU: {} ({:?})", gpu_type, vendor, gpu.name, gpu.backend)
             },
             None => "No GPU detected".to_string()
         }
