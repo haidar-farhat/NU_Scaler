@@ -8,6 +8,9 @@ from PySide6.QtGui import QPixmap, QImage, QAction
 import time
 import random
 import traceback
+import threading
+import psutil
+import os
 
 # First, try to import the Rust core module
 print("[main.py] About to import nu_scaler_core...")
@@ -88,6 +91,7 @@ class LiveFeedScreen(QWidget):
         self.timer.setInterval(33)  # ~30 FPS
         self.timer.timeout.connect(self.update_frame)
         self.last_frame_time = None
+        self.last_timer_time = None
         self.fps = 0.0
         self.upscaler_initialized = False
         self.upscale_scale = 2.0  # Default scale factor
@@ -109,6 +113,28 @@ class LiveFeedScreen(QWidget):
         print('[DEBUG] LiveFeedScreen: Before update_scale_label')
         self.update_scale_label()
         print('[DEBUG] LiveFeedScreen: After update_scale_label')
+        # Heartbeat timer
+        self.heartbeat_timer = QTimer(self)
+        self.heartbeat_timer.setInterval(1000)
+        self.heartbeat_timer.timeout.connect(self._heartbeat)
+        self.heartbeat_timer.start()
+        # Resource monitor timer
+        self.resource_timer = QTimer(self)
+        self.resource_timer.setInterval(5000)
+        self.resource_timer.timeout.connect(self._resource_debug)
+        self.resource_timer.start()
+
+    def _heartbeat(self):
+        print(f"[HEARTBEAT] GUI event loop alive at {time.strftime('%H:%M:%S')}")
+
+    def _resource_debug(self):
+        try:
+            process = psutil.Process(os.getpid())
+            mem = process.memory_info().rss / (1024 * 1024)
+            thread_count = threading.active_count()
+            print(f"[RESOURCE] Memory: {mem:.1f} MB | Threads: {thread_count}")
+        except Exception as e:
+            print(f"[RESOURCE] Error: {e}")
 
     def init_ui(self):
         layout = QHBoxLayout(self)
@@ -445,62 +471,73 @@ class LiveFeedScreen(QWidget):
         return True
 
     def update_frame(self):
-        if not self.capture:
-            return
-        # Only start a new upscale if no thread is running
-        if getattr(self, '_upscale_thread', None) is not None:
-            print('[DEBUG] Skipping frame: upscale worker still running')
-            return
-        frame_result = self.capture.get_frame()
-        if frame_result is None:
-            return # No frame yet
-
-        frame_bytes_obj, in_w, in_h = frame_result
-        frame = frame_bytes_obj
-
-        # Initialize upscaler on first frame or if dimensions change
-        if not self.upscaler or not self.upscaler_initialized:
-            scale = self.scale_slider.value() / 10.0
-            if not self.init_upscaler(in_w, in_h, scale):
-                return # Stop if upscaler failed to init
-
-        # Re-initialize if scale factor changes
-        current_scale = self.scale_slider.value() / 10.0
-        if abs(current_scale - self.upscale_scale) > 0.01:
-            self.upscale_scale = current_scale
-            try:
-                if hasattr(self.upscaler, 'upscale_scale'):
-                    self.upscaler.upscale_scale = current_scale
-                out_w = int(in_w * current_scale)
-                out_h = int(in_h * current_scale)
-                self.upscaler.initialize(in_w, in_h, out_w, out_h)
-            except Exception as e:
-                print(f"Error re-initializing upscaler: {e}")
+        try:
+            now = time.perf_counter()
+            if self.last_timer_time is not None:
+                print(f"[DEBUG] Timer interval: {(now - self.last_timer_time)*1000:.2f} ms")
+            self.last_timer_time = now
+            if not self.capture:
                 return
+            # Only start a new upscale if no thread is running
+            if getattr(self, '_upscale_thread', None) is not None:
+                print('[DEBUG] Skipping frame: upscale worker still running')
+                return
+            frame_result = self.capture.get_frame()
+            if frame_result is None:
+                return # No frame yet
 
-        # Calculate output dimensions
-        scale = self.upscale_scale
-        out_w = int(in_w * scale)
-        out_h = int(in_h * scale)
+            frame_bytes_obj, in_w, in_h = frame_result
+            frame = frame_bytes_obj
 
-        # Start worker thread for upscaling
-        self._upscale_thread = QThread()
-        self._upscale_worker = UpscaleWorker(self.upscaler, frame, in_w, in_h, out_w, out_h, scale)
-        self._upscale_worker.moveToThread(self._upscale_thread)
-        self._upscale_thread.started.connect(self._upscale_worker.run)
-        self._upscale_worker.finished.connect(self.on_upscale_finished)
-        self._upscale_worker.error.connect(self.on_upscale_error)
-        self._upscale_worker.finished.connect(self._upscale_thread.quit)
-        self._upscale_worker.finished.connect(self._upscale_worker.deleteLater)
-        self._upscale_thread.finished.connect(self._upscale_thread.deleteLater)
-        self._upscale_thread.finished.connect(self._clear_upscale_thread)
-        self._upscale_thread.start()
+            # Initialize upscaler on first frame or if dimensions change
+            if not self.upscaler or not self.upscaler_initialized:
+                scale = self.scale_slider.value() / 10.0
+                if not self.init_upscaler(in_w, in_h, scale):
+                    return # Stop if upscaler failed to init
+
+            # Re-initialize if scale factor changes
+            current_scale = self.scale_slider.value() / 10.0
+            if abs(current_scale - self.upscale_scale) > 0.01:
+                self.upscale_scale = current_scale
+                try:
+                    if hasattr(self.upscaler, 'upscale_scale'):
+                        self.upscaler.upscale_scale = current_scale
+                    out_w = int(in_w * current_scale)
+                    out_h = int(in_h * current_scale)
+                    self.upscaler.initialize(in_w, in_h, out_w, out_h)
+                except Exception as e:
+                    print(f"Error re-initializing upscaler: {e}")
+                    return
+
+            # Calculate output dimensions
+            scale = self.upscale_scale
+            out_w = int(in_w * scale)
+            out_h = int(in_h * scale)
+
+            # Start worker thread for upscaling
+            print(f"[DEBUG] Starting upscale worker at {time.strftime('%H:%M:%S')}")
+            self._upscale_thread = QThread()
+            self._upscale_worker = UpscaleWorker(self.upscaler, frame, in_w, in_h, out_w, out_h, scale)
+            self._upscale_worker.moveToThread(self._upscale_thread)
+            self._upscale_thread.started.connect(self._upscale_worker.run)
+            self._upscale_worker.finished.connect(self.on_upscale_finished)
+            self._upscale_worker.error.connect(self.on_upscale_error)
+            self._upscale_worker.finished.connect(self._upscale_thread.quit)
+            self._upscale_worker.finished.connect(self._upscale_worker.deleteLater)
+            self._upscale_thread.finished.connect(self._upscale_thread.deleteLater)
+            self._upscale_thread.finished.connect(self._clear_upscale_thread)
+            self._upscale_thread.start()
+        except Exception as e:
+            print(f"[EXCEPTION] update_frame: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _clear_upscale_thread(self):
         self._upscale_thread = None
         self._upscale_worker = None
 
     def on_upscale_finished(self, out_bytes, out_w, out_h, elapsed):
+        print(f"[DEBUG] Upscale finished in {elapsed*1000:.2f} ms at {time.strftime('%H:%M:%S')}")
         # Update the GUI with the upscaled image
         if out_bytes:
             qimg = QImage(out_bytes, out_w, out_h, QImage.Format_RGBA8888)
