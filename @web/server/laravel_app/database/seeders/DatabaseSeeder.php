@@ -15,10 +15,15 @@ class DatabaseSeeder extends Seeder
     {
         // User::factory(10)->create();
 
-        User::factory()->create([
-            'name' => 'Test User',
-            'email' => 'test@example.com',
-        ]);
+        // Use firstOrCreate to avoid duplicate entry for test user
+        User::firstOrCreate(
+            ['email' => 'test@example.com'],
+            [
+                'name' => 'Test User',
+                'password' => bcrypt('testpassword'),
+                'is_admin' => false,
+            ]
+        );
 
         // Seed an admin user if not present
         User::firstOrCreate(
