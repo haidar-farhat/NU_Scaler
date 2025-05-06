@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\V1\DownloadController;
 use App\Http\Controllers\Api\Admin\FeedbackController;
 use App\Http\Controllers\Api\Admin\AuthController;
 use App\Http\Controllers\Api\Admin\MetricsController;
+use App\Http\Controllers\TestController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -21,6 +22,9 @@ use Illuminate\Support\Facades\Route;
 | be assigned to the "api" middleware group. Make something great!
 |
 */
+
+// Direct test route - no middleware at all (not even the api group middleware)
+Route::get('/direct-test', [TestController::class, 'testCors']);
 
 // Simple test route for CORS - no rate limits or other middleware
 Route::get('/test-cors', function() {
