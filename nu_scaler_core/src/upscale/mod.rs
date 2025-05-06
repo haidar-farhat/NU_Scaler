@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::any::Any;
 use pyo3::prelude::*;
-use crate::gpu::{detector::GpuDetector, memory::{MemoryPool, AllocationStrategy}, GpuResources};
+use crate::gpu::{detector::GpuDetector, memory::{MemoryPool, AllocationStrategy, MemoryPressure}, GpuResources};
 
 // Add new module declarations
 mod fsr;
