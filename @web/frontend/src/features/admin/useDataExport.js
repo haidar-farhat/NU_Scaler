@@ -11,24 +11,43 @@ export function useDataExport() {
   const exportData = useCallback(async (type, format) => {
     setLoading(true);
     setError(null);
+    
     const urlMap = {
       reviews: '/api/admin/reviews/export',
       bugReports: '/api/admin/bug-reports/export',
       surveys: '/api/admin/hardware-surveys/export',
     };
-    const url = urlMap[type] + `?format=${format}`;
+    
+    // Add http://localhost:8000 prefix if needed
+    const baseUrl = 'http://localhost:8000';
+    const url = `${baseUrl}${urlMap[type]}?format=${format}`;
+    
+    // Get the token
+    const authToken = token || localStorage.getItem('token');
+    console.log('Export request with token:', authToken ? `${authToken.substring(0, 10)}...` : 'No token');
+    
     try {
       const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token || localStorage.getItem('token')}` },
+        headers: { 
+          'Authorization': `Bearer ${authToken}`,
+          'Accept': 'application/json, application/octet-stream',
+          'Content-Type': 'application/json'
+        },
+        credentials: 'include' // Important for CORS and authentication cookies
       });
+      
       if (!res.ok) {
-        let msg = 'Export failed';
+        console.error('Export failed:', res.status, res.statusText);
+        let msg = `Export failed: ${res.status} ${res.statusText}`;
         try {
           const err = await res.json();
           msg = err.message || msg;
-        } catch {}
+        } catch (e) {
+          console.error('Error parsing error response:', e);
+        }
         throw new Error(msg);
       }
+      
       const blob = await res.blob();
       const a = document.createElement('a');
       a.href = window.URL.createObjectURL(blob);
@@ -38,6 +57,7 @@ export function useDataExport() {
       a.remove();
       showToast('Export started. Check your downloads.', 'success');
     } catch (e) {
+      console.error('Export error:', e);
       setError(e.message || 'Export failed');
       showToast(e.message || 'Export failed', 'error');
     } finally {
