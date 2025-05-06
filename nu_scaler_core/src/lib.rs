@@ -347,9 +347,13 @@ impl PyAdvancedWgpuUpscaler {
     }
     
     /// Get VRAM stats (total, used, free)
-    pub fn get_vram_stats(&self) -> PyResult<VramStats> {
+    #[cfg(feature = "python")]
+    pub fn get_vram_stats(&self) -> PyResult<PyVramStats> {
         match &self.gpu_resources {
-            Some(res) => Ok(res.get_vram_stats()),
+            Some(res) => {
+                let stats = res.get_vram_stats();
+                Ok(PyVramStats::from(stats))
+            },
             None => Err(pyo3::exceptions::PyRuntimeError::new_err(
                 "No GPU resources available"
             )),
@@ -390,12 +394,8 @@ impl PyAdvancedWgpuUpscaler {
     /// Check if adaptive quality is enabled
     #[getter]
     pub fn get_adaptive_quality(&self) -> PyResult<bool> {
-        // Directly access inner struct to check the setting
-        Python::with_gil(|_py| {
-            // Use unsafe to get mutable access (only reading, not writing)
-            let inner = unsafe { &mut *(&self.inner as *const _ as *mut upscale::WgpuUpscaler) };
-            Ok(inner.adaptive_quality)
-        })
+        // Use inner's public method to get the value
+        Ok(self.inner.is_adaptive_quality_enabled())
     }
     
     /// Enable or disable adaptive quality
