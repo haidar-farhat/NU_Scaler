@@ -6,6 +6,7 @@ use crate::upscale::Upscaler;
 use crate::capture::realtime::RealTimeCapture;
 use anyhow::Result;
 use std::sync::Arc;
+use crate::benchmark::{PyBenchmarkResult, py_benchmark_upscaler, py_run_comparison_benchmark};
 
 pub mod capture;
 pub mod gpu;
