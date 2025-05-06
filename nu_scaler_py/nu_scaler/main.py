@@ -408,9 +408,10 @@ class LiveFeedScreen(QWidget):
             
             # Initialize the upscaler
             self.upscaler.initialize(in_w, in_h, out_w, out_h)
-            self.upscaler.set_upscale_scale(scale)
-            
-            print(f"Upscaler initialized: {in_w}x{in_h} -> {out_w}x{out_h}")
+            # Don't try to call set_upscale_scale which doesn't exist
+            # Instead, just note that the upscaler scale is set during initialization
+            # based on the dimensions
+            print(f"Upscaler scale factor: {self.upscaler.upscale_scale}")
             self.upscaler_initialized = True
             
             # Update memory stats right away
