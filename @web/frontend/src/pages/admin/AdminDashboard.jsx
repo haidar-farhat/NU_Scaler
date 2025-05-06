@@ -1,42 +1,44 @@
-import React from 'react';
+import React, { useEffect } from 'react';
+import { useSelector, useDispatch } from 'react-redux';
 import SummaryCards from './SummaryCards';
 import ReviewsTable from './ReviewsTable';
 import BugReportsTable from './BugReportsTable';
 import SurveysChart from './SurveysChart';
 import UserGrowthChart from './UserGrowthChart';
-
-const dummyReviews = [
-  { id: 1, rating: 5, comment: 'Great!', created_at: new Date().toISOString() },
-];
-const dummyBugReports = [
-  { id: 1, severity: 'high', description: 'Crash on launch', created_at: new Date().toISOString() },
-];
-const dummySurveys = [
-  { gpu_brand: 'NVIDIA', count: 10 },
-  { gpu_brand: 'AMD', count: 5 },
-];
-const dummyUserGrowth = [
-  { date: '2024-05-01', registrations: 2 },
-  { date: '2024-05-02', registrations: 5 },
-];
+import { fetchReviews } from '../../features/admin/reviewsSlice';
+import { fetchBugReports } from '../../features/admin/bugReportsSlice';
+import { fetchSurveys } from '../../features/admin/surveysSlice';
+import { fetchUserGrowth } from '../../features/admin/userGrowthSlice';
 
 const AdminDashboard = () => {
-  // Replace dummy data with Redux selectors or API data as needed
+  const dispatch = useDispatch();
+  const { list: reviews, loading: reviewsLoading, error: reviewsError } = useSelector(state => state.reviews);
+  const { list: bugReports, loading: bugReportsLoading, error: bugReportsError } = useSelector(state => state.bugReports);
+  const { list: surveys, loading: surveysLoading, error: surveysError } = useSelector(state => state.surveys);
+  const { list: userGrowth, loading: userGrowthLoading, error: userGrowthError } = useSelector(state => state.userGrowth);
+
+  useEffect(() => {
+    dispatch(fetchReviews());
+    dispatch(fetchBugReports());
+    dispatch(fetchSurveys());
+    dispatch(fetchUserGrowth());
+  }, [dispatch]);
+
   return (
     <div className="p-6">
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <SummaryCards title="Total Reviews" value={dummyReviews.length} icon="⭐" />
-        <SummaryCards title="Bug Reports" value={dummyBugReports.length} icon="🐞" />
-        <SummaryCards title="Surveys" value={dummySurveys.length} icon="🖥️" />
-        <SummaryCards title="New Users" value={dummyUserGrowth.length} icon="👤" />
+        <SummaryCards title="Total Reviews" value={reviews.length} icon="⭐" />
+        <SummaryCards title="Bug Reports" value={bugReports.length} icon="🐞" />
+        <SummaryCards title="Surveys" value={surveys.length} icon="🖥️" />
+        <SummaryCards title="New Users" value={userGrowth.length} icon="👤" />
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <ReviewsTable reviews={dummyReviews} />
-        <BugReportsTable bugReports={dummyBugReports} />
+        {reviewsLoading ? <div>Loading reviews...</div> : reviewsError ? <div className="text-red-600">{reviewsError}</div> : <ReviewsTable reviews={reviews} />}
+        {bugReportsLoading ? <div>Loading bug reports...</div> : bugReportsError ? <div className="text-red-600">{bugReportsError}</div> : <BugReportsTable bugReports={bugReports} />}
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
-        <SurveysChart data={dummySurveys} />
-        <UserGrowthChart data={dummyUserGrowth} />
+        {surveysLoading ? <div>Loading surveys...</div> : surveysError ? <div className="text-red-600">{surveysError}</div> : <SurveysChart data={surveys} />}
+        {userGrowthLoading ? <div>Loading user growth...</div> : userGrowthError ? <div className="text-red-600">{userGrowthError}</div> : <UserGrowthChart data={userGrowth} />}
       </div>
     </div>
   );
