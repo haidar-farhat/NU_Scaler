@@ -23,6 +23,7 @@ class User extends Authenticatable
         'email',
         'password',
         'is_admin',
+        'is_active',
         // 'role', // Removed role, using is_admin boolean instead
     ];
 
@@ -47,6 +48,7 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'is_admin' => 'boolean',
+            'is_active' => 'boolean',
         ];
     }
 
