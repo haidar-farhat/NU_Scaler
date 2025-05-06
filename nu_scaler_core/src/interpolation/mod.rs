@@ -550,6 +550,122 @@ impl BlockMatchingInterpolator {
             search_radius,
         }
     }
+    
+    /// Calculate the sum of absolute differences (SAD) between two blocks
+    fn calculate_sad(&self, frame1: &[u8], frame2: &[u8], x1: usize, y1: usize, x2: usize, y2: usize) -> u32 {
+        let width = self.width as usize;
+        let channels = 4; // RGBA
+        let block_size = self.block_size as usize;
+        
+        let mut sad = 0u32;
+        
+        for y in 0..block_size {
+            for x in 0..block_size {
+                if y1 + y >= self.height as usize || x1 + x >= width || 
+                   y2 + y >= self.height as usize || x2 + x >= width {
+                    continue;
+                }
+                
+                let idx1 = ((y1 + y) * width + (x1 + x)) * channels;
+                let idx2 = ((y2 + y) * width + (x2 + x)) * channels;
+                
+                // Calculate difference for RGB channels (ignore alpha)
+                for c in 0..3 {
+                    let diff = (frame1[idx1 + c] as i32 - frame2[idx2 + c] as i32).abs() as u32;
+                    sad += diff;
+                }
+            }
+        }
+        
+        sad
+    }
+    
+    /// Find the best matching block using sum of absolute differences
+    fn find_best_match(&self, frame1: &[u8], frame2: &[u8], block_x: usize, block_y: usize) -> (i32, i32) {
+        let width = self.width as usize;
+        let height = self.height as usize;
+        let search_radius = self.search_radius as i32;
+        
+        let mut best_x = 0;
+        let mut best_y = 0;
+        let mut min_sad = u32::MAX;
+        
+        for dy in -search_radius..=search_radius {
+            for dx in -search_radius..=search_radius {
+                let search_x = block_x as i32 + dx;
+                let search_y = block_y as i32 + dy;
+                
+                if search_x < 0 || search_y < 0 || 
+                   search_x + self.block_size as i32 > width as i32 || 
+                   search_y + self.block_size as i32 > height as i32 {
+                    continue;
+                }
+                
+                let sad = self.calculate_sad(
+                    frame1, 
+                    frame2, 
+                    block_x, 
+                    block_y, 
+                    search_x as usize, 
+                    search_y as usize
+                );
+                
+                if sad < min_sad {
+                    min_sad = sad;
+                    best_x = dx;
+                    best_y = dy;
+                }
+            }
+        }
+        
+        (best_x, best_y)
+    }
+    
+    /// Sample a frame at non-integer coordinates using bilinear interpolation
+    fn sample_frame(&self, frame: &[u8], x: f32, y: f32) -> [u8; 4] {
+        let width = self.width as usize;
+        let height = self.height as usize;
+        let channels = 4; // RGBA
+        
+        // Clamp coordinates to valid range
+        let x = x.clamp(0.0, (width - 1) as f32);
+        let y = y.clamp(0.0, (height - 1) as f32);
+        
+        // Integer pixel coordinates
+        let x0 = x.floor() as usize;
+        let y0 = y.floor() as usize;
+        let x1 = (x0 + 1).min(width - 1);
+        let y1 = (y0 + 1).min(height - 1);
+        
+        // Fractional parts for interpolation
+        let x_frac = x - x0 as f32;
+        let y_frac = y - y0 as f32;
+        
+        // Get pixel values at the four surrounding integer positions
+        let idx00 = (y0 * width + x0) * channels;
+        let idx01 = (y0 * width + x1) * channels;
+        let idx10 = (y1 * width + x0) * channels;
+        let idx11 = (y1 * width + x1) * channels;
+        
+        let mut result = [0u8; 4];
+        
+        // Perform bilinear interpolation for each channel
+        for c in 0..channels {
+            let p00 = frame[idx00 + c] as f32;
+            let p01 = frame[idx01 + c] as f32;
+            let p10 = frame[idx10 + c] as f32;
+            let p11 = frame[idx11 + c] as f32;
+            
+            // Bilinear interpolation formula
+            let top = p00 * (1.0 - x_frac) + p01 * x_frac;
+            let bottom = p10 * (1.0 - x_frac) + p11 * x_frac;
+            let value = top * (1.0 - y_frac) + bottom * y_frac;
+            
+            result[c] = value as u8;
+        }
+        
+        result
+    }
 }
 
 impl FrameInterpolator for BlockMatchingInterpolator {
@@ -560,6 +676,8 @@ impl FrameInterpolator for BlockMatchingInterpolator {
         
         self.width = width;
         self.height = height;
+        
+        println!("[BlockMatchingInterpolator] Initialized with dimensions: {}x{}", width, height);
         self.initialized = true;
         
         Ok(())
@@ -570,22 +688,73 @@ impl FrameInterpolator for BlockMatchingInterpolator {
             return Err(anyhow!("Interpolator not initialized"));
         }
         
-        // For this initial implementation, we'll just do a simple blend between frames
-        // A proper implementation would use block matching for motion estimation
-        
         let frame_size = (self.width * self.height * 4) as usize;
         
         if frame1.len() != frame_size || frame2.len() != frame_size {
             return Err(anyhow!("Frame size mismatch"));
         }
         
-        // Simple linear interpolation between pixels
+        let width = self.width as usize;
+        let height = self.height as usize;
+        let channels = 4; // RGBA
+        let block_size = self.block_size as usize;
+        
+        // Calculate motion vectors for each block
+        let blocks_x = (width + block_size - 1) / block_size;
+        let blocks_y = (height + block_size - 1) / block_size;
+        
+        // Store motion vectors for each block (x, y)
+        let mut motion_vectors = vec![(0, 0); blocks_x * blocks_y];
+        
+        // Step 1: Calculate motion vectors
+        for by in 0..blocks_y {
+            for bx in 0..blocks_x {
+                let block_index = by * blocks_x + bx;
+                let block_x = bx * block_size;
+                let block_y = by * block_size;
+                
+                // Find best matching block in the second frame
+                let (mv_x, mv_y) = self.find_best_match(frame1, frame2, block_x, block_y);
+                motion_vectors[block_index] = (mv_x, mv_y);
+            }
+        }
+        
+        // Step 2: Generate interpolated frame using motion vectors
         let mut output = vec![0u8; frame_size];
         
-        for i in 0..frame_size {
-            let pixel1 = frame1[i] as f32;
-            let pixel2 = frame2[i] as f32;
-            output[i] = ((1.0 - t) * pixel1 + t * pixel2) as u8;
+        for y in 0..height {
+            for x in 0..width {
+                let pixel_idx = (y * width + x) * channels;
+                
+                // Find which block this pixel belongs to
+                let block_x = x / block_size;
+                let block_y = y / block_size;
+                let block_index = block_y * blocks_x + block_x;
+                
+                // Get motion vector for this block
+                let (mv_x, mv_y) = motion_vectors[block_index];
+                
+                // Calculate pixel position in both frames with motion compensation
+                let src_x1 = x as f32 + mv_x as f32 * t;
+                let src_y1 = y as f32 + mv_y as f32 * t;
+                
+                let src_x2 = x as f32 - mv_x as f32 * (1.0 - t);
+                let src_y2 = y as f32 - mv_y as f32 * (1.0 - t);
+                
+                // Sample from both frames
+                let pixel1 = self.sample_frame(frame1, src_x1, src_y1);
+                let pixel2 = self.sample_frame(frame2, src_x2, src_y2);
+                
+                // Blend samples based on time parameter
+                for c in 0..channels {
+                    output[pixel_idx + c] = ((1.0 - t) * pixel1[c] as f32 + t * pixel2[c] as f32) as u8;
+                }
+            }
+        }
+        
+        // Step 3: Apply occlusion handling - detect areas with inconsistent motion
+        if let Some(processed_output) = self.handle_occlusions(frame1, frame2, &output, &motion_vectors, blocks_x, blocks_y, t) {
+            return Ok(processed_output);
         }
         
         Ok(output)
@@ -598,7 +767,7 @@ impl FrameInterpolator for BlockMatchingInterpolator {
     fn set_quality(&mut self, quality: InterpolationQuality) -> Result<()> {
         self.quality = quality;
         
-        // Update block size and search radius based on quality
+        // Update block size and search radius based on new quality
         self.block_size = match quality {
             InterpolationQuality::High => 8,
             InterpolationQuality::Medium => 16,
@@ -611,11 +780,133 @@ impl FrameInterpolator for BlockMatchingInterpolator {
             InterpolationQuality::Low => 8,
         };
         
+        self.initialized = false; // Force reinitialization with new settings
+        
         Ok(())
     }
     
     fn quality(&self) -> InterpolationQuality {
         self.quality
+    }
+}
+
+impl BlockMatchingInterpolator {
+    /// Handle occlusions by detecting areas with inconsistent motion
+    fn handle_occlusions(&self, frame1: &[u8], frame2: &[u8], output: &[u8], motion_vectors: &[(i32, i32)], 
+                        blocks_x: usize, blocks_y: usize, t: f32) -> Option<Vec<u8>> {
+        // This is a simplified implementation of occlusion handling
+        // A more sophisticated approach would involve bidirectional motion estimation
+        // and consistency checks between forward and backward motion vectors
+        
+        let width = self.width as usize;
+        let height = self.height as usize;
+        let channels = 4; // RGBA
+        let block_size = self.block_size as usize;
+        
+        // Check if motion is smooth - if so, no need for special handling
+        let mut is_motion_smooth = true;
+        
+        for by in 1..blocks_y {
+            for bx in 1..blocks_x {
+                let current_idx = by * blocks_x + bx;
+                let left_idx = by * blocks_x + (bx - 1);
+                let top_idx = (by - 1) * blocks_x + bx;
+                
+                let (cur_x, cur_y) = motion_vectors[current_idx];
+                let (left_x, left_y) = motion_vectors[left_idx];
+                let (top_x, top_y) = motion_vectors[top_idx];
+                
+                // Calculate motion difference
+                let diff_left = ((cur_x - left_x).abs() + (cur_y - left_y).abs()) as f32;
+                let diff_top = ((cur_x - top_x).abs() + (cur_y - top_y).abs()) as f32;
+                
+                // If motion difference is large, we have potential occlusions
+                if diff_left > 10.0 || diff_top > 10.0 {
+                    is_motion_smooth = false;
+                    break;
+                }
+            }
+            if !is_motion_smooth {
+                break;
+            }
+        }
+        
+        // If motion is smooth enough, no special handling needed
+        if is_motion_smooth {
+            return None;
+        }
+        
+        // Handle occlusions by blending based on motion confidence
+        let mut result = output.to_vec();
+        
+        for by in 0..blocks_y {
+            for bx in 0..blocks_x {
+                let block_index = by * blocks_x + bx;
+                let (mv_x, mv_y) = motion_vectors[block_index];
+                
+                // Calculate a confidence value for this block
+                // Blocks with very different motion from neighbors get lower confidence
+                let mut confidence = 1.0;
+                
+                if bx > 0 && by > 0 && bx < blocks_x - 1 && by < blocks_y - 1 {
+                    let mut diff_sum = 0.0;
+                    let mut neighbor_count = 0.0;
+                    
+                    // Check neighboring blocks
+                    for dy in -1..=1 {
+                        for dx in -1..=1 {
+                            if dx == 0 && dy == 0 {
+                                continue;
+                            }
+                            
+                            let nx = bx as isize + dx;
+                            let ny = by as isize + dy;
+                            
+                            if nx >= 0 && nx < blocks_x as isize && ny >= 0 && ny < blocks_y as isize {
+                                let neighbor_idx = (ny as usize * blocks_x + nx as usize);
+                                let (n_x, n_y) = motion_vectors[neighbor_idx];
+                                
+                                let diff = ((mv_x - n_x).abs() + (mv_y - n_y).abs()) as f32;
+                                diff_sum += diff;
+                                neighbor_count += 1.0;
+                            }
+                        }
+                    }
+                    
+                    if neighbor_count > 0.0 {
+                        let avg_diff = diff_sum / neighbor_count;
+                        // Reduce confidence for blocks with high motion difference
+                        confidence = 1.0 / (1.0 + avg_diff * 0.1);
+                    }
+                }
+                
+                // Apply confidence-based blending for this block
+                for y in 0..block_size {
+                    for x in 0..block_size {
+                        let px = bx * block_size + x;
+                        let py = by * block_size + y;
+                        
+                        if px >= width || py >= height {
+                            continue;
+                        }
+                        
+                        let pixel_idx = (py * width + px) * channels;
+                        
+                        // For low confidence areas, blend more from original frames
+                        // rather than motion-compensated samples
+                        if confidence < 0.7 {
+                            // Direct blend between original frames for low confidence areas
+                            for c in 0..channels {
+                                result[pixel_idx + c] = ((1.0 - t) * frame1[pixel_idx + c] as f32 + 
+                                                        t * frame2[pixel_idx + c] as f32) as u8;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        Some(result)
     }
 }
 
