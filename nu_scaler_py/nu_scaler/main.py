@@ -6,6 +6,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QPixmap, QImage
 import time
+import random
+import traceback
 
 try:
     import nu_scaler_core
@@ -26,6 +28,13 @@ class LiveFeedScreen(QWidget):
         self.fps = 0.0
         self.upscaler_initialized = False
         self.upscale_scale = 2.0  # Default scale factor
+        self.advanced_upscaling = True  # Use advanced upscaler by default
+        self.memory_monitor_timer = QTimer(self)
+        self.memory_monitor_timer.timeout.connect(self.update_memory_stats)
+        self.memory_monitor_timer.start(2000)  # Update every 2 seconds
+        self.vram_usage = 0.0
+        self.total_vram = 0.0
+        self.show_memory_stats = True
         self.init_ui()
 
     def init_ui(self):
@@ -122,6 +131,32 @@ class LiveFeedScreen(QWidget):
         layout.addWidget(right_panel)
         self.refresh_windows()
         self.update_scale_label()
+
+        # Add advanced upscaling option
+        self.advanced_check = QCheckBox("Advanced GPU Optimization", self)
+        self.advanced_check.setChecked(self.advanced_upscaling)
+        self.advanced_check.stateChanged.connect(self.toggle_advanced_upscaling)
+        upscale_controls.layout().addRow(self.advanced_check)
+        
+        # Add memory stats display
+        self.memory_stats_label = QLabel("VRAM: 0.0 MB / 0.0 MB (0%)", self)
+        upscale_controls.layout().addRow(self.memory_stats_label)
+        
+        # Add memory management strategy dropdown
+        memory_strategy_layout = QHBoxLayout()
+        memory_strategy_layout.addWidget(QLabel("Memory Strategy:"))
+        self.memory_strategy_box = QComboBox(self)
+        self.memory_strategy_box.addItems(["Auto", "Aggressive", "Balanced", "Conservative", "Minimal"])
+        self.memory_strategy_box.setCurrentText("Auto")
+        self.memory_strategy_box.currentIndexChanged.connect(self.set_memory_strategy)
+        memory_strategy_layout.addWidget(self.memory_strategy_box)
+        upscale_controls.layout().addLayout(memory_strategy_layout)
+        
+        # Add adaptive quality checkbox
+        self.adaptive_quality_check = QCheckBox("Adaptive Quality", self)
+        self.adaptive_quality_check.setChecked(True)
+        self.adaptive_quality_check.stateChanged.connect(self.toggle_adaptive_quality)
+        upscale_controls.layout().addRow(self.adaptive_quality_check)
 
     def update_source_ui(self, text):
         if text == "Window":
@@ -239,6 +274,58 @@ class LiveFeedScreen(QWidget):
             self.quality_box.setEnabled(True)
             self.algorithm_box.setEnabled(False)
             
+    def toggle_advanced_upscaling(self, state):
+        """Toggle between standard and advanced upscaling"""
+        self.advanced_upscaling = bool(state)
+        self.upscaler = None  # Force re-initialization
+        self.upscaler_initialized = False
+        self.memory_strategy_box.setEnabled(self.advanced_upscaling)
+        self.adaptive_quality_check.setEnabled(self.advanced_upscaling)
+    
+    def toggle_adaptive_quality(self, state):
+        """Toggle adaptive quality mode"""
+        if self.upscaler and hasattr(self.upscaler, 'set_adaptive_quality'):
+            self.upscaler.set_adaptive_quality(bool(state))
+    
+    def set_memory_strategy(self, index):
+        """Set the memory allocation strategy"""
+        if not self.upscaler or not hasattr(self.upscaler, 'set_memory_strategy'):
+            return
+            
+        strategies = ["Auto", "Aggressive", "Balanced", "Conservative", "Minimal"]
+        if index >= 0 and index < len(strategies):
+            strategy = strategies[index].lower()
+            try:
+                self.upscaler.set_memory_strategy(strategy)
+                print(f"Memory strategy set to: {strategy}")
+            except Exception as e:
+                print(f"Failed to set memory strategy: {e}")
+    
+    def update_memory_stats(self):
+        """Update GPU memory usage statistics"""
+        try:
+            if self.upscaler and hasattr(self.upscaler, 'get_vram_stats'):
+                stats = self.upscaler.get_vram_stats()
+                if stats:
+                    self.vram_usage = stats.used_mb
+                    self.total_vram = stats.total_mb
+                    percentage = stats.usage_percent
+                    
+                    # Update label
+                    self.memory_stats_label.setText(
+                        f"VRAM: {self.vram_usage:.1f} MB / {self.total_vram:.1f} MB ({percentage:.1f}%)"
+                    )
+                    
+                    # Set color based on usage
+                    if percentage > 90:
+                        self.memory_stats_label.setStyleSheet("color: red; font-weight: bold")
+                    elif percentage > 75:
+                        self.memory_stats_label.setStyleSheet("color: orange")
+                    else:
+                        self.memory_stats_label.setStyleSheet("color: green")
+        except Exception as e:
+            print(f"Error updating memory stats: {e}")
+    
     def init_upscaler(self, in_w, in_h, scale):
         if nu_scaler_core is None:
             print("[GUI] Rust core not available for upscaler.")
@@ -253,40 +340,50 @@ class LiveFeedScreen(QWidget):
             algorithm = self.algorithm_box.currentText()
             technology = self.technology_box.currentText()
             
-            # Use appropriate upscaler based on technology selection
-            if technology == "Auto (Best for GPU)":
-                # Use core's automatic detection for best technology
-                self.upscaler = nu_scaler_core.create_best_upscaler(quality)
-                print(f"[GUI] Created auto-detected best upscaler: {quality}")
-            elif technology == "FSR 3.0":
-                # Use FSR technology
-                self.upscaler = nu_scaler_core.create_fsr_upscaler(quality)
-                print(f"[GUI] Created FSR 3.0 upscaler: {quality}")
-            elif technology == "DLSS":
-                # Use DLSS technology
-                self.upscaler = nu_scaler_core.create_dlss_upscaler(quality)
-                print(f"[GUI] Created DLSS upscaler: {quality}")
-            else:
-                # Use basic WGPU upscaler with specified algorithm
-                self.upscaler = nu_scaler_core.PyWgpuUpscaler(quality, algorithm)
-                print(f"[GUI] Created basic upscaler: {quality}, {algorithm}")
+            # Use the appropriate upscaler based on settings
+            if self.advanced_upscaling:
+                # Use the advanced GPU-optimized upscaler with memory management
+                print(f"Creating advanced upscaler with quality: {quality}")
+                self.upscaler = nu_scaler_core.create_advanced_upscaler(quality.lower())
                 
-            # Initialize the upscaler with dimensions
+                # Set adaptive quality based on checkbox
+                if hasattr(self.upscaler, 'set_adaptive_quality'):
+                    self.upscaler.set_adaptive_quality(self.adaptive_quality_check.isChecked())
+                
+                # Set memory strategy if not auto
+                strategy_text = self.memory_strategy_box.currentText()
+                if strategy_text != "Auto" and hasattr(self.upscaler, 'set_memory_strategy'):
+                    self.upscaler.set_memory_strategy(strategy_text.lower())
+            else:
+                # Use appropriate upscaler based on technology selection
+                if technology == "Auto (Best for GPU)":
+                    # Use core's automatic detection for best technology
+                    self.upscaler = nu_scaler_core.create_best_upscaler(quality.lower())
+                elif technology == "FSR 3.0":
+                    # Use FSR upscaler
+                    self.upscaler = nu_scaler_core.create_fsr_upscaler(quality.lower())
+                elif technology == "DLSS":
+                    # Use DLSS upscaler
+                    self.upscaler = nu_scaler_core.create_dlss_upscaler(quality.lower())
+                else:
+                    # Default to basic upscaler
+                    self.upscaler = nu_scaler_core.PyWgpuUpscaler(quality.lower(), algorithm.lower())
+            
+            # Initialize the upscaler
             self.upscaler.initialize(in_w, in_h, out_w, out_h)
+            self.upscaler.set_upscale_scale(scale)
+            
+            print(f"Upscaler initialized: {in_w}x{in_h} -> {out_w}x{out_h}")
             self.upscaler_initialized = True
             
-            # Store scale factor for future reference
-            self.upscale_scale = scale
-            # If the upscaler has a scale property, set it
-            if hasattr(self.upscaler, 'set_upscale_scale'):
-                self.upscaler.set_upscale_scale(scale)
+            # Update memory stats right away
+            self.update_memory_stats()
             
-            print(f"[GUI] Upscaler initialized: {in_w}x{in_h} -> {out_w}x{out_h}")
             return True
         except Exception as e:
+            traceback.print_exc()
             print(f"[GUI] Error initializing upscaler: {e}")
-            self.status_bar.setText(f"Error initializing upscaler: {e}")
-            self.log_signal.emit(f"Error initializing upscaler: {e}")
+            self.status_bar.setText(f"Error: {str(e)}")
             return False
 
     def update_frame(self):
@@ -305,63 +402,67 @@ class LiveFeedScreen(QWidget):
             scale = self.scale_slider.value() / 10.0
             if not self.init_upscaler(in_w, in_h, scale):
                 return # Stop if upscaler failed to init
-        # TODO: Add logic to re-initialize if scale factor changes
+        
+        # Re-initialize if scale factor changes
+        current_scale = self.scale_slider.value() / 10.0
+        if abs(current_scale - self.upscale_scale) > 0.01:
+            self.upscale_scale = current_scale
+            self.upscaler.set_upscale_scale(current_scale)
+            # Re-initialize with new output size
+            out_w = int(in_w * current_scale)
+            out_h = int(in_h * current_scale)
+            try:
+                self.upscaler.initialize(in_w, in_h, out_w, out_h)
+            except Exception as e:
+                print(f"Error re-initializing upscaler: {e}")
+                return
 
         try:
             out_bytes = self.upscaler.upscale(frame) # Frame is now RGBA
             
-            # Get scale factor from upscaler directly
-            self.upscale_scale = self.upscaler.get_upscale_scale()
-            out_w = int(in_w * self.upscale_scale)
-            out_h = int(in_h * self.upscale_scale)
-
-            # Print first ~20 bytes of received upscale buffer
-            print(f"[GUI] Received {len(out_bytes)} upscale bytes. First 20: {bytes(out_bytes[:20])}")
-
-            # --- BEGIN ADDED DEBUG CODE ---
-            try:
-                from PIL import Image
-                print(f"Attempting to save upscaled image ({out_w}x{out_h}, {len(out_bytes)} bytes)")
-                if len(out_bytes) == out_w * out_h * 4:
-                    img_to_save = Image.frombytes('RGBA', (out_w, out_h), out_bytes)
-                    img_to_save.save('upscaled_debug.png')
-                    print("Saved upscaled_debug.png successfully.")
-                else:
-                    print(f"Error: Upscaled byte length mismatch. Expected {out_w * out_h * 4}, got {len(out_bytes)}")
-            except ImportError:
-                print("PIL/Pillow not installed. Cannot save debug image.")
-            except Exception as save_e:
-                print(f"Error saving debug image: {save_e}")
-            # --- END ADDED DEBUG CODE ---
-
-            # Display output (now showing raw input)
-            # img = QImage(out_bytes, out_w, out_h, QImage.Format_ARGB32)
-            # Use RGBA8888 now that Rust returns RGBA
-            # For output preview, we display the raw input frame for now
-            img_out_debug = QImage(frame, in_w, in_h, QImage.Format_RGBA8888)
-            pixmap_out = QPixmap.fromImage(img_out_debug)
-            self.output_preview.setPixmap(pixmap_out)
-
-            # Display input (Use RGBA8888)
-            img_in = QImage(frame, in_w, in_h, QImage.Format_RGBA8888) 
-            pixmap_in = QPixmap.fromImage(img_in)
-            self.input_preview.setPixmap(pixmap_in)
-
-            # Update overlay and status
-            t1 = time.perf_counter()
-            frame_time = (t1 - t0) * 1000
-            self.fps = 1000.0 / frame_time if frame_time > 0 else 0.0
-            self.overlay.setText(f"Input: {in_w}×{in_h}\nUpscaled: {out_w}×{out_h}\nFPS: {self.fps:.1f}")
-            self.status_bar.setText(f"Frame Time: {frame_time:.1f} ms   FPS: {self.fps:.1f}   Resolution: {in_w}×{in_h} → {out_w}×{out_h}")
-            self.profiler_signal.emit(frame_time, self.fps, in_w, in_h)
-            if self.fps < 30:
-                self.warning_signal.emit(f"Warning: Low FPS ({self.fps:.1f})", True)
+            # Get scale factor from upscaler directly if possible
+            if hasattr(self.upscaler, 'get_upscale_scale'):
+                scale = self.upscaler.get_upscale_scale
             else:
-                self.warning_signal.emit("", False)
-
+                scale = self.upscale_scale
+                
+            # Calculate output dimensions
+            out_w = int(in_w * scale)
+            out_h = int(in_h * scale)
+            
+            # Clean up memory if using advanced upscaler
+            if self.advanced_upscaling and hasattr(self.upscaler, 'cleanup_memory'):
+                # Only call cleanup_memory occasionally to avoid constant cleanup
+                if random.random() < 0.05:  # ~5% chance each frame
+                    self.upscaler.cleanup_memory()
+            
+            # Convert result to QImage/QPixmap and display
+            if out_bytes:
+                qimg = QImage(out_bytes, out_w, out_h, QImage.Format_RGBA8888)
+                pixmap = QPixmap.fromImage(qimg)
+                self.output_preview.setPixmap(pixmap)
+                
+                # Update FPS
+                t1 = time.perf_counter()
+                dt = t1 - t0
+                if dt > 0:
+                    inst_fps = 1.0 / dt
+                    # Smooth FPS calculation
+                    self.fps = 0.95 * self.fps + 0.05 * inst_fps if self.fps > 0 else inst_fps
+                self.overlay.setText(f"Input: {in_w}×{in_h}\nUpscaled: {out_w}×{out_h}\nFPS: {self.fps:.1f}")
+                self.status_bar.setText(f"Frame Time: {(t1 - t0) * 1000:.1f} ms   FPS: {self.fps:.1f}   Resolution: {in_w}×{in_h} → {out_w}×{out_h}")
+                self.profiler_signal.emit(dt * 1000, self.fps, in_w, in_h)
+                if self.fps < 30:
+                    self.warning_signal.emit(f"Warning: Low FPS ({self.fps:.1f})", True)
+                else:
+                    self.warning_signal.emit("", False)
+                
+                # Update frame time
+                self.last_frame_time = t0
         except Exception as e:
-            self.status_bar.setText(f"Upscale error: {e}")
-            self.log_signal.emit(f"Error: {e}")
+            traceback.print_exc()
+            print(f"[GUI] Error in upscaling: {e}")
+            self.status_bar.setText(f"Error: {str(e)}")
             self.stop_capture() # Stop on error
 
 class SettingsScreen(QWidget):
