@@ -5,6 +5,7 @@ use rayon::prelude::*;
 use std::time::Instant;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::any::Any;
 use crate::gpu::{detector::GpuDetector, memory::{MemoryPool, AllocationStrategy}, GpuResources};
 
 // Add new module declarations
@@ -42,7 +43,7 @@ pub enum UpscalingTechnology {
 }
 
 /// Trait for upscaling algorithms
-pub trait Upscaler {
+pub trait Upscaler: Any + Send + Sync {
     /// Initialize the upscaler
     fn initialize(&mut self, input_width: u32, input_height: u32, output_width: u32, output_height: u32) -> Result<()>;
     /// Upscale a single frame (raw bytes or image)
