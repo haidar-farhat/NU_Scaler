@@ -5,6 +5,7 @@ use rayon::prelude::*;
 use std::time::Instant;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use crate::gpu::{detector::GpuDetector, memory::{MemoryPool, AllocationStrategy}, GpuResources};
 
 // Add new module declarations
 mod fsr;
@@ -193,10 +194,13 @@ pub struct WgpuUpscaler {
     output_width: u32,
     output_height: u32,
     initialized: bool,
-    // WGPU fields
+    // WGPU fields - internal device and queue for self-managed mode
     instance: Option<Instance>,
     device: Option<Device>,
     queue: Option<Queue>,
+    // Shared resources - for external device and queue mode
+    gpu_resources: Option<Arc<GpuResources>>,
+    // Upscaler resources
     shader: Option<ShaderModule>,
     pipeline: Option<ComputePipeline>,
     input_buffer: Option<Buffer>,
@@ -213,6 +217,9 @@ pub struct WgpuUpscaler {
     buffer_pool_size: u32,
     gpu_allocator: String,
     shader_path: String,
+    // VRAM management
+    use_memory_pool: bool,
+    adaptive_quality: bool,
 }
 
 impl WgpuUpscaler {
@@ -228,6 +235,7 @@ impl WgpuUpscaler {
             instance: None,
             device: None,
             queue: None,
+            gpu_resources: None,
             shader: None,
             pipeline: None,
             input_buffer: None,
@@ -243,8 +251,75 @@ impl WgpuUpscaler {
             buffer_pool_size: 4,
             gpu_allocator: "Default".to_string(),
             shader_path: "".to_string(),
+            use_memory_pool: true,
+            adaptive_quality: true,
         }
     }
+    
+    /// Set the shared GPU resources
+    pub fn set_gpu_resources(&mut self, gpu_resources: Arc<GpuResources>) {
+        self.gpu_resources = Some(gpu_resources);
+        // Clear self-managed resources
+        self.instance = None;
+        self.device = None;
+        self.queue = None;
+        // Reset initialization
+        self.initialized = false;
+    }
+    
+    /// Enable/disable adaptive quality adjustment based on GPU memory pressure
+    pub fn set_adaptive_quality(&mut self, enabled: bool) {
+        self.adaptive_quality = enabled;
+        println!("[WgpuUpscaler] Adaptive quality: {}", if enabled { "enabled" } else { "disabled" });
+    }
+    
+    /// Update quality based on memory pressure
+    fn update_adaptive_quality(&mut self) -> bool {
+        if !self.adaptive_quality {
+            return false;
+        }
+        
+        // Check if we have GPU resources with memory pool
+        if let Some(resources) = &self.gpu_resources {
+            let pressure = resources.get_memory_pressure();
+            
+            use crate::gpu::memory::MemoryPressure;
+            let new_quality = match pressure {
+                MemoryPressure::Low => UpscalingQuality::Ultra,
+                MemoryPressure::Medium => UpscalingQuality::Quality,
+                MemoryPressure::High => UpscalingQuality::Balanced,
+                MemoryPressure::Critical => UpscalingQuality::Performance,
+            };
+            
+            if new_quality != self.quality {
+                println!("[WgpuUpscaler] Adaptive quality adjusted: {:?} -> {:?} (Memory pressure: {:?})",
+                          self.quality, new_quality, pressure);
+                self.quality = new_quality;
+                return true;
+            }
+        }
+        
+        false
+    }
+    
+    /// Get the device reference
+    fn device(&self) -> Option<&Device> {
+        if let Some(resources) = &self.gpu_resources {
+            Some(&resources.device)
+        } else {
+            self.device.as_ref()
+        }
+    }
+    
+    /// Get the queue reference
+    fn queue(&self) -> Option<&Queue> {
+        if let Some(resources) = &self.gpu_resources {
+            Some(&resources.queue)
+        } else {
+            self.queue.as_ref()
+        }
+    }
+    
     pub fn set_thread_count(&mut self, n: u32) {
         self.thread_count = n;
         println!("[WgpuUpscaler] Set thread count: {}", n);
@@ -253,15 +328,22 @@ impl WgpuUpscaler {
             let _ = rayon::ThreadPoolBuilder::new().num_threads(n as usize).build_global();
         }
     }
+    
     pub fn set_buffer_pool_size(&mut self, n: u32) {
         self.buffer_pool_size = n;
         println!("[WgpuUpscaler] Set buffer pool size: {}", n);
+
+        // If using memory pool, don't manage our own buffers
+        if self.use_memory_pool && self.gpu_resources.is_some() {
+            println!("[WgpuUpscaler] Using shared memory pool for buffers");
+            return;
+        }
 
         self.buffer_pool.clear();
         self.buffer_pool_bind_groups.clear();
 
         if let (Some(device), Some(layout), Some(input_buf), Some(dims_buf)) = (
-            self.device.as_ref(),
+            self.device(),
             self.bind_group_layout.as_ref(),
             self.input_buffer.as_ref(),
             self.dimensions_buffer.as_ref(),
@@ -296,14 +378,32 @@ impl WgpuUpscaler {
         }
         self.buffer_pool_index.store(0, Ordering::SeqCst);
     }
+    
     pub fn set_gpu_allocator(&mut self, preset: &str) {
         self.gpu_allocator = preset.to_string();
+        
+        // If using the memory pool, configure it directly
+        if self.use_memory_pool && self.gpu_resources.is_some() {
+            if let Some(resources) = &self.gpu_resources {
+                match preset {
+                    "Aggressive" => resources.memory_pool.set_allocation_strategy(AllocationStrategy::Aggressive),
+                    "Balanced" => resources.memory_pool.set_allocation_strategy(AllocationStrategy::Balanced),
+                    "Conservative" => resources.memory_pool.set_allocation_strategy(AllocationStrategy::Conservative),
+                    "Minimal" => resources.memory_pool.set_allocation_strategy(AllocationStrategy::Minimal),
+                    _ => resources.memory_pool.set_allocation_strategy(AllocationStrategy::Balanced),
+                }
+                println!("[WgpuUpscaler] Set memory pool allocation strategy: {}", preset);
+                return;
+            }
+        }
+        
+        // Otherwise use the old implementation
         match preset {
             "Aggressive" => {
                 // Pre-allocate a large pool, never shrink
                 let n = self.buffer_pool_size.max(8);
                 self.buffer_pool.clear();
-                if let Some(device) = self.device.as_ref() {
+                if let Some(device) = self.device() {
                     for _ in 0..n {
                         let buf = device.create_buffer(&BufferDescriptor {
                             label: Some("Output Buffer (Aggressive)"),
@@ -328,6 +428,7 @@ impl WgpuUpscaler {
             }
         }
     }
+    
     pub fn reload_shader(&mut self, path: &str) -> anyhow::Result<()> {
         use std::fs;
         let code = fs::read_to_string(path)?;
@@ -383,6 +484,12 @@ impl WgpuUpscaler {
 
 impl Upscaler for WgpuUpscaler {
     fn initialize(&mut self, input_width: u32, input_height: u32, output_width: u32, output_height: u32) -> Result<()> {
+        // Check if we have shared GPU resources
+        if self.gpu_resources.is_some() {
+            return self.initialize_with_resources(input_width, input_height, output_width, output_height);
+        }
+        
+        // Use existing self-managed resources initialization if no shared resources
         if self.initialized &&
            self.input_width == input_width &&
            self.input_height == input_height &&
@@ -565,29 +672,58 @@ impl Upscaler for WgpuUpscaler {
         Ok(())
     }
     fn upscale(&self, input: &[u8]) -> Result<Vec<u8>> {
+        // Apply adaptive quality if enabled
+        if self.adaptive_quality {
+            // This is safe because the Upscaler trait methods don't require &self to be immutable internally
+            let this = unsafe { &mut *(self as *const Self as *mut Self) };
+            if this.update_adaptive_quality() {
+                // If quality changed, we don't need to reinitialize as it only affects shader parameters
+                println!("[WgpuUpscaler] Quality adjusted to {:?}", this.quality);
+            }
+        }
+        
         if !self.initialized {
             anyhow::bail!("WgpuUpscaler not initialized");
         }
+        
         let staging_buffer = self.staging_buffer.as_ref().ok_or_else(|| anyhow::anyhow!("No staging buffer"))?;
-
-        // Select output buffer and bind group from pool
-        let buffer_index = self.buffer_pool_index.fetch_add(1, Ordering::SeqCst);
-        let (output_buffer, bind_group) = if !self.buffer_pool.is_empty() && !self.buffer_pool_bind_groups.is_empty() {
-            let idx = buffer_index % self.buffer_pool.len();
-            let bg_idx = idx.min(self.buffer_pool_bind_groups.len() - 1);
-            (&self.buffer_pool[idx], &self.buffer_pool_bind_groups[bg_idx])
+        
+        let device = if let Some(resources) = &self.gpu_resources {
+            &resources.device
         } else {
+            self.device.as_ref().ok_or_else(|| anyhow::anyhow!("No device"))?
+        };
+        
+        let queue = if let Some(resources) = &self.gpu_resources {
+            &resources.queue
+        } else {
+            self.queue.as_ref().ok_or_else(|| anyhow::anyhow!("No queue"))?
+        };
+        
+        // Select output buffer and bind group
+        let (output_buffer, bind_group) = if self.use_memory_pool && self.gpu_resources.is_some() {
+            // Use fallback bind group with shared output buffer for memory pool mode
             (
-                self.output_buffer.as_ref().ok_or_else(|| anyhow::anyhow!("No fallback output buffer"))?,
+                self.output_buffer.as_ref().ok_or_else(|| anyhow::anyhow!("No output buffer"))?,
                 self.fallback_bind_group.as_ref().ok_or_else(|| anyhow::anyhow!("No fallback bind group"))?
             )
+        } else {
+            // Use buffer pool in non-memory pool mode
+            let buffer_index = self.buffer_pool_index.fetch_add(1, Ordering::SeqCst);
+            if !self.buffer_pool.is_empty() && !self.buffer_pool_bind_groups.is_empty() {
+                let idx = buffer_index % self.buffer_pool.len();
+                let bg_idx = idx.min(self.buffer_pool_bind_groups.len() - 1);
+                (&self.buffer_pool[idx], &self.buffer_pool_bind_groups[bg_idx])
+            } else {
+                (
+                    self.output_buffer.as_ref().ok_or_else(|| anyhow::anyhow!("No fallback output buffer"))?,
+                    self.fallback_bind_group.as_ref().ok_or_else(|| anyhow::anyhow!("No fallback bind group"))?
+                )
+            }
         };
 
-        let device = self.device.as_ref().ok_or_else(|| anyhow::anyhow!("No device"))?;
-        let queue = self.queue.as_ref().ok_or_else(|| anyhow::anyhow!("No queue"))?;
         let pipeline = self.pipeline.as_ref().ok_or_else(|| anyhow::anyhow!("No pipeline"))?;
         let input_buffer = self.input_buffer.as_ref().ok_or_else(|| anyhow::anyhow!("No input buffer"))?;
-        let dimensions_buffer = self.dimensions_buffer.as_ref().ok_or_else(|| anyhow::anyhow!("No dimensions buffer"))?;
 
         // Error handling: check input size
         let expected = (self.input_width * self.input_height * 4) as usize;
@@ -595,9 +731,16 @@ impl Upscaler for WgpuUpscaler {
             anyhow::bail!("Input buffer size mismatch: expected {} got {}", expected, input.len());
         }
 
+        // Update memory pool strategy if needed
+        if self.adaptive_quality && self.gpu_resources.is_some() {
+            if let Some(resources) = &self.gpu_resources {
+                resources.update_memory_strategy();
+            }
+        }
+
         // Update dimensions buffer if needed
         let dims = [self.input_width, self.input_height, self.output_width, self.output_height];
-        queue.write_buffer(dimensions_buffer, 0, bytemuck::cast_slice(&dims));
+        queue.write_buffer(self.dimensions_buffer.as_ref().ok_or_else(|| anyhow::anyhow!("No dimensions buffer"))?, 0, bytemuck::cast_slice(&dims));
 
         // Upload input to GPU
         queue.write_buffer(input_buffer, 0, input);
