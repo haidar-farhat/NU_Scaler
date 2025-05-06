@@ -4,6 +4,7 @@ import reviewsReducer from '../features/admin/reviewsSlice';
 import bugReportsReducer from '../features/admin/bugReportsSlice';
 import surveysReducer from '../features/admin/surveysSlice';
 import userGrowthReducer from '../features/admin/userGrowthSlice';
+import adminUsersReducer from '../features/admin/usersSlice';
 
 const store = configureStore({
   reducer: {
@@ -12,6 +13,7 @@ const store = configureStore({
     bugReports: bugReportsReducer,
     surveys: surveysReducer,
     userGrowth: userGrowthReducer,
+    adminUsers: adminUsersReducer,
   },
 });
 

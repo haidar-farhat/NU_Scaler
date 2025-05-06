@@ -9,6 +9,7 @@ import { fetchReviews } from '../../features/admin/reviewsSlice';
 import { fetchBugReports } from '../../features/admin/bugReportsSlice';
 import { fetchSurveys } from '../../features/admin/surveysSlice';
 import { fetchUserGrowth } from '../../features/admin/userGrowthSlice';
+import { Link } from 'react-router-dom';
 
 const AdminDashboard = () => {
   const dispatch = useDispatch();
@@ -39,6 +40,11 @@ const AdminDashboard = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
         {surveysLoading ? <div>Loading surveys...</div> : surveysError ? <div className="text-red-600">{surveysError}</div> : <SurveysChart data={surveys} />}
         {userGrowthLoading ? <div>Loading user growth...</div> : userGrowthError ? <div className="text-red-600">{userGrowthError}</div> : <UserGrowthChart data={userGrowth} />}
+      </div>
+      <div style={{ marginBottom: 24 }}>
+        <Link to="/admin/users" style={{ fontWeight: 'bold', color: '#007bff', textDecoration: 'none' }}>
+          Manage Users
+        </Link>
       </div>
     </div>
   );
