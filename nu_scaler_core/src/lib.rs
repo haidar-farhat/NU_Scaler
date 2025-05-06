@@ -2,12 +2,12 @@
 
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use crate::upscale::Upscaler;
+use crate::upscale::{Upscaler, UpscalingTechnology, UpscalerFactory, UpscalingQuality};
 use crate::capture::realtime::RealTimeCapture;
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use std::sync::Arc;
 use crate::benchmark::{PyBenchmarkResult, py_benchmark_upscaler, py_run_comparison_benchmark};
-use crate::gpu::memory::{PyVramStats, AllocationStrategy, MemoryPressure};
+use crate::gpu::memory::{VramStats, AllocationStrategy, MemoryPressure};
 use crate::gpu::GpuResources;
 use crate::gpu::detector::GpuDetector;
 
@@ -17,9 +17,9 @@ pub mod upscale;
 pub mod renderer;
 pub mod benchmark;
 
-use upscale::{WgpuUpscaler, UpscalingQuality, UpscaleAlgorithm};
+use upscale::{WgpuUpscaler, UpscaleAlgorithm};
 use capture::realtime::{ScreenCapture, CaptureTarget};
-use gpu::detector::{GpuDetector, GpuInfo, GpuVendor};
+use gpu::detector::{GpuInfo, GpuVendor};
 
 /// Public API for initializing the core library (placeholder)
 pub fn initialize() {
@@ -570,7 +570,7 @@ mod tests {
 
 /// A struct to hold all application state
 pub struct NuScaler {
-    capture: Box<dyn ScreenCapture>,
+    capture: ScreenCapture,
     upscaler: Box<dyn Upscaler>,
     gpu_info: Option<GpuInfo>,
     device: Option<Arc<wgpu::Device>>,
@@ -603,7 +603,7 @@ impl NuScaler {
         println!("[NuScaler] Using upscaler: {} (Technology: {:?})", upscaler.name(), upscaling_tech);
         
         Ok(Self {
-            capture: crate::capture::create_capturer()?,
+            capture: ScreenCapture::new(),
             upscaler,
             gpu_info,
             device: Some(device),
@@ -627,7 +627,7 @@ impl NuScaler {
         println!("[NuScaler] Initialized with technology: {:?}, quality: {:?}", technology, quality);
         
         Ok(Self {
-            capture: crate::capture::create_capturer()?,
+            capture: ScreenCapture::new(),
             upscaler,
             gpu_info,
             device: Some(device),
