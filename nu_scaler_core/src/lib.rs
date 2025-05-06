@@ -2,6 +2,7 @@
 
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
+use wgpu::BufferUsages;
 use crate::upscale::{Upscaler, UpscalingTechnology, UpscalerFactory, UpscalingQuality};
 use crate::capture::realtime::RealTimeCapture;
 use anyhow::{Result, anyhow};
