@@ -16,8 +16,8 @@ const ProtectedRoute = ({ children, role }) => {
   }
 
   // If a specific role is required, check for it
-  if (role === 'admin' && (!user?.role || user.role !== 'admin')) {
-    // Redirect to homepage if user doesn't have admin role
+  if (role === 'admin' && !user?.is_admin) {
+    // Redirect to homepage if user isn't admin
     return <Navigate to="/" replace />;
   }
 
