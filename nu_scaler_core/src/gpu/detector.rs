@@ -110,8 +110,13 @@ impl GpuDetector {
     
     /// Enumerate all WGPU adapters
     async fn enumerate_adapters(&self) -> Result<Vec<Adapter>> {
+        // Convert enumerated adapters to Vec directly
         let adapters = self.instance.enumerate_adapters(Backends::PRIMARY);
-        let adapter_vec: Vec<_> = adapters.collect();
+        // Manually collect into a vector since adapters is already an iterator
+        let mut adapter_vec = Vec::new();
+        for adapter in adapters {
+            adapter_vec.push(adapter);
+        }
         Ok(adapter_vec)
     }
     
