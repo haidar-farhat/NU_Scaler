@@ -789,8 +789,8 @@ impl Upscaler for WgpuUpscaler {
             let (device, queue) = pollster::block_on(adapter.request_device(
                 &DeviceDescriptor {
                     label: Some("Upscaler Device"),
-                    features: wgpu::Features::empty(),
-                    limits: Limits::default(),
+                    required_features: wgpu::Features::empty(),
+                    required_limits: Limits::default(),
                 },
                 None,
             ))?;
