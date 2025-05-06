@@ -287,7 +287,12 @@ impl WgpuUpscaler {
     /// Enable/disable adaptive quality adjustment based on GPU memory pressure
     pub fn set_adaptive_quality(&mut self, enabled: bool) {
         self.adaptive_quality = enabled;
-        println!("[WgpuUpscaler] Adaptive quality: {}", if enabled { "enabled" } else { "disabled" });
+        println!("[WgpuUpscaler] Adaptive quality set to: {}", enabled);
+    }
+    
+    /// Check if adaptive quality is enabled
+    pub fn is_adaptive_quality_enabled(&self) -> bool {
+        self.adaptive_quality
     }
     
     /// Update quality based on memory pressure
