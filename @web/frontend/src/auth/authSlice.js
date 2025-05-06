@@ -24,15 +24,28 @@ export const login = createAsyncThunk(
       // First get the CSRF cookie from Laravel Sanctum
       await axios.get('http://localhost:8000/sanctum/csrf-cookie', { withCredentials: true });
       
+      console.log('Attempting login with credentials:', credentials);
       const response = await api.post('/v1/login', credentials);
-      const { token, user } = response.data;
+      console.log('Login response:', response.data);
+      
+      // Extract token and user from the response
+      // The Laravel API returns data in this format
+      const token = response.data.access_token;
+      const user = response.data.user;
+      
+      if (!token || !user) {
+        console.error('Invalid response format from login API', response.data);
+        return rejectWithValue('Invalid server response format');
+      }
       
       // Store in localStorage
       localStorage.setItem('token', token);
       localStorage.setItem('user', JSON.stringify(user));
       
+      console.log('Login successful', { token: token.substring(0, 10) + '...', user });
       return { token, user };
     } catch (error) {
+      console.error('Login error:', error.response?.data || error.message);
       return rejectWithValue(error.response?.data?.message || 'Login failed');
     }
   }
