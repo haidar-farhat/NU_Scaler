@@ -57,6 +57,10 @@ pub trait Upscaler: Any + Send + Sync {
     fn quality(&self) -> UpscalingQuality;
     /// Set the quality level
     fn set_quality(&mut self, quality: UpscalingQuality) -> Result<()>;
+    /// Get a reference to self as Any
+    fn as_any(&self) -> &dyn Any;
+    /// Get a mutable reference to self as Any
+    fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 
 /// Factory for creating upscalers based on technology detection
@@ -76,13 +80,16 @@ impl UpscalerFactory {
     /// Share device and queue with all upscalers
     pub fn set_shared_resources(upscaler: &mut Box<dyn Upscaler>, device: Arc<Device>, queue: Arc<Queue>) -> Result<()> {
         // Cast to specific types to share resources
-        if let Some(fsr) = upscaler.as_mut().downcast_mut::<FsrUpscaler>() {
+        if let Some(fsr) = upscaler.as_any_mut().downcast_mut::<FsrUpscaler>() {
             fsr.set_device_queue(device, queue);
-        } else if let Some(dlss) = upscaler.as_mut().downcast_mut::<DlssUpscaler>() {
+            Ok(())
+        } else if let Some(dlss) = upscaler.as_any_mut().downcast_mut::<DlssUpscaler>() {
             dlss.set_device_queue(device, queue);
+            Ok(())
+        } else {
+            // Other upscalers don't have set_device_queue
+            Ok(())
         }
-        
-        Ok(())
     }
 }
 
@@ -104,6 +111,12 @@ impl Upscaler for MockUpscaler {
     }
     fn set_quality(&mut self, _quality: UpscalingQuality) -> Result<()> {
         unimplemented!()
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }
 
@@ -1009,6 +1022,12 @@ impl Upscaler for WgpuUpscaler {
     fn set_quality(&mut self, quality: UpscalingQuality) -> Result<()> {
         self.quality = quality;
         Ok(())
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }
 
