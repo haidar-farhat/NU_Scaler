@@ -971,7 +971,6 @@ impl Upscaler for WgpuUpscaler {
         let staging_buffer = self.staging_buffer.as_ref().ok_or_else(|| anyhow::anyhow!("No staging buffer"))?;
         
         let device = self.device().ok_or_else(|| anyhow::anyhow!("No device"))?;
-        
         let queue = self.queue().ok_or_else(|| anyhow::anyhow!("No queue"))?;
         
         // Adaptive quality check - could lower quality if needed
@@ -1021,27 +1020,40 @@ impl Upscaler for WgpuUpscaler {
         
         // Wait for and retrieve results
         let buffer_slice = staging_buffer.slice(..);
-        let (sender, receiver) = std::sync::mpsc::channel();
         
-        buffer_slice.map_async(MapMode::Read, move |v| {
-            sender.send(v).unwrap();
-        });
+        // Create a separate scope for mapping to ensure it's properly unmapped
+        let result = {
+            let (sender, receiver) = std::sync::mpsc::channel();
+            
+            buffer_slice.map_async(MapMode::Read, move |v| {
+                sender.send(v).unwrap();
+            });
+            
+            // Wait for the GPU - with timeout to avoid deadlock
+            device.poll(wgpu::Maintain::Wait);
+            
+            // Wait for mapping with timeout
+            let mapping_result = match receiver.recv_timeout(std::time::Duration::from_secs(5)) {
+                Ok(res) => res,
+                Err(_) => return Err(anyhow!("Timeout waiting for buffer mapping")),
+            };
+            
+            // Check mapping succeeded
+            mapping_result?;
+            
+            // Get the mapped data - use a scope to ensure unmap happens
+            let mapped_range = buffer_slice.get_mapped_range();
+            let result = Vec::from(mapped_range.as_ref());
+            result
+        };
         
-        // Wait for the GPU
+        // Explicitly unmap the buffer after the mapped range is dropped
+        staging_buffer.unmap();
+        
+        // Ensure device is fully finished before returning
         device.poll(wgpu::Maintain::Wait);
         
-        if let Ok(Ok(())) = receiver.recv() {
-            // Create a Vec from the mapped buffer
-            let padded_buffer = buffer_slice.get_mapped_range();
-            let result = padded_buffer.to_vec();
-            
-            // Unmap the buffer by dropping the mapped range
-            drop(padded_buffer);
-            
-            Ok(result)
-        } else {
-            Err(anyhow!("Failed to retrieve GPU compute results"))
-        }
+        Ok(result)
     }
     fn name(&self) -> &'static str {
         "WgpuUpscaler"
