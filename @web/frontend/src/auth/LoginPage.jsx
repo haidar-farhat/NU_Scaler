@@ -72,14 +72,30 @@ const LoginPage = () => {
     }
   };
   
+  // Helper to determine the appropriate error message and styling
+  const getErrorDisplay = () => {
+    if (!error || loginAttempts === 0) return null;
+    
+    // Check if the error is an account disabled error
+    const isAccountDisabled = typeof error === 'object' && error.account_disabled;
+    const errorMessage = typeof error === 'object' ? error.message : error;
+    
+    return (
+      <div className={`border px-4 py-3 rounded relative max-w-md mx-auto mb-4 ${
+        isAccountDisabled ? 'bg-yellow-100 border-yellow-400 text-yellow-800' : 'bg-red-100 border-red-400 text-red-700'
+      }`}>
+        <strong className="font-bold">{isAccountDisabled ? 'Account Deactivated: ' : 'Error: '}</strong>
+        <span className="block sm:inline">{errorMessage}</span>
+        {isAccountDisabled && (
+          <p className="mt-2">Please contact an administrator to reactivate your account.</p>
+        )}
+      </div>
+    );
+  };
+  
   return (
     <>
-      {loginAttempts > 0 && error && (
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative max-w-md mx-auto mb-4">
-          <strong className="font-bold">Error: </strong>
-          <span className="block sm:inline">{error}</span>
-        </div>
-      )}
+      {getErrorDisplay()}
       <AuthForm mode="login" onSubmit={handleSubmit} loading={loading} error={error} />
     </>
   );

@@ -46,6 +46,15 @@ export const login = createAsyncThunk(
       return { token, user };
     } catch (error) {
       console.error('Login error:', error.response?.data || error.message);
+      
+      // Check if this is an account disabled error
+      if (error.response?.status === 403 && error.response?.data?.account_disabled) {
+        return rejectWithValue({
+          message: error.response.data.message || 'Your account has been deactivated',
+          account_disabled: true
+        });
+      }
+      
       return rejectWithValue(error.response?.data?.message || 'Login failed');
     }
   }
