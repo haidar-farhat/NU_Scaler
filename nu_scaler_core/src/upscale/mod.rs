@@ -934,112 +934,94 @@ impl Upscaler for WgpuUpscaler {
         Ok(())
     }
     fn upscale(&self, input: &[u8]) -> Result<Vec<u8>> {
-        // Apply adaptive quality if enabled
-        if self.adaptive_quality {
-            // This is safe because the Upscaler trait methods don't require &self to be immutable internally
-            let this = unsafe { &mut *(self as *const Self as *mut Self) };
-            if this.update_adaptive_quality() {
-                // If quality changed, we don't need to reinitialize as it only affects shader parameters
-                println!("[WgpuUpscaler] Quality adjusted to {:?}", this.quality);
-            }
-        }
-        
+        // Quick validation
         if !self.initialized {
-            anyhow::bail!("WgpuUpscaler not initialized");
+            return Err(anyhow!("WgpuUpscaler not initialized"));
         }
         
+        let expected_size = (self.input_width * self.input_height * 4) as usize;
+        if input.len() != expected_size {
+            return Err(anyhow!("Input buffer size mismatch: expected {} bytes, got {}", expected_size, input.len()));
+        }
+        
+        // Get all resources safely
+        let pipeline = self.pipeline.as_ref().ok_or_else(|| anyhow::anyhow!("No pipeline"))?;
+        let input_buffer = self.input_buffer.as_ref().ok_or_else(|| anyhow::anyhow!("No input buffer"))?;
         let staging_buffer = self.staging_buffer.as_ref().ok_or_else(|| anyhow::anyhow!("No staging buffer"))?;
         
         let device = self.device().ok_or_else(|| anyhow::anyhow!("No device"))?;
         
         let queue = self.queue().ok_or_else(|| anyhow::anyhow!("No queue"))?;
         
+        // Adaptive quality check - could lower quality if needed
+        if self.adaptive_quality {
+            let _adaptive_changed = self.update_adaptive_quality();
+        }
+        
         // Select output buffer and bind group
-        let (output_buffer, bind_group) = if self.use_memory_pool && self.gpu_resources.is_some() {
-            // Use fallback bind group with shared output buffer for memory pool mode
-            (
-                self.output_buffer.as_ref().ok_or_else(|| anyhow::anyhow!("No output buffer"))?,
-                self.fallback_bind_group.as_ref().ok_or_else(|| anyhow::anyhow!("No fallback bind group"))?
-            )
+        let buffer_idx = self.buffer_pool_index.fetch_add(1, Ordering::SeqCst) % self.buffer_pool.len().max(1);
+        let (output_buffer, bind_group) = if !self.buffer_pool.is_empty() && !self.buffer_pool_bind_groups.is_empty() {
+            // Use pooled buffer
+            (&self.buffer_pool[buffer_idx], &self.buffer_pool_bind_groups[buffer_idx])
         } else {
-            // Use buffer pool in non-memory pool mode
-            let buffer_index = self.buffer_pool_index.fetch_add(1, Ordering::SeqCst);
-            if !self.buffer_pool.is_empty() && !self.buffer_pool_bind_groups.is_empty() {
-                let idx = buffer_index % self.buffer_pool.len();
-                let bg_idx = idx.min(self.buffer_pool_bind_groups.len() - 1);
-                (&self.buffer_pool[idx], &self.buffer_pool_bind_groups[bg_idx])
-            } else {
-                (
-                    self.output_buffer.as_ref().ok_or_else(|| anyhow::anyhow!("No fallback output buffer"))?,
-                    self.fallback_bind_group.as_ref().ok_or_else(|| anyhow::anyhow!("No fallback bind group"))?
-                )
-            }
+            // Use fallback direct buffer
+            (self.output_buffer.as_ref().ok_or_else(|| anyhow::anyhow!("No output buffer"))?, 
+             self.fallback_bind_group.as_ref().ok_or_else(|| anyhow::anyhow!("No fallback bind group"))?)
         };
-
-        let pipeline = self.pipeline.as_ref().ok_or_else(|| anyhow::anyhow!("No pipeline"))?;
-        let input_buffer = self.input_buffer.as_ref().ok_or_else(|| anyhow::anyhow!("No input buffer"))?;
-
-        // Error handling: check input size
-        let expected = (self.input_width * self.input_height * 4) as usize;
-        if input.len() != expected {
-            anyhow::bail!("Input buffer size mismatch: expected {} got {}", expected, input.len());
-        }
-
-        // Update memory pool strategy if needed
-        if self.adaptive_quality && self.gpu_resources.is_some() {
-            if let Some(resources) = &self.gpu_resources {
-                resources.update_memory_strategy();
-            }
-        }
-
-        // Update dimensions buffer if needed
-        let dims = [self.input_width, self.input_height, self.output_width, self.output_height];
-        queue.write_buffer(self.dimensions_buffer.as_ref().ok_or_else(|| anyhow::anyhow!("No dimensions buffer"))?, 0, bytemuck::cast_slice(&dims));
-
-        // Upload input to GPU
+        
+        // Copy data to GPU
         queue.write_buffer(input_buffer, 0, input);
-
-        // Encode compute pass and copy to staging buffer
+        
+        // Execute the shader
         let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
             label: Some("Upscale Encoder"),
         });
         {
-            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Upscale Compute Pass"),
+            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Upscale Pass"),
                 timestamp_writes: None,
             });
-            cpass.set_pipeline(pipeline);
-            cpass.set_bind_group(0, bind_group, &[]);
-            let x_groups = (self.output_width + 7) / 8;
-            let y_groups = (self.output_height + 7) / 8;
-            cpass.dispatch_workgroups(x_groups, y_groups, 1);
+            compute_pass.set_pipeline(pipeline);
+            compute_pass.set_bind_group(0, bind_group, &[]);
+            
+            // Handle non-divisible sizes
+            let workgroup_width = if self.algorithm == UpscaleAlgorithm::Nearest { 8 } else { 16 };
+            let workgroup_height = if self.algorithm == UpscaleAlgorithm::Nearest { 8 } else { 16 };
+            
+            let x = (self.output_width + workgroup_width - 1) / workgroup_width;
+            let y = (self.output_height + workgroup_height - 1) / workgroup_height;
+            
+            compute_pass.dispatch_workgroups(x, y, 1);
         }
-        // Copy result from output buffer (pool) to staging buffer
-        encoder.copy_buffer_to_buffer(
-            output_buffer, 0,
-            staging_buffer, 0,
-            staging_buffer.size()
-        );
+        
+        // Copy result from device to staging buffer
+        encoder.copy_buffer_to_buffer(output_buffer, 0, staging_buffer, 0, (self.output_width * self.output_height * 4) as u64);
         queue.submit(Some(encoder.finish()));
-
-        // Map the staging buffer to read results
-        let mapped_data: Result<Vec<u8>, anyhow::Error> = {
-            let buffer_slice = staging_buffer.slice(..);
-            let (sender, receiver) = std::sync::mpsc::channel();
-            buffer_slice.map_async(MapMode::Read, move |v| sender.send(v).unwrap());
-            device.poll(wgpu::Maintain::Wait);
-            match receiver.recv() {
-                Ok(Ok(())) => {
-                    let data = buffer_slice.get_mapped_range().to_vec();
-                    drop(buffer_slice.get_mapped_range());
-                    staging_buffer.unmap(); // Unmap the staging buffer
-                    Ok(data)
-                }
-                Ok(Err(e)) => Err(anyhow::anyhow!("Buffer map callback failed: {:?}", e)),
-                Err(e) => Err(anyhow::anyhow!("Failed to receive buffer map result: {:?}", e)),
-            }
-        };
-        mapped_data
+        
+        // Wait for and retrieve results
+        let buffer_slice = staging_buffer.slice(..);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        
+        buffer_slice.map_async(MapMode::Read, move |v| {
+            sender.send(v).unwrap();
+        });
+        
+        // Wait for the GPU
+        device.poll(wgpu::Maintain::Wait);
+        
+        if let Ok(Ok(())) = receiver.recv() {
+            // Create a Vec from the mapped buffer
+            let padded_buffer = buffer_slice.get_mapped_range();
+            let result = padded_buffer.to_vec();
+            
+            // Unmap the buffer
+            drop(padded_buffer);
+            buffer_slice.unmap();
+            
+            Ok(result)
+        } else {
+            Err(anyhow!("Failed to retrieve GPU compute results"))
+        }
     }
     fn name(&self) -> &'static str {
         "WgpuUpscaler"
