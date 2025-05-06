@@ -85,6 +85,7 @@ class LiveFeedScreen(QWidget):
         self.capture = None
         self.upscaler = None
         self.timer = QTimer(self)
+        self.timer.setInterval(33)  # ~30 FPS
         self.timer.timeout.connect(self.update_frame)
         self.last_frame_time = None
         self.fps = 0.0
@@ -102,7 +103,6 @@ class LiveFeedScreen(QWidget):
         print('[DEBUG] LiveFeedScreen: Before init_ui')
         self.init_ui()
         print('[DEBUG] LiveFeedScreen: After init_ui')
-        # Heavy call: self.refresh_windows()
         print('[DEBUG] LiveFeedScreen: Before refresh_windows')
         # self.refresh_windows()  # Commented out for diagnosis
         print('[DEBUG] LiveFeedScreen: After refresh_windows')
@@ -314,7 +314,7 @@ class LiveFeedScreen(QWidget):
 
             self.upscaler_initialized = False # Reset upscaler state
             self.upscaler = None
-            self.timer.start(16) # Aim for ~60 FPS
+            self.timer.start()  # Start the timer (throttled)
             self.start_btn.setEnabled(False)
             self.stop_btn.setEnabled(True)
             self.status_bar.setText("Capture started")
@@ -447,6 +447,10 @@ class LiveFeedScreen(QWidget):
     def update_frame(self):
         if not self.capture:
             return
+        # Only start a new upscale if no thread is running
+        if getattr(self, '_upscale_thread', None) is not None:
+            print('[DEBUG] Skipping frame: upscale worker still running')
+            return
         frame_result = self.capture.get_frame()
         if frame_result is None:
             return # No frame yet
@@ -478,10 +482,6 @@ class LiveFeedScreen(QWidget):
         scale = self.upscale_scale
         out_w = int(in_w * scale)
         out_h = int(in_h * scale)
-
-        # Only start a new upscale if no thread is running
-        if getattr(self, '_upscale_thread', None) is not None:
-            return
 
         # Start worker thread for upscaling
         self._upscale_thread = QThread()
@@ -517,8 +517,7 @@ class LiveFeedScreen(QWidget):
             else:
                 self.warning_signal.emit("", False)
             self.last_frame_time = time.perf_counter()
-        # self._upscale_thread = None
-        # self._upscale_worker = None
+        # The timer will continue to fire at the set interval
 
     def on_upscale_error(self, error_msg):
         import traceback
@@ -526,10 +525,8 @@ class LiveFeedScreen(QWidget):
         self.status_bar.setText(f"Error: {str(error_msg)}")
         self.upscaler = None
         self.upscaler_initialized = False
-        # self._upscale_thread = None
-        # self._upscale_worker = None
-        # Also print traceback if available
         traceback.print_exc()
+        # The timer will continue to fire at the set interval
 
 class SettingsScreen(QWidget):
     def __init__(self, live_feed_screen=None):
