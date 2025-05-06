@@ -1,5 +1,6 @@
 import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import Navbar from './components/Navbar';
 
 // Layout component (optional, for shared structure like header/footer)
 // import Layout from './components/Layout'; 
@@ -24,6 +25,7 @@ const LoadingSpinner = () => (
 function App() {
   return (
     <BrowserRouter>
+      <Navbar />
       {/* <Layout> You could wrap Routes in a Layout component */}
       <Suspense fallback={<LoadingSpinner />}>
         <Routes>
