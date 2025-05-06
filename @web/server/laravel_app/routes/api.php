@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\Admin\AdminMetricsController;
 use App\Http\Controllers\Api\Admin\AdminAuthController; // Assuming separate admin auth controller
 use App\Http\Controllers\Api\Admin\LogDashboardController;
 use App\Http\Controllers\Api\Admin\UserManagementController;
+use App\Http\Controllers\Api\DebugController;
 
 /*
 |--------------------------------------------------------------------------
@@ -122,6 +123,9 @@ Route::middleware(['auth:sanctum', 'is_admin'])->group(function () {
 
     // Admin Routes....
 });
+
+// Debug routes for development
+Route::get('/debug/auth', [DebugController::class, 'auth']);
 
 // Fallback route for unmatched API requests (optional but good practice)
 Route::fallback(function(){
