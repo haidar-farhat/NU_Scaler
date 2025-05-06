@@ -1147,8 +1147,66 @@ class BenchmarkScreen(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Nu Scaler")
-        # self.setMinimumSize(1100, 650) # <-- Commented out for testing maximization
+        self.setWindowTitle("Nu_Scaler")
+        self.resize(1024, 768)
+        
+        # Create the main widget
+        self.main_widget = LiveFeedScreen(self)
+        self.setCentralWidget(self.main_widget)
+        
+        # Create application instance variable to store upscaler
+        self.upscaler = None
+
+        # Create menu bar
+        self.menu_bar = self.menuBar()
+        self.file_menu = self.menu_bar.addMenu("File")
+        self.help_menu = self.menu_bar.addMenu("Help")
+        
+        # Create exit action
+        exit_action = QAction("Exit", self)
+        exit_action.triggered.connect(qApp.quit)
+        self.file_menu.addAction(exit_action)
+        
+        # Create about action
+        about_action = QAction("About", self)
+        about_action.triggered.connect(self.show_about_dialog)
+        self.help_menu.addAction(about_action)
+        
+        # App startup - initialize upscaler with advanced optimizations
+        if nu_scaler_core is not None:
+            try:
+                if hasattr(nu_scaler_core, 'create_advanced_upscaler'):
+                    self.upscaler = nu_scaler_core.create_advanced_upscaler('quality')
+                    # Optimize the upscaler to maximize GPU utilization
+                    optimize_upscaler(self.upscaler)
+                    print("[GUI] Application startup: GPU optimizations applied")
+            except Exception as e:
+                print(f"[GUI] Error initializing optimized upscaler: {e}")
+
+        # Create debug screen
+        self.debug_screen = DebugScreen()
+
+        # Create advanced screen
+        self.advanced_screen = AdvancedScreen(live_feed_screen=self.main_widget)
+
+        # Create UI accessibility screen
+        self.ui_screen = UIAccessibilityScreen()
+
+        # Create benchmark screen
+        self.benchmark_screen = BenchmarkScreen()
+
+        # Create stacked widget
+        self.stack = QStackedWidget()
+        self.screens = {
+            0: self.main_widget,
+            1: SettingsScreen(live_feed_screen=self.main_widget),
+            2: self.benchmark_screen,
+            3: self.debug_screen,
+            4: self.advanced_screen,
+            5: self.ui_screen,
+        }
+        for i in range(6):
+            self.stack.addWidget(self.screens[i])
         self.sidebar = QListWidget()
         self.sidebar.addItems([
             "Live Feed",
@@ -1160,33 +1218,19 @@ class MainWindow(QMainWindow):
         ])
         self.sidebar.setFixedWidth(180)
         self.sidebar.setStyleSheet("background: #232323; color: #bbb; font-size: 16px;")
-        self.stack = QStackedWidget()
-        self.live_feed_screen = LiveFeedScreen()
-        self.debug_screen = DebugScreen()
-        self.advanced_screen = AdvancedScreen(live_feed_screen=self.live_feed_screen)
-        self.ui_screen = UIAccessibilityScreen()
-        self.benchmark_screen = BenchmarkScreen()
-        self.screens = {
-            0: self.live_feed_screen,
-            1: SettingsScreen(live_feed_screen=self.live_feed_screen),
-            2: self.benchmark_screen,
-            3: self.debug_screen,
-            4: self.advanced_screen,
-            5: self.ui_screen,
-        }
-        for i in range(6):
-            self.stack.addWidget(self.screens[i])
         self.sidebar.currentRowChanged.connect(self.stack.setCurrentIndex)
-        main_widget = QWidget()
-        main_layout = QHBoxLayout(main_widget)
+        main_layout = QHBoxLayout()
         main_layout.addWidget(self.sidebar)
         main_layout.addWidget(self.stack)
+        main_widget = QWidget()
+        main_layout.addWidget(main_widget)
         self.setCentralWidget(main_widget)
         self.apply_theme()
         # Connect LiveFeedScreen signals to DebugScreen
-        self.live_feed_screen.log_signal.connect(self.debug_screen.append_log)
-        self.live_feed_screen.profiler_signal.connect(self.debug_screen.update_profiler)
-        self.live_feed_screen.warning_signal.connect(self.debug_screen.show_warning)
+        self.main_widget.log_signal.connect(self.debug_screen.append_log)
+        self.main_widget.profiler_signal.connect(self.debug_screen.update_profiler)
+        self.main_widget.warning_signal.connect(self.debug_screen.show_warning)
+
     def apply_theme(self):
         self.setStyleSheet("""
             QMainWindow { background: #181818; }
@@ -1194,6 +1238,10 @@ class MainWindow(QMainWindow):
             QListWidget::item:selected { background: #444; color: #fff; }
             QFrame[frameShape=\"4\"] { border: 1px solid #444; border-radius: 8px; }
         """)
+
+    def show_about_dialog(self):
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.information(self, "About Nu_Scaler", "Nu_Scaler is a high-performance upscaling application.")
 
 def run_gui():
     app = QApplication(sys.argv)
