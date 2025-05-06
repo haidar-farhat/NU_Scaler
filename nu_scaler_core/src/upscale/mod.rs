@@ -973,29 +973,54 @@ impl Upscaler for WgpuUpscaler {
         let device = self.device().ok_or_else(|| anyhow::anyhow!("No device"))?;
         let queue = self.queue().ok_or_else(|| anyhow::anyhow!("No queue"))?;
         
-        // Adaptive quality check - could lower quality if needed
-        if self.adaptive_quality {
-            let _adaptive_changed = self.update_adaptive_quality();
-        }
-        
         // Select output buffer and bind group
         let buffer_idx = self.buffer_pool_index.fetch_add(1, Ordering::SeqCst) % self.buffer_pool.len().max(1);
         let (output_buffer, bind_group) = if !self.buffer_pool.is_empty() && !self.buffer_pool_bind_groups.is_empty() {
-            // Use pooled buffer
             (&self.buffer_pool[buffer_idx], &self.buffer_pool_bind_groups[buffer_idx])
         } else {
-            // Use fallback direct buffer
             (self.output_buffer.as_ref().ok_or_else(|| anyhow::anyhow!("No output buffer"))?, 
              self.fallback_bind_group.as_ref().ok_or_else(|| anyhow::anyhow!("No fallback bind group"))?)
         };
         
-        // Copy data to GPU
-        queue.write_buffer(input_buffer, 0, input);
+        // Copy data to GPU - use an intermediate buffer for large transfers
+        if input.len() > 16 * 1024 * 1024 {
+            // For very large inputs, use a staging buffer and command encoder
+            let staging_upload = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Upload Staging Buffer"),
+                size: input.len() as u64,
+                usage: BufferUsages::COPY_SRC | BufferUsages::MAP_WRITE,
+                mapped_at_creation: true,
+            });
+            
+            // Copy input data to staging buffer
+            {
+                let mut view = staging_upload.slice(..).get_mapped_range_mut();
+                view.copy_from_slice(input);
+            }
+            
+            // Unmap the staging buffer before using it in commands
+            staging_upload.unmap();
+            
+            // Create command encoder to copy from staging to input buffer
+            let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
+                label: Some("Upload Encoder"),
+            });
+            
+            // Copy from staging to input buffer
+            encoder.copy_buffer_to_buffer(&staging_upload, 0, input_buffer, 0, input.len() as u64);
+            
+            // Submit the copy command
+            queue.submit(Some(encoder.finish()));
+        } else {
+            // For smaller inputs, write directly
+            queue.write_buffer(input_buffer, 0, input);
+        }
         
-        // Execute the shader
+        // Execute the shader with a fresh command encoder
         let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
             label: Some("Upscale Encoder"),
         });
+        
         {
             let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("Upscale Pass"),
@@ -1004,14 +1029,19 @@ impl Upscaler for WgpuUpscaler {
             compute_pass.set_pipeline(pipeline);
             compute_pass.set_bind_group(0, bind_group, &[]);
             
-            // Handle non-divisible sizes
-            let workgroup_width = if self.algorithm == UpscaleAlgorithm::Nearest { 8 } else { 16 };
-            let workgroup_height = if self.algorithm == UpscaleAlgorithm::Nearest { 8 } else { 16 };
+            // Handle non-divisible sizes, use more optimal workgroup sizes
+            let workgroup_width = 16;
+            let workgroup_height = 16;
             
             let x = (self.output_width + workgroup_width - 1) / workgroup_width;
             let y = (self.output_height + workgroup_height - 1) / workgroup_height;
             
-            compute_pass.dispatch_workgroups(x, y, 1);
+            // Use more threads for large outputs
+            if self.output_width * self.output_height > 4 * 1920 * 1080 {
+                compute_pass.dispatch_workgroups(x, y, 4); // Use 4 workgroups in z dimension for 4K+ outputs
+            } else {
+                compute_pass.dispatch_workgroups(x, y, 2); // Use 2 workgroups for smaller outputs
+            }
         }
         
         // Copy result from device to staging buffer
@@ -1021,37 +1051,46 @@ impl Upscaler for WgpuUpscaler {
         // Wait for and retrieve results
         let buffer_slice = staging_buffer.slice(..);
         
-        // Create a separate scope for mapping to ensure it's properly unmapped
+        // Use a scope to ensure proper buffer mapping/unmapping
         let result = {
             let (sender, receiver) = std::sync::mpsc::channel();
             
             buffer_slice.map_async(MapMode::Read, move |v| {
-                sender.send(v).unwrap();
+                let _ = sender.send(v);
             });
             
-            // Wait for the GPU - with timeout to avoid deadlock
+            // Wait for the GPU with polling to prevent hangs
             device.poll(wgpu::Maintain::Wait);
             
-            // Wait for mapping with timeout
-            let mapping_result = match receiver.recv_timeout(std::time::Duration::from_secs(5)) {
-                Ok(res) => res,
+            // Use a timeout to prevent deadlocks
+            match receiver.recv_timeout(std::time::Duration::from_secs(5)) {
+                Ok(Ok(())) => {
+                    // Get the mapped data
+                    let mapped_range = buffer_slice.get_mapped_range();
+                    let result = Vec::from(mapped_range.as_ref());
+                    
+                    // Explicitly drop the mapped range before unmapping
+                    drop(mapped_range);
+                    
+                    result
+                },
+                Ok(Err(e)) => return Err(anyhow!("Buffer mapping error: {:?}", e)),
                 Err(_) => return Err(anyhow!("Timeout waiting for buffer mapping")),
-            };
-            
-            // Check mapping succeeded
-            mapping_result?;
-            
-            // Get the mapped data - use a scope to ensure unmap happens
-            let mapped_range = buffer_slice.get_mapped_range();
-            let result = Vec::from(mapped_range.as_ref());
-            result
+            }
         };
         
-        // Explicitly unmap the buffer after the mapped range is dropped
+        // Explicitly unmap the buffer
         staging_buffer.unmap();
         
-        // Ensure device is fully finished before returning
+        // Ensure device is fully finished
         device.poll(wgpu::Maintain::Wait);
+        
+        // Update memory usage stats
+        if self.adaptive_quality && self.gpu_resources.is_some() {
+            if let Some(resources) = &self.gpu_resources {
+                let _ = resources.memory_pool.update_vram_usage();
+            }
+        }
         
         Ok(result)
     }
