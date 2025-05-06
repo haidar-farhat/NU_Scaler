@@ -22,6 +22,11 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
+// Simple test route for CORS - no rate limits or other middleware
+Route::get('/test-cors', function() {
+    return response()->json(['message' => 'CORS is working!']);
+});
+
 // Apply general rate limiting to all API routes
 Route::middleware(['api.rate.limit:public'])->group(function () {
 
