@@ -581,6 +581,12 @@ pub struct NuScaler {
     queue: Option<Arc<wgpu::Queue>>,
 }
 
+// Add WindowInfo struct
+#[derive(Debug, Clone)]
+pub struct WindowInfo {
+    pub title: String,
+}
+
 impl NuScaler {
     /// Create a new NuScaler instance
     pub fn new() -> Result<Self> {
@@ -641,12 +647,15 @@ impl NuScaler {
     
     /// Get the list of available windows for capture
     pub fn list_windows(&self) -> Result<Vec<WindowInfo>> {
-        self.capture.list_windows()
+        // Use the static method instead of instance method
+        let window_titles = ScreenCapture::list_windows();
+        Ok(window_titles.into_iter().map(|title| WindowInfo { title }).collect())
     }
     
     /// Set the capture target
     pub fn set_capture_target(&mut self, target: CaptureTarget) -> Result<()> {
-        self.capture.set_target(target)
+        // Use start instead of set_target
+        self.capture.start(target).map_err(|e| anyhow!(e))
     }
     
     /// Set the upscaling quality
@@ -659,12 +668,13 @@ impl NuScaler {
         // Initialize upscaler with dimensions if needed
         self.upscaler.initialize(input_width, input_height, output_width, output_height)?;
         
-        // Capture frame
-        let frame = self.capture.capture_frame()?;
+        // Capture frame - use get_frame instead of capture_frame
+        let frame_data = self.capture.get_frame()
+            .ok_or_else(|| anyhow!("No frame captured"))?;
         
         // Upscale the frame
         let timer = std::time::Instant::now();
-        let result = self.upscaler.upscale(&frame.data)?;
+        let result = self.upscaler.upscale(&frame_data.0)?;
         let elapsed = timer.elapsed();
         
         println!("[NuScaler] Upscaled {}x{} to {}x{} in {:.2}ms", 
