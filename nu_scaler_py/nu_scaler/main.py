@@ -25,6 +25,7 @@ class LiveFeedScreen(QWidget):
         self.last_frame_time = None
         self.fps = 0.0
         self.upscaler_initialized = False
+        self.upscale_scale = 2.0  # Default scale factor
         self.init_ui()
 
     def init_ui(self):
@@ -273,6 +274,13 @@ class LiveFeedScreen(QWidget):
             # Initialize the upscaler with dimensions
             self.upscaler.initialize(in_w, in_h, out_w, out_h)
             self.upscaler_initialized = True
+            
+            # Store scale factor for future reference
+            self.upscale_scale = scale
+            # If the upscaler has a scale property, set it
+            if hasattr(self.upscaler, 'set_upscale_scale'):
+                self.upscaler.set_upscale_scale(scale)
+            
             print(f"[GUI] Upscaler initialized: {in_w}x{in_h} -> {out_w}x{out_h}")
             return True
         except Exception as e:
