@@ -2,6 +2,7 @@ use anyhow::Result;
 use wgpu::{Device, Queue, ShaderModule, ComputePipeline, Buffer, BindGroup, BindGroupLayout, BufferUsages, ShaderModuleDescriptor, ShaderSource, ComputePipelineDescriptor, PipelineLayoutDescriptor, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, BufferBindingType, BindGroupDescriptor, BindGroupEntry, CommandEncoderDescriptor, BufferDescriptor, MapMode};
 use wgpu::util::DeviceExt;
 use std::sync::Arc;
+use std::any;
 
 use super::{Upscaler, UpscalingQuality, UpscalingTechnology};
 
@@ -315,6 +316,13 @@ impl FsrUpscaler {
     pub fn set_device_queue(&mut self, device: Arc<Device>, queue: Arc<Queue>) {
         self.device = Some(device);
         self.queue = Some(queue);
+    }
+}
+
+// Implement std::any::Any by using the built-in impl for concrete struct types
+impl std::any::Any for FsrUpscaler {
+    fn type_id(&self) -> std::any::TypeId {
+        std::any::TypeId::of::<FsrUpscaler>()
     }
 }
 
