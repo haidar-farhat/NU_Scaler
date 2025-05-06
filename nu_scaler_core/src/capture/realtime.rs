@@ -7,9 +7,11 @@ use image::ImageFormat; // Keep, used in workaround
 use std::env;
 use std::fs;
 use uuid::Uuid;
+use std::time::Duration;
+use std::path::PathBuf;
 
 // Windows API imports (needed for list_windows)
-use windows::core::{Error, Result};
+use windows::core::{Error, Result as WindowsResult};
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowTextW, IsWindowVisible/*, FindWindowW*/}; // FindWindowW unused
 
@@ -28,7 +30,7 @@ pub enum CaptureTarget {
 }
 
 pub trait RealTimeCapture {
-    fn start(&mut self, target: CaptureTarget) -> Result<(), String>;
+    fn start(&mut self, target: CaptureTarget) -> std::result::Result<(), String>;
     fn stop(&mut self);
     fn get_frame(&mut self) -> Option<(Vec<u8>, usize, usize)>; 
     fn list_windows() -> Vec<String> where Self: Sized;
