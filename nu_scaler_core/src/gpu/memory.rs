@@ -331,7 +331,7 @@ impl MemoryPool {
                         // Get adapter description with properly created descriptor
                         let mut desc = zeroed::<Dxgi::DXGI_ADAPTER_DESC1>();
                         if adapter.GetDesc1(&mut desc).is_ok() {
-                            dedicated_vram = desc.DedicatedVideoMemory;
+                            dedicated_vram = desc.DedicatedVideoMemory as u64;
                         }
 
                         // Get current usage with properly created memory info struct
