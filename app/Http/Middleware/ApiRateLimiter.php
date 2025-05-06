@@ -39,6 +39,11 @@ class ApiRateLimiter
      */
     public function handle(Request $request, Closure $next, string $limiterType): Response
     {
+        // Skip rate limiting for CORS preflight requests
+        if ($request->isMethod('OPTIONS')) {
+            return $next($request);
+        }
+        
         // Get rate limits based on limiter type
         [$maxAttempts, $decayMinutes] = $this->getRateLimits($limiterType);
 
