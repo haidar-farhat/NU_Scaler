@@ -493,7 +493,12 @@ class LiveFeedScreen(QWidget):
         self._upscale_worker.finished.connect(self._upscale_thread.quit)
         self._upscale_worker.finished.connect(self._upscale_worker.deleteLater)
         self._upscale_thread.finished.connect(self._upscale_thread.deleteLater)
+        self._upscale_thread.finished.connect(self._clear_upscale_thread)
         self._upscale_thread.start()
+
+    def _clear_upscale_thread(self):
+        self._upscale_thread = None
+        self._upscale_worker = None
 
     def on_upscale_finished(self, out_bytes, out_w, out_h, elapsed):
         # Update the GUI with the upscaled image
@@ -512,8 +517,8 @@ class LiveFeedScreen(QWidget):
             else:
                 self.warning_signal.emit("", False)
             self.last_frame_time = time.perf_counter()
-        self._upscale_thread = None
-        self._upscale_worker = None
+        # self._upscale_thread = None
+        # self._upscale_worker = None
 
     def on_upscale_error(self, error_msg):
         import traceback
@@ -521,8 +526,8 @@ class LiveFeedScreen(QWidget):
         self.status_bar.setText(f"Error: {str(error_msg)}")
         self.upscaler = None
         self.upscaler_initialized = False
-        self._upscale_thread = None
-        self._upscale_worker = None
+        # self._upscale_thread = None
+        # self._upscale_worker = None
 
 class SettingsScreen(QWidget):
     def __init__(self, live_feed_screen=None):
