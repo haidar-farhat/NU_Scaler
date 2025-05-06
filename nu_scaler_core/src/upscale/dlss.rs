@@ -2,6 +2,7 @@ use anyhow::Result;
 use wgpu::{Device, Queue, ShaderModule, ComputePipeline, Buffer, BindGroup, BindGroupLayout, BufferUsages, ShaderModuleDescriptor, ShaderSource, ComputePipelineDescriptor, PipelineLayoutDescriptor, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, BufferBindingType, BindGroupDescriptor, BindGroupEntry, CommandEncoderDescriptor, BufferDescriptor, MapMode};
 use wgpu::util::DeviceExt;
 use std::sync::Arc;
+use std::any::Any;
 
 use super::{Upscaler, UpscalingQuality, UpscalingTechnology};
 
@@ -227,5 +228,13 @@ impl Upscaler for DlssUpscaler {
     fn set_quality(&mut self, quality: UpscalingQuality) -> Result<()> {
         self.quality = quality;
         Ok(())
+    }
+    
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 } 
