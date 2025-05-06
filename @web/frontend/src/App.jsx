@@ -15,6 +15,7 @@ import ProtectedRoute from './auth/ProtectedRoute';
 
 // Lazy load less common or heavier pages (like admin)
 const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'));
+const AdminUsersPage = lazy(() => import('./pages/admin/AdminUsersPage'));
 
 // Simple loading spinner component (you can replace with a fancier one)
 const LoadingSpinner = () => (
@@ -50,6 +51,16 @@ function App() {
               element={
                 <ProtectedRoute role="admin">
                   <AdminDashboard />
+                </ProtectedRoute>
+              }
+            />
+            
+            {/* Add Admin Users Route */}
+            <Route 
+              path="/admin/users" 
+              element={
+                <ProtectedRoute role="admin">
+                  <AdminUsersPage />
                 </ProtectedRoute>
               }
             />
