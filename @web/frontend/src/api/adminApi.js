@@ -129,6 +129,9 @@ const adminApiService = {
   ensureCSRF: setupCSRF,
   checkAuthStatus: () => adminApi.get('/debug/auth'),
   
+  // Admin session
+  checkAdminSession: () => adminApi.get('/admin/session/check'),
+  
   // Reviews
   getReviews: (params) => adminApi.get('/admin/reviews', { params }),
   exportReviews: (format = 'csv') => adminApi.get(`/admin/reviews/export?format=${format}`, { responseType: 'blob' }),
