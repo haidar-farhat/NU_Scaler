@@ -1,34 +1,42 @@
 import React from 'react';
+import SummaryCards from './SummaryCards';
+import ReviewsTable from './ReviewsTable';
+import BugReportsTable from './BugReportsTable';
+import SurveysChart from './SurveysChart';
+import UserGrowthChart from './UserGrowthChart';
+
+const dummyReviews = [
+  { id: 1, rating: 5, comment: 'Great!', created_at: new Date().toISOString() },
+];
+const dummyBugReports = [
+  { id: 1, severity: 'high', description: 'Crash on launch', created_at: new Date().toISOString() },
+];
+const dummySurveys = [
+  { gpu_brand: 'NVIDIA', count: 10 },
+  { gpu_brand: 'AMD', count: 5 },
+];
+const dummyUserGrowth = [
+  { date: '2024-05-01', registrations: 2 },
+  { date: '2024-05-02', registrations: 5 },
+];
 
 const AdminDashboard = () => {
+  // Replace dummy data with Redux selectors or API data as needed
   return (
-    <div className="min-h-screen bg-gray-100 p-8">
-      <h1 className="text-3xl font-bold text-gray-800 mb-6">Admin Dashboard</h1>
-      
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {/* Placeholder for Feedback Submissions Table */}
-        <div className="bg-white p-6 rounded-lg shadow">
-          <h2 className="text-xl font-semibold mb-4">Feedback Submissions</h2>
-          <p className="text-gray-600">[Submissions Table (e.g., TanStack Table) will go here]</p>
-        </div>
-
-        {/* Placeholder for Charts */}
-        <div className="bg-white p-6 rounded-lg shadow">
-          <h2 className="text-xl font-semibold mb-4">User Growth</h2>
-          <p className="text-gray-600">[User Growth Line Chart (e.g., Recharts) will go here]</p>
-        </div>
-
-        <div className="bg-white p-6 rounded-lg shadow">
-          <h2 className="text-xl font-semibold mb-4">OS Usage</h2>
-          <p className="text-gray-600">[OS Usage Bar Chart (e.g., Recharts) will go here]</p>
-        </div>
-
-        <div className="bg-white p-6 rounded-lg shadow">
-          <h2 className="text-xl font-semibold mb-4">Review Ratings</h2>
-          <p className="text-gray-600">[Review Stars Pie Chart (e.g., Recharts) will go here]</p>
-        </div>
-        
-        {/* Add more placeholder sections as needed */}
+    <div className="p-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <SummaryCards title="Total Reviews" value={dummyReviews.length} icon="⭐" />
+        <SummaryCards title="Bug Reports" value={dummyBugReports.length} icon="🐞" />
+        <SummaryCards title="Surveys" value={dummySurveys.length} icon="🖥️" />
+        <SummaryCards title="New Users" value={dummyUserGrowth.length} icon="👤" />
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <ReviewsTable reviews={dummyReviews} />
+        <BugReportsTable bugReports={dummyBugReports} />
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+        <SurveysChart data={dummySurveys} />
+        <UserGrowthChart data={dummyUserGrowth} />
       </div>
     </div>
   );
