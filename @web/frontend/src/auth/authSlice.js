@@ -1,5 +1,6 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import api from '../api/axios';
+import axios from 'axios';
 
 // Load initial state from localStorage if available
 const getInitialState = () => {
@@ -20,6 +21,9 @@ export const login = createAsyncThunk(
   'auth/login',
   async (credentials, { rejectWithValue }) => {
     try {
+      // First get the CSRF cookie from Laravel Sanctum
+      await axios.get('http://localhost:8000/sanctum/csrf-cookie', { withCredentials: true });
+      
       const response = await api.post('/v1/login', credentials);
       const { token, user } = response.data;
       
