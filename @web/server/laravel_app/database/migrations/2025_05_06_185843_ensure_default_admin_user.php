@@ -375,21 +375,28 @@ return new class extends Migration
             return;
         }
 
-        $cpus = ['Intel Core i9-13900K', 'AMD Ryzen 9 7950X', 'Intel Core i7-12700K', 'AMD Ryzen 7 5800X', 'Intel Core i5-13600K'];
-        $gpus = ['NVIDIA RTX 4090', 'AMD Radeon RX 7900 XTX', 'NVIDIA RTX 3080', 'AMD Radeon RX 6800 XT', 'NVIDIA RTX 4070'];
-        $rams = ['16GB DDR4-3200', '32GB DDR4-3600', '64GB DDR5-5600', '8GB DDR4-2666', '32GB DDR5-6000'];
-        $storage = ['1TB NVMe SSD', '2TB SATA SSD + 4TB HDD', '500GB NVMe SSD + 2TB HDD', '4TB NVMe SSD', '1TB SATA SSD'];
+        $cpuModels = ['Intel Core i9-13900K', 'AMD Ryzen 9 7950X', 'Intel Core i7-12700K', 'AMD Ryzen 7 5800X', 'Intel Core i5-13600K'];
+        $gpuModels = ['NVIDIA RTX 4090', 'AMD Radeon RX 7900 XTX', 'NVIDIA RTX 3080', 'AMD Radeon RX 6800 XT', 'NVIDIA RTX 4070'];
+        $ramSizes = [8, 16, 32, 64, 128];
+        $os = ['Windows 10 Home', 'Windows 10 Pro', 'Windows 11 Home', 'Windows 11 Pro'];
+        $resolutions = ['1920x1080', '2560x1440', '3840x2160', '5120x1440', '3440x1440'];
+        $refreshRates = [60, 75, 120, 144, 165, 240, 360];
 
         for ($i = 0; $i < 10; $i++) {
             $userId = $users[array_rand($users)];
 
             DB::table('hardware_surveys')->insert([
                 'user_id' => $userId,
-                'cpu' => $cpus[array_rand($cpus)],
-                'gpu' => $gpus[array_rand($gpus)],
-                'ram' => $rams[array_rand($rams)],
-                'storage' => $storage[array_rand($storage)],
-                'os_version' => 'Windows ' . rand(10, 11) . (rand(0, 1) ? ' Pro' : ' Home'),
+                'cpu_model' => $cpuModels[array_rand($cpuModels)],
+                'gpu_model' => $gpuModels[array_rand($gpuModels)],
+                'ram_size' => $ramSizes[array_rand($ramSizes)],
+                'os' => $os[array_rand($os)],
+                'resolution' => $resolutions[array_rand($resolutions)],
+                'monitor_refresh_rate' => $refreshRates[array_rand($refreshRates)],
+                'additional_info' => json_encode([
+                    'storage' => ['SSD' => rand(1, 4) . 'TB', 'HDD' => rand(1, 8) . 'TB'],
+                    'peripherals' => ['mechanical_keyboard' => (bool)rand(0, 1), 'gaming_mouse' => (bool)rand(0, 1)]
+                ]),
                 'created_at' => now()->subDays(rand(1, 30)),
                 'updated_at' => now(),
             ]);
