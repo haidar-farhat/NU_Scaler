@@ -166,6 +166,7 @@ return [
          * Package Service Providers...
          */
         Laravel\Sanctum\SanctumServiceProvider::class,
+        Maatwebsite\Excel\ExcelServiceProvider::class,
 
         /*
          * Application Service Providers...
@@ -184,6 +185,7 @@ return [
         ...array_filter(
             explode(',', env('APP_ALIASES', ''))
         ),
+        'Excel' => Maatwebsite\Excel\Facades\Excel::class,
     ],
 
 ];
