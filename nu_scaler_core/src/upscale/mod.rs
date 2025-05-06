@@ -4,6 +4,15 @@ use wgpu::util::DeviceExt;
 use rayon::prelude::*;
 use std::time::Instant;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+
+// Add new module declarations
+mod fsr;
+mod dlss;
+
+// Re-export the new implementations
+pub use fsr::FsrUpscaler;
+pub use dlss::DlssUpscaler;
 
 /// Upscaling quality levels
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -43,6 +52,33 @@ pub trait Upscaler {
     fn quality(&self) -> UpscalingQuality;
     /// Set the quality level
     fn set_quality(&mut self, quality: UpscalingQuality) -> Result<()>;
+}
+
+/// Factory for creating upscalers based on technology detection
+pub struct UpscalerFactory;
+
+impl UpscalerFactory {
+    /// Create the most appropriate upscaler based on the detected technology
+    pub fn create_upscaler(technology: UpscalingTechnology, quality: UpscalingQuality) -> Box<dyn Upscaler> {
+        match technology {
+            UpscalingTechnology::FSR => Box::new(FsrUpscaler::new(quality)),
+            UpscalingTechnology::DLSS => Box::new(DlssUpscaler::new(quality)),
+            UpscalingTechnology::Wgpu => Box::new(WgpuUpscaler::new(quality, UpscaleAlgorithm::Bilinear)),
+            _ => Box::new(WgpuUpscaler::new(quality, UpscaleAlgorithm::Nearest)),
+        }
+    }
+    
+    /// Share device and queue with all upscalers
+    pub fn set_shared_resources(upscaler: &mut Box<dyn Upscaler>, device: Arc<Device>, queue: Arc<Queue>) -> Result<()> {
+        // Cast to specific types to share resources
+        if let Some(fsr) = upscaler.as_mut().downcast_mut::<FsrUpscaler>() {
+            fsr.set_device_queue(device, queue);
+        } else if let Some(dlss) = upscaler.as_mut().downcast_mut::<DlssUpscaler>() {
+            dlss.set_device_queue(device, queue);
+        }
+        
+        Ok(())
+    }
 }
 
 /// Mock implementation for testing
