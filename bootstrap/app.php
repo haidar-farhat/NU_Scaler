@@ -1,76 +1,87 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Facades\App;
-use Illuminate\Support\Facades\Config;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Request;
-use Illuminate\Support\Facades\Response;
-use Illuminate\Support\Facades\Session;
-use Illuminate\Support\Facades\View;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\File;
-use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Queue;
-use Illuminate\Support\Facades\Broadcast;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Passport;
-use Illuminate\Support\Facades\JWT;
-use Illuminate\Support\Facades\JWTAuth;
-use Illuminate\Support\Facades\JWTFactory;
-use Illuminate\Support\Facades\JWK;
-use Illuminate\Support\Facades\JWKS;
-use Illuminate\Support\Facades\JWKSBuilder;
-use Illuminate\Support\Facades\JWKSToPEM;
-use Illuminate\Support\Facades\JWKSToPEMBuilder;
-use Illuminate\Support\Facades\JWKSToPEMConverter;
-use Illuminate\Support\Facades\JWKSToPEMConverterBuilder;
-use Illuminate\Support\Facades\JWKSToPEMConverterBuilderBuilder;
-use Illuminate\Support\Facades\JWKSToPEMConverterBuilderBuilderBuilder;
-use Illuminate\Support\Facades\JWKSToPEMConverterBuilderBuilderBuilderBuilder;
-use Illuminate\Support\Facades\JWKSToPEMConverterBuilderBuilderBuilderBuilderBuild;
-use Illuminate\Support\Facades\JWKSToPEMConverterBuilderBuilderBuilderBuilderBuildBuild;
-use Illuminate\Support\Facades\JWKSToPEMConverterBuilderBuilderBuilderBuilderBuildBuildBuild;
-use Illuminate\Support\Facades\JWKSToPEMConverterBuilderBuilderBuilderBuilderBuildBuildBuildBuild;
-use Illuminate\Support\Facades\JWKSToPEMConverterBuilderBuilderBuilderBuilderBuildBuildBuildBuildBuild;
-use Illuminate\Support\Facades\JWKSToPEMConverterBuilderBuilderBuilderBuilderBuildBuildBuildBuildBuildBuild;
-use Illuminate\Support\Facades\JWKSToPEMConverterBuilderBuilderBuilderBuilderBuildBuildBuildBuildBuildBuildBuild;
-use Illuminate\Support\Facades\JWKSToPEMConverterBuilderBuilderBuilderBuilderBuildBuildBuildBuildBuildBuildBuildBuild;
-use Illuminate\Support\Facades\JWKSToPEMConverterBuilderBuilderBuilderBuilderBuildBuildBuildBuildBuildBuildBuildBuildBuild;
-use Illuminate\Support\Facades\JWKSToPEMConverterBuilderBuilderBuilderBuilderBuildBuildBuildBuildBuildBuildBuildBuildBuild;
-use Illuminate\Support\Facades\JWKSToPEMConverterBuilderBuilderBuilderBuilderBuildBuildBuildBuildBuildBuildBuildBuildBuild;
-use Illuminate\Support\Facades\JWKSToPEMConverterBuilderBuilderBuilderBuilderBuildBuildBuildBuildBuildBuildBuildBuildBuild;
-use Illuminate\Support\Facades\JWKSToPEMConverterBuilderBuilderBuilderBuilderBuildBuildBuildBuildBuildBuildBuildBuildBuild;
-use Illuminate\Support\Facades\JWKSToPEMConverterBuilderBuilderBuilderBuilderBuildBuildBuildBuildBuildBuildBuildBuildBuild;
-use Illuminate\Support\Facades\JWKSToPEMConverterBuilderBuilderBuilderBuilderBuildBuildBuildBuildBuildBuildBuildBuildBuild;
-use Illuminate\Support\Facades\JWKSToPEMConverterBuilderBuilderBuilderBuilderBuildBuildBuildBuildBuildBuildBuildBuildBuild;
-use Illuminate\Support\Facades\JWKSToPEMConverterBuilderBuilderBuilderBuilderBuildBuildBuildBuildBuildBuildBuildBuildBuild;
-use Illuminate\Support\Facades\JWKSToPEMConverterBuilderBuilderBuilderBuilderBuildBuildBuildBuildBuildBuildBuildBuildBuild;
-use Illuminate\Support\Facades\JWKSToPEMConverterBuilderBuilderBuilderBuilderBuildBuildBuildBuildBuildBuildBuildBuildBuild;
-use Illuminate\Support\Facades\JWKSToPEMConverterBuilderBuilderBuilderBuilderBuildBuildBuildBuildBuildBuildBuildBuildBuild;
+/*
+|--------------------------------------------------------------------------
+| Create The Application
+|--------------------------------------------------------------------------
+|
+| The first thing we will do is create a new Laravel application instance
+| which serves as the "glue" for all the components of Laravel, and is
+| the IoC container for the system binding all of the various parts.
+|
+*/
 
-$app->instance('path.public', base_path('public'));
+$app = new Illuminate\Foundation\Application(
+    $_ENV['APP_BASE_PATH'] ?? dirname(__DIR__)
+);
 
-$app->withoutMiddleware([
-    \App\Http\Middleware\ApiRateLimiter::class,
-]);
+/*
+|--------------------------------------------------------------------------
+| Bind Important Interfaces
+|--------------------------------------------------------------------------
+|
+| Next, we need to bind some important interfaces into the container so
+| we will be able to resolve them when needed. The kernels serve the
+| incoming requests to this application from both the web and CLI.
+|
+*/
 
-$app->afterResolving(\Illuminate\Contracts\Debug\ExceptionHandler::class, function ($handler) {
+$app->singleton(
+    Illuminate\Contracts\Http\Kernel::class,
+    App\Http\Kernel::class
+);
+
+$app->singleton(
+    Illuminate\Contracts\Console\Kernel::class,
+    App\Console\Kernel::class
+);
+
+$app->singleton(
+    Illuminate\Contracts\Debug\ExceptionHandler::class,
+    App\Exceptions\Handler::class
+);
+
+/*
+|--------------------------------------------------------------------------
+| Force CORS Headers on All Responses
+|--------------------------------------------------------------------------
+|
+| To ensure CORS works even during errors, we'll add CORS headers
+| to all responses including error responses.
+|
+*/
+
+$app->afterResolving(Illuminate\Contracts\Debug\ExceptionHandler::class, function ($handler) {
     $handler->renderable(function (\Throwable $e, $request) {
-        $response = response()->json([
-            'error' => 'Server Error',
-            'message' => $e->getMessage(),
-            'trace' => $e->getTraceAsString(),
-        ], 500);
+        if ($request->expectsJson() || $request->is('api/*')) {
+            $response = response()->json([
+                'error' => 'Server Error',
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ], 500);
+            
+            // Force CORS headers on all responses, even errors
+            return $response->withHeaders([
+                'Access-Control-Allow-Origin' => '*',
+                'Access-Control-Allow-Methods' => 'GET, POST, PUT, DELETE, OPTIONS',
+                'Access-Control-Allow-Headers' => 'Content-Type, X-Requested-With, Authorization',
+            ]);
+        }
         
-        // Force CORS headers on all responses, even errors
-        return $response->withHeaders([
-            'Access-Control-Allow-Origin' => '*',
-            'Access-Control-Allow-Methods' => 'GET, POST, PUT, DELETE, OPTIONS',
-            'Access-Control-Allow-Headers' => 'Content-Type, Authorization',
-        ]);
+        return null;
     });
 });
+
+/*
+|--------------------------------------------------------------------------
+| Return The Application
+|--------------------------------------------------------------------------
+|
+| This script returns the application instance. The instance is given to
+| the calling script so we can separate the building of the instances
+| from the actual running of the application and sending responses.
+|
+*/
 
 return $app;
