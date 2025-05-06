@@ -9,24 +9,35 @@ import time
 import random
 import traceback
 
+# First, try to import the Rust core module
 print("[main.py] About to import nu_scaler_core...")
 try:
     import nu_scaler_core
     print(f"[main.py] Successfully imported nu_scaler_core from {nu_scaler_core.__file__}")
     print(f"[main.py] Available classes in nu_scaler_core: {dir(nu_scaler_core)}")
-    from nu_scaler.benchmark import run_benchmark, run_comparison_benchmark, BenchmarkResult, plot_benchmark_results
 except ImportError as e:
-    print(f"[main.py] ImportError: {e}")
+    print(f"[main.py] ImportError when importing nu_scaler_core: {e}")
     nu_scaler_core = None
-    run_benchmark = None
-    run_comparison_benchmark = None
-    plot_benchmark_results = None
 except Exception as e:
-    print(f"[main.py] Error during import: {e}")
+    print(f"[main.py] Error during nu_scaler_core import: {e}")
     traceback.print_exc()
     nu_scaler_core = None
+
+# Then, separately try to import the benchmark module
+try:
+    from nu_scaler.benchmark import run_benchmark, run_comparison_benchmark, BenchmarkResult, plot_benchmark_results
+except ImportError as e:
+    print(f"[main.py] ImportError when importing benchmark module: {e}")
     run_benchmark = None
     run_comparison_benchmark = None
+    BenchmarkResult = None
+    plot_benchmark_results = None
+except Exception as e:
+    print(f"[main.py] Error when importing benchmark module: {e}")
+    traceback.print_exc()
+    run_benchmark = None
+    run_comparison_benchmark = None
+    BenchmarkResult = None
     plot_benchmark_results = None
 
 print(f"[main.py] nu_scaler_core available: {nu_scaler_core is not None}")
