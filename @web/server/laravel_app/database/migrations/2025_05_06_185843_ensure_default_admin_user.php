@@ -267,56 +267,79 @@ return new class extends Migration
         }
 
         $statuses = ['pending', 'in_progress', 'resolved', 'closed'];
+        $severities = ['low', 'medium', 'high', 'critical'];
+        $categories = ['UI', 'Performance', 'Compatibility', 'Feature', 'General'];
+
         $bugReports = [
             [
-                'title' => 'Application crashes when scanning system',
                 'description' => 'The app crashes when I try to scan my system with more than 3 drives.',
-                'status' => $statuses[array_rand($statuses)],
+                'severity' => $severities[array_rand($severities)],
+                'category' => $categories[array_rand($categories)],
+                'steps_to_reproduce' => 'Connect at least 4 drives, start a system scan, wait until it crashes.',
+                'system_info' => json_encode(['os' => 'Windows 11', 'ram' => '32GB', 'cpu' => 'Intel i7']),
             ],
             [
-                'title' => 'Memory optimization not working',
                 'description' => 'Memory optimization feature doesn\'t seem to be working on Windows 11.',
-                'status' => $statuses[array_rand($statuses)],
+                'severity' => $severities[array_rand($severities)],
+                'category' => $categories[array_rand($categories)],
+                'steps_to_reproduce' => 'Run memory optimization on Windows 11.',
+                'system_info' => json_encode(['os' => 'Windows 11', 'ram' => '16GB', 'cpu' => 'AMD Ryzen 5']),
             ],
             [
-                'title' => 'UI freezes during heavy operations',
                 'description' => 'The interface becomes unresponsive during disk cleanup.',
-                'status' => $statuses[array_rand($statuses)],
+                'severity' => $severities[array_rand($severities)],
+                'category' => $categories[array_rand($categories)],
+                'steps_to_reproduce' => 'Start disk cleanup on a drive with more than 500GB.',
+                'system_info' => json_encode(['os' => 'Windows 10', 'ram' => '8GB', 'cpu' => 'Intel i5']),
             ],
             [
-                'title' => 'Error message when accessing network settings',
                 'description' => 'Getting an unhandled exception when trying to optimize network settings.',
-                'status' => $statuses[array_rand($statuses)],
+                'severity' => $severities[array_rand($severities)],
+                'category' => $categories[array_rand($categories)],
+                'steps_to_reproduce' => 'Go to network settings, click optimize.',
+                'system_info' => json_encode(['os' => 'Windows 11', 'ram' => '32GB', 'cpu' => 'AMD Ryzen 7']),
             ],
             [
-                'title' => 'Can\'t save custom profiles',
                 'description' => 'Custom optimization profiles don\'t save properly.',
-                'status' => $statuses[array_rand($statuses)],
+                'severity' => $severities[array_rand($severities)],
+                'category' => $categories[array_rand($categories)],
+                'steps_to_reproduce' => 'Create a custom profile, save it, restart app, check if it still exists.',
+                'system_info' => json_encode(['os' => 'Windows 10', 'ram' => '16GB', 'cpu' => 'Intel i9']),
             ],
             [
-                'title' => 'Application hangs on startup',
                 'description' => 'Sometimes the application hangs indefinitely when starting up.',
-                'status' => $statuses[array_rand($statuses)],
+                'severity' => $severities[array_rand($severities)],
+                'category' => $categories[array_rand($categories)],
+                'steps_to_reproduce' => 'Start the application multiple times.',
+                'system_info' => json_encode(['os' => 'Windows 11', 'ram' => '64GB', 'cpu' => 'AMD Ryzen 9']),
             ],
             [
-                'title' => 'CPU optimization not detecting all cores',
                 'description' => 'The CPU optimization only detects half of my CPU cores.',
-                'status' => $statuses[array_rand($statuses)],
+                'severity' => $severities[array_rand($severities)],
+                'category' => $categories[array_rand($categories)],
+                'steps_to_reproduce' => 'Run CPU optimization on a 12-core processor.',
+                'system_info' => json_encode(['os' => 'Windows 10', 'ram' => '32GB', 'cpu' => 'Intel i7']),
             ],
             [
-                'title' => 'Export results feature not working',
                 'description' => 'When I try to export optimization results, nothing happens.',
-                'status' => $statuses[array_rand($statuses)],
+                'severity' => $severities[array_rand($severities)],
+                'category' => $categories[array_rand($categories)],
+                'steps_to_reproduce' => 'Run optimization, click export results button.',
+                'system_info' => json_encode(['os' => 'Windows 11', 'ram' => '16GB', 'cpu' => 'AMD Ryzen 5']),
             ],
             [
-                'title' => 'Application crashes with specific GPU model',
                 'description' => 'The app consistently crashes with my RTX 4090 graphics card.',
-                'status' => $statuses[array_rand($statuses)],
+                'severity' => $severities[array_rand($severities)],
+                'category' => $categories[array_rand($categories)],
+                'steps_to_reproduce' => 'Just start the app with RTX 4090 installed.',
+                'system_info' => json_encode(['os' => 'Windows 11', 'ram' => '64GB', 'cpu' => 'Intel i9', 'gpu' => 'RTX 4090']),
             ],
             [
-                'title' => 'Settings reset after application update',
                 'description' => 'All my settings were reset after the latest update.',
-                'status' => $statuses[array_rand($statuses)],
+                'severity' => $severities[array_rand($severities)],
+                'category' => $categories[array_rand($categories)],
+                'steps_to_reproduce' => 'Update to latest version, check settings.',
+                'system_info' => json_encode(['os' => 'Windows 10', 'ram' => '16GB', 'cpu' => 'Intel i5']),
             ],
         ];
 
