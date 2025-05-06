@@ -42,6 +42,15 @@ const LoginPage = () => {
     console.log('Auth state changed:', { isAuthenticated, user });
     if (isAuthenticated && user) {
       console.log('User is authenticated, redirecting to:', from);
+      console.log('User details:', user);
+      
+      // Check if the user is an admin and log that information
+      if (user.is_admin) {
+        console.log('User has admin privileges');
+      } else {
+        console.log('User does not have admin privileges');
+      }
+      
       navigate(from, { replace: true });
     }
   }, [isAuthenticated, user, navigate, from]);
