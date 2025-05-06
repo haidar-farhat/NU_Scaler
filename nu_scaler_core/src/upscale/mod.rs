@@ -295,30 +295,51 @@ impl WgpuUpscaler {
         self.adaptive_quality
     }
     
-    /// Update quality based on memory pressure
-    fn update_adaptive_quality(&mut self) -> bool {
-        if !self.adaptive_quality {
+    /// Check if adaptive quality is needed based on current memory situation
+    fn update_adaptive_quality(&self) -> bool {
+        // If not using GPU resources, don't change quality
+        if !self.use_memory_pool || self.gpu_resources.is_none() {
             return false;
         }
         
-        // Check if we have GPU resources with memory pool
-        if let Some(resources) = &self.gpu_resources {
-            let pressure = resources.get_memory_pressure();
-            
-            use crate::gpu::memory::MemoryPressure;
-            let new_quality = match pressure {
-                MemoryPressure::Low => UpscalingQuality::Ultra,
-                MemoryPressure::Medium => UpscalingQuality::Quality,
-                MemoryPressure::High => UpscalingQuality::Balanced,
-                MemoryPressure::Critical => UpscalingQuality::Performance,
-            };
-            
-            if new_quality != self.quality {
-                println!("[WgpuUpscaler] Adaptive quality adjusted: {:?} -> {:?} (Memory pressure: {:?})",
-                          self.quality, new_quality, pressure);
-                self.quality = new_quality;
-                return true;
+        // Get current memory stats
+        let resources = self.gpu_resources.as_ref().unwrap();
+        let stats = resources.get_vram_stats();
+        let memory_level = resources.memory_pool.get_current_memory_pressure();
+        
+        // Get current quality for comparison
+        let current_quality = self.quality;
+        
+        // Only adjust quality based on memory pressure
+        let should_be_quality = match memory_level {
+            MemoryPressure::Critical => UpscalingQuality::Performance,
+            MemoryPressure::High => UpscalingQuality::Balanced,
+            MemoryPressure::Medium => {
+                // If usage is >80%, go to Balanced
+                if stats.usage_percent() > 80.0 {
+                    UpscalingQuality::Balanced
+                } else {
+                    UpscalingQuality::Quality
+                }
+            },
+            MemoryPressure::Low => {
+                // If usage is <60%, use Ultra
+                if stats.usage_percent() < 60.0 {
+                    UpscalingQuality::Ultra
+                } else {
+                    UpscalingQuality::Quality
+                }
             }
+        };
+        
+        // Report quality change
+        if current_quality != should_be_quality {
+            println!("[WgpuUpscaler] Adaptive quality: {:?} -> {:?} (Memory: {:.1}%, Pressure: {:?})",
+                    current_quality, should_be_quality, stats.usage_percent(), memory_level);
+            
+            // Cannot directly modify quality, need outer code to handle this
+            // We just report the quality change is needed
+            return true;
         }
         
         false
