@@ -364,7 +364,12 @@ class LiveFeedScreen(QWidget):
                     self.upscaler = nu_scaler_core.create_fsr_upscaler(quality.lower())
                 elif technology == "DLSS":
                     # Use DLSS upscaler
-                    self.upscaler = nu_scaler_core.create_dlss_upscaler(quality.lower())
+                    try:
+                        self.upscaler = nu_scaler_core.create_dlss_upscaler(quality.lower())
+                    except (AttributeError, Exception) as e:
+                        print(f"[GUI] Error initializing DLSS upscaler: {e}")
+                        print("[GUI] Falling back to best available upscaler")
+                        self.upscaler = nu_scaler_core.create_best_upscaler(quality.lower())
                 else:
                     # Default to basic upscaler
                     self.upscaler = nu_scaler_core.PyWgpuUpscaler(quality.lower(), algorithm.lower())
