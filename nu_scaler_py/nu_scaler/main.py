@@ -1152,46 +1152,13 @@ class MainWindow(QMainWindow):
         
         # Create the main widget
         self.main_widget = LiveFeedScreen(self)
-        self.setCentralWidget(self.main_widget)
-        
-        # Create application instance variable to store upscaler
-        self.upscaler = None
-
-        # Create menu bar
-        self.menu_bar = self.menuBar()
-        self.file_menu = self.menu_bar.addMenu("File")
-        self.help_menu = self.menu_bar.addMenu("Help")
-        
-        # Create exit action
-        exit_action = QAction("Exit", self)
-        exit_action.triggered.connect(qApp.quit)
-        self.file_menu.addAction(exit_action)
-        
-        # Create about action
-        about_action = QAction("About", self)
-        about_action.triggered.connect(self.show_about_dialog)
-        self.help_menu.addAction(about_action)
-        
-        # App startup - initialize upscaler with advanced optimizations
-        if nu_scaler_core is not None:
-            try:
-                if hasattr(nu_scaler_core, 'create_advanced_upscaler'):
-                    self.upscaler = nu_scaler_core.create_advanced_upscaler('quality')
-                    # Optimize the upscaler to maximize GPU utilization
-                    optimize_upscaler(self.upscaler)
-                    print("[GUI] Application startup: GPU optimizations applied")
-            except Exception as e:
-                print(f"[GUI] Error initializing optimized upscaler: {e}")
 
         # Create debug screen
         self.debug_screen = DebugScreen()
-
         # Create advanced screen
         self.advanced_screen = AdvancedScreen(live_feed_screen=self.main_widget)
-
         # Create UI accessibility screen
         self.ui_screen = UIAccessibilityScreen()
-
         # Create benchmark screen
         self.benchmark_screen = BenchmarkScreen()
 
@@ -1222,14 +1189,37 @@ class MainWindow(QMainWindow):
         main_layout = QHBoxLayout()
         main_layout.addWidget(self.sidebar)
         main_layout.addWidget(self.stack)
-        main_widget = QWidget()
-        main_layout.addWidget(main_widget)
+        main_widget = QWidget(self)
+        main_widget.setLayout(main_layout)
         self.setCentralWidget(main_widget)
         self.apply_theme()
         # Connect LiveFeedScreen signals to DebugScreen
         self.main_widget.log_signal.connect(self.debug_screen.append_log)
         self.main_widget.profiler_signal.connect(self.debug_screen.update_profiler)
         self.main_widget.warning_signal.connect(self.debug_screen.show_warning)
+
+        # Create menu bar
+        self.menu_bar = self.menuBar()
+        self.file_menu = self.menu_bar.addMenu("File")
+        self.help_menu = self.menu_bar.addMenu("Help")
+        # Create exit action
+        exit_action = QAction("Exit", self)
+        exit_action.triggered.connect(qApp.quit)
+        self.file_menu.addAction(exit_action)
+        # Create about action
+        about_action = QAction("About", self)
+        about_action.triggered.connect(self.show_about_dialog)
+        self.help_menu.addAction(about_action)
+        # App startup - initialize upscaler with advanced optimizations
+        if nu_scaler_core is not None:
+            try:
+                if hasattr(nu_scaler_core, 'create_advanced_upscaler'):
+                    self.upscaler = nu_scaler_core.create_advanced_upscaler('quality')
+                    # Optimize the upscaler to maximize GPU utilization
+                    optimize_upscaler(self.upscaler)
+                    print("[GUI] Application startup: GPU optimizations applied")
+            except Exception as e:
+                print(f"[GUI] Error initializing optimized upscaler: {e}")
 
     def apply_theme(self):
         self.setStyleSheet("""
