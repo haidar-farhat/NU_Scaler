@@ -9,14 +9,27 @@ import time
 import random
 import traceback
 
+print("[main.py] About to import nu_scaler_core...")
 try:
     import nu_scaler_core
+    print(f"[main.py] Successfully imported nu_scaler_core from {nu_scaler_core.__file__}")
+    print(f"[main.py] Available classes in nu_scaler_core: {dir(nu_scaler_core)}")
     from nu_scaler.benchmark import run_benchmark, run_comparison_benchmark, BenchmarkResult, plot_benchmark_results
-except ImportError:
+except ImportError as e:
+    print(f"[main.py] ImportError: {e}")
     nu_scaler_core = None
     run_benchmark = None
     run_comparison_benchmark = None
     plot_benchmark_results = None
+except Exception as e:
+    print(f"[main.py] Error during import: {e}")
+    traceback.print_exc()
+    nu_scaler_core = None
+    run_benchmark = None
+    run_comparison_benchmark = None
+    plot_benchmark_results = None
+
+print(f"[main.py] nu_scaler_core available: {nu_scaler_core is not None}")
 
 class LiveFeedScreen(QWidget):
     log_signal = Signal(str)
