@@ -1,9 +1,10 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
-import axios from '../../api/axios';
+import adminApi from '../../api/adminApi';
 
 export const fetchUsers = createAsyncThunk('adminUsers/fetchUsers', async (_, { rejectWithValue }) => {
   try {
-    const res = await axios.get('/admin/users');
+    console.log('Fetching admin users...');
+    const res = await adminApi.getUsers();
     console.log('Fetching users response:', res.data);
     return res.data;
   } catch (err) {
@@ -14,7 +15,7 @@ export const fetchUsers = createAsyncThunk('adminUsers/fetchUsers', async (_, { 
 
 export const updateUserRole = createAsyncThunk('adminUsers/updateUserRole', async ({ userId, is_admin }, { rejectWithValue }) => {
   try {
-    const res = await axios.patch(`/admin/users/${userId}/role`, { is_admin });
+    const res = await adminApi.updateUserRole(userId, is_admin);
     return res.data.user;
   } catch (err) {
     return rejectWithValue(err.response?.data || err.message);
@@ -23,7 +24,7 @@ export const updateUserRole = createAsyncThunk('adminUsers/updateUserRole', asyn
 
 export const updateUserStatus = createAsyncThunk('adminUsers/updateUserStatus', async ({ userId, is_active }, { rejectWithValue }) => {
   try {
-    const res = await axios.patch(`/admin/users/${userId}/status`, { is_active });
+    const res = await adminApi.updateUserStatus(userId, is_active);
     return res.data.user;
   } catch (err) {
     return rejectWithValue(err.response?.data || err.message);
