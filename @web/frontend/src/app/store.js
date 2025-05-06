@@ -6,7 +6,7 @@ import surveysReducer from '../features/admin/surveysSlice';
 import userGrowthReducer from '../features/admin/userGrowthSlice';
 import adminUsersReducer from '../features/admin/usersSlice';
 
-const store = configureStore({
+export const store = configureStore({
   reducer: {
     auth: authReducer,
     reviews: reviewsReducer,
