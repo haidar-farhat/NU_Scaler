@@ -95,7 +95,16 @@ class LiveFeedScreen(QWidget):
         self.show_memory_stats = True
         self._upscale_thread = None
         self._upscale_worker = None
+        print('[DEBUG] LiveFeedScreen: Before init_ui')
         self.init_ui()
+        print('[DEBUG] LiveFeedScreen: After init_ui')
+        # Heavy call: self.refresh_windows()
+        print('[DEBUG] LiveFeedScreen: Before refresh_windows')
+        # self.refresh_windows()  # Commented out for diagnosis
+        print('[DEBUG] LiveFeedScreen: After refresh_windows')
+        print('[DEBUG] LiveFeedScreen: Before update_scale_label')
+        self.update_scale_label()
+        print('[DEBUG] LiveFeedScreen: After update_scale_label')
 
     def init_ui(self):
         layout = QHBoxLayout(self)
@@ -1217,16 +1226,18 @@ class MainWindow(QMainWindow):
         about_action = QAction("About", self)
         about_action.triggered.connect(self.show_about_dialog)
         self.help_menu.addAction(about_action)
-        # App startup - initialize upscaler with advanced optimizations
-        if nu_scaler_core is not None:
-            try:
-                if hasattr(nu_scaler_core, 'create_advanced_upscaler'):
-                    self.upscaler = nu_scaler_core.create_advanced_upscaler('quality')
-                    # Optimize the upscaler to maximize GPU utilization
-                    optimize_upscaler(self.upscaler)
-                    print("[GUI] Application startup: GPU optimizations applied")
-            except Exception as e:
-                print(f"[GUI] Error initializing optimized upscaler: {e}")
+        print('[DEBUG] MainWindow: Before upscaler optimization')
+        # Heavy call: optimize_upscaler(self.upscaler)
+        # Heavy call: force_gpu_activation(self.upscaler)
+        # if nu_scaler_core is not None:
+        #     try:
+        #         if hasattr(nu_scaler_core, 'create_advanced_upscaler'):
+        #             self.upscaler = nu_scaler_core.create_advanced_upscaler('quality')
+        #             optimize_upscaler(self.upscaler)
+        #             print("[GUI] Application startup: GPU optimizations applied")
+        #     except Exception as e:
+        #         print(f"[GUI] Error initializing optimized upscaler: {e}")
+        print('[DEBUG] MainWindow: After upscaler optimization')
 
     def apply_theme(self):
         self.setStyleSheet("""
