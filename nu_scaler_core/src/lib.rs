@@ -7,6 +7,8 @@ use crate::capture::realtime::RealTimeCapture;
 use anyhow::{Result, anyhow};
 use std::sync::Arc;
 use crate::benchmark::{PyBenchmarkResult, py_benchmark_upscaler, py_run_comparison_benchmark};
+#[cfg(feature = "python")]
+use crate::gpu::memory::PyVramStats;
 use crate::gpu::memory::{VramStats, AllocationStrategy, MemoryPressure};
 use crate::gpu::GpuResources;
 use crate::gpu::detector::GpuDetector;
@@ -482,7 +484,8 @@ fn nu_scaler_core(py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(py_benchmark_upscaler, m)?)?;
     m.add_function(wrap_pyfunction!(py_run_comparison_benchmark, m)?)?;
     
-    // Register PyVramStats
+    // Register PyVramStats with proper feature gate
+    #[cfg(feature = "python")]
     m.add_class::<PyVramStats>()?;
     
     // Register advanced upscaler
