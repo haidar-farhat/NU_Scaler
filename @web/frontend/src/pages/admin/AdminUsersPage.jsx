@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchUsers, updateUserRole, updateUserStatus } from '../../features/admin/usersSlice';
+import { useToast } from '../../components/ToastContext';
 
 const tableStyle = {
   width: '100%',
@@ -24,18 +25,35 @@ export default function AdminUsersPage() {
   const dispatch = useDispatch();
   const { users, loading, error } = useSelector(state => state.adminUsers);
   const { user } = useSelector(state => state.auth);
+  const { showToast } = useToast();
 
   useEffect(() => {
-    dispatch(fetchUsers());
-  }, [dispatch]);
+    dispatch(fetchUsers())
+      .unwrap()
+      .catch(e => showToast(e.message || 'Failed to load users', 'error'));
+  }, [dispatch, showToast]);
 
-  const handleRole = (u) => {
+  const handleRole = async (u) => {
     if (u.id === user.id) return;
-    dispatch(updateUserRole({ userId: u.id, is_admin: !u.is_admin }));
+    const action = u.is_admin ? 'demote this admin to user' : 'promote this user to admin';
+    if (!window.confirm(`Are you sure you want to ${action}?`)) return;
+    try {
+      await dispatch(updateUserRole({ userId: u.id, is_admin: !u.is_admin })).unwrap();
+      showToast(`User ${u.is_admin ? 'demoted' : 'promoted'} successfully.`, 'success');
+    } catch (e) {
+      showToast(e.message || 'Failed to update user role', 'error');
+    }
   };
-  const handleStatus = (u) => {
+  const handleStatus = async (u) => {
     if (u.id === user.id) return;
-    dispatch(updateUserStatus({ userId: u.id, is_active: !u.is_active }));
+    const action = u.is_active ? 'deactivate this user' : 'activate this user';
+    if (!window.confirm(`Are you sure you want to ${action}?`)) return;
+    try {
+      await dispatch(updateUserStatus({ userId: u.id, is_active: !u.is_active })).unwrap();
+      showToast(`User ${u.is_active ? 'deactivated' : 'activated'} successfully.`, 'success');
+    } catch (e) {
+      showToast(e.message || 'Failed to update user status', 'error');
+    }
   };
 
   return (
