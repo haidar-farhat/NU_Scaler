@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (
     QPushButton, QComboBox, QSpinBox, QCheckBox, QSlider, QGroupBox, QFormLayout, QProgressBar, QFileDialog
 )
 from PySide6.QtCore import Qt, QTimer, Signal, QThread, QObject
-from PySide6.QtGui import QPixmap, QImage
+from PySide6.QtGui import QPixmap, QImage, QAction
 import time
 import random
 import traceback
