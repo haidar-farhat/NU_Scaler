@@ -329,7 +329,7 @@ impl WgpuUpscaler {
         if let Some(resources) = &self.gpu_resources {
             Some(&resources.device)
         } else {
-            self.device.as_ref()
+            self.device.as_ref().map(|v| &**v)
         }
     }
     
@@ -338,7 +338,7 @@ impl WgpuUpscaler {
         if let Some(resources) = &self.gpu_resources {
             Some(&resources.queue)
         } else {
-            self.queue.as_ref()
+            self.queue.as_ref().map(|v| &**v)
         }
     }
     
@@ -769,32 +769,37 @@ impl Upscaler for WgpuUpscaler {
         self.buffer_pool_bind_groups.clear();
         self.buffer_pool_index = AtomicUsize::new(0);
 
-        // Create WGPU instance if not exists
-        let instance = self.instance.get_or_insert_with(|| {
-            println!("[WgpuUpscaler] Creating WGPU instance (Backends: {:?})", Backends::PRIMARY);
-            Instance::new(wgpu::InstanceDescriptor {
-                backends: Backends::PRIMARY, // Request primary backends (Vulkan/Metal/DX12)
+        // Create instance and adapter if needed
+        if self.device.is_none() {
+            // Create WGPU instance
+            let instance = Instance::new(wgpu::InstanceDescriptor {
+                backends: Backends::PRIMARY,
                 ..Default::default()
-            })
-        });
-
-        // Request adapter
-        let adapter = pollster::block_on(instance.request_adapter(&RequestAdapterOptions::default()))
-            .ok_or_else(|| anyhow::anyhow!("Failed to find suitable adapter"))?;
-
-        // <<< ADD LOGGING HERE >>>
-        let adapter_info = adapter.get_info();
-        println!("[WgpuUpscaler] Selected Adapter: {} ({:?}, Backend: {:?})", adapter_info.name, adapter_info.device_type, adapter_info.backend);
-
-        // Request device and queue
-        let (device, queue) = pollster::block_on(adapter.request_device(
-            &DeviceDescriptor {
-                label: Some("Upscaler Device"),
-                required_features: wgpu::Features::empty(),
-                required_limits: Limits::default(),
-            },
-            None,
-        ))?;
+            });
+            
+            // Request adapter
+            let adapter = pollster::block_on(instance.request_adapter(
+                &RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::HighPerformance,
+                    ..Default::default()
+                },
+            )).ok_or_else(|| anyhow!("Could not find a suitable GPU adapter"))?;
+            
+            // Create device and queue
+            let (device, queue) = pollster::block_on(adapter.request_device(
+                &DeviceDescriptor {
+                    label: Some("Upscaler Device"),
+                    features: wgpu::Features::empty(),
+                    limits: Limits::default(),
+                },
+                None,
+            ))?;
+            
+            // Store instance and device
+            self.instance = Some(instance);
+            self.device = Some(Arc::new(device));
+            self.queue = Some(Arc::new(queue));
+        }
 
         // Select shader source
         let shader_src = match self.algorithm {
@@ -802,19 +807,19 @@ impl Upscaler for WgpuUpscaler {
             UpscaleAlgorithm::Bilinear => BILINEAR_UPSCALE_SHADER,
         };
         // Create shader module
-        let shader = device.create_shader_module(ShaderModuleDescriptor {
+        let shader = self.device.as_ref().ok_or_else(|| anyhow!("No device"))?.create_shader_module(ShaderModuleDescriptor {
             label: Some("Upscale Shader"),
             source: ShaderSource::Wgsl(shader_src.into()),
         });
 
         // Create buffers
-        let input_buffer = device.create_buffer(&BufferDescriptor {
+        let input_buffer = self.device.as_ref().ok_or_else(|| anyhow!("No device"))?.create_buffer(&BufferDescriptor {
             label: Some("Input Buffer"),
             size: (input_width * input_height * 4) as u64,
             usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let output_buffer = device.create_buffer(&BufferDescriptor {
+        let output_buffer = self.device.as_ref().ok_or_else(|| anyhow!("No device"))?.create_buffer(&BufferDescriptor {
             label: Some("Output Buffer"),
             size: (output_width * output_height * 4) as u64,
             usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
@@ -822,14 +827,14 @@ impl Upscaler for WgpuUpscaler {
         });
         // Create dimensions buffer (uniform)
         let dims = [input_width, input_height, output_width, output_height];
-        let dimensions_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let dimensions_buffer = self.device.as_ref().ok_or_else(|| anyhow!("No device"))?.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Dimensions Buffer"),
             contents: bytemuck::cast_slice(&dims),
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
         });
 
         // Create bind group layout
-        let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+        let bind_group_layout = self.device.as_ref().ok_or_else(|| anyhow!("No device"))?.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("Upscale Bind Group Layout"),
             entries: &[ // input_img
                 BindGroupLayoutEntry {
@@ -868,12 +873,12 @@ impl Upscaler for WgpuUpscaler {
         });
 
         // Create pipeline
-        let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+        let pipeline_layout = self.device.as_ref().ok_or_else(|| anyhow!("No device"))?.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Upscale Pipeline Layout"),
             bind_group_layouts: &[&bind_group_layout],
             push_constant_ranges: &[],
         });
-        let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+        let pipeline = self.device.as_ref().ok_or_else(|| anyhow!("No device"))?.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some("Upscale Pipeline"),
             layout: Some(&pipeline_layout),
             module: &shader,
@@ -883,7 +888,7 @@ impl Upscaler for WgpuUpscaler {
         // Create Staging Buffer
         let staging_buffer_size = (output_width * output_height * 4) as u64;
         let staging_buffer = if staging_buffer_size > 0 {
-            Some(device.create_buffer(&BufferDescriptor {
+            Some(self.device.as_ref().ok_or_else(|| anyhow!("No device"))?.create_buffer(&BufferDescriptor {
                 label: Some("Staging Buffer"),
                 size: staging_buffer_size,
                 usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
@@ -893,8 +898,6 @@ impl Upscaler for WgpuUpscaler {
             None
         };
 
-        self.device = Some(device);
-        self.queue = Some(queue);
         self.shader = Some(shader);
         self.pipeline = Some(pipeline);
         self.input_buffer = Some(input_buffer);
@@ -947,17 +950,9 @@ impl Upscaler for WgpuUpscaler {
         
         let staging_buffer = self.staging_buffer.as_ref().ok_or_else(|| anyhow::anyhow!("No staging buffer"))?;
         
-        let device = if let Some(resources) = &self.gpu_resources {
-            &resources.device
-        } else {
-            self.device.as_ref().ok_or_else(|| anyhow::anyhow!("No device"))?
-        };
+        let device = self.device().ok_or_else(|| anyhow::anyhow!("No device"))?;
         
-        let queue = if let Some(resources) = &self.gpu_resources {
-            &resources.queue
-        } else {
-            self.queue.as_ref().ok_or_else(|| anyhow::anyhow!("No queue"))?
-        };
+        let queue = self.queue().ok_or_else(|| anyhow::anyhow!("No queue"))?;
         
         // Select output buffer and bind group
         let (output_buffer, bind_group) = if self.use_memory_pool && self.gpu_resources.is_some() {
