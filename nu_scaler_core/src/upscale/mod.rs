@@ -6,6 +6,7 @@ use std::time::Instant;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::any::Any;
+use pyo3::prelude::*;
 use crate::gpu::{detector::GpuDetector, memory::{MemoryPool, AllocationStrategy}, GpuResources};
 
 // Add new module declarations
@@ -18,6 +19,7 @@ pub use dlss::DlssUpscaler;
 
 /// Upscaling quality levels
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[pyclass]
 pub enum UpscalingQuality {
     Ultra,
     Quality,
@@ -34,6 +36,7 @@ pub enum UpscaleAlgorithm {
 
 /// Supported upscaling technologies
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[pyclass]
 pub enum UpscalingTechnology {
     None,
     FSR,
