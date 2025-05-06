@@ -4,6 +4,8 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use crate::upscale::Upscaler;
 use crate::capture::realtime::RealTimeCapture;
+use anyhow::Result;
+use std::sync::Arc;
 
 pub mod capture;
 pub mod gpu;
@@ -12,6 +14,7 @@ pub mod renderer;
 
 use upscale::{WgpuUpscaler, UpscalingQuality, UpscaleAlgorithm};
 use capture::realtime::{ScreenCapture, CaptureTarget};
+use gpu::detector::{GpuDetector, GpuInfo, GpuVendor};
 
 /// Public API for initializing the core library (placeholder)
 pub fn initialize() {
@@ -236,5 +239,162 @@ mod tests {
     fn it_works() {
         let result = add(2, 2);
         assert_eq!(result, 4);
+    }
+}
+
+/// A struct to hold all application state
+pub struct NuScaler {
+    capture: Box<dyn ScreenCapture>,
+    upscaler: Box<dyn Upscaler>,
+    gpu_info: Option<GpuInfo>,
+    device: Option<Arc<wgpu::Device>>,
+    queue: Option<Arc<wgpu::Queue>>,
+}
+
+impl NuScaler {
+    /// Create a new NuScaler instance
+    pub fn new() -> Result<Self> {
+        // Initialize GPU detector
+        let mut gpu_detector = GpuDetector::new();
+        gpu_detector.detect_gpus()?;
+        
+        // Determine best upscaling technology based on GPU
+        let upscaling_tech = gpu_detector.determine_best_upscaling_technology();
+        let gpu_info = gpu_detector.get_primary_gpu().cloned();
+        
+        // Create appropriate upscaler based on detected GPU
+        let mut upscaler = UpscalerFactory::create_upscaler(
+            upscaling_tech, 
+            UpscalingQuality::Balanced
+        );
+        
+        // Initialize shared GPU resources
+        let (device, queue) = pollster::block_on(gpu_detector.create_device_queue())?;
+        UpscalerFactory::set_shared_resources(&mut upscaler, device.clone(), queue.clone())?;
+        
+        let description = gpu_detector.get_gpu_description();
+        println!("[NuScaler] Initialized with: {}", description);
+        println!("[NuScaler] Using upscaler: {} (Technology: {:?})", upscaler.name(), upscaling_tech);
+        
+        Ok(Self {
+            capture: crate::capture::create_capturer()?,
+            upscaler,
+            gpu_info,
+            device: Some(device),
+            queue: Some(queue),
+        })
+    }
+    
+    /// Create a new NuScaler instance with specific upscaling technology
+    pub fn with_technology(technology: UpscalingTechnology, quality: UpscalingQuality) -> Result<Self> {
+        let mut gpu_detector = GpuDetector::new();
+        gpu_detector.detect_gpus()?;
+        let gpu_info = gpu_detector.get_primary_gpu().cloned();
+        
+        // Create upscaler with requested technology
+        let mut upscaler = UpscalerFactory::create_upscaler(technology, quality);
+        
+        // Initialize shared GPU resources
+        let (device, queue) = pollster::block_on(gpu_detector.create_device_queue())?;
+        UpscalerFactory::set_shared_resources(&mut upscaler, device.clone(), queue.clone())?;
+        
+        println!("[NuScaler] Initialized with technology: {:?}, quality: {:?}", technology, quality);
+        
+        Ok(Self {
+            capture: crate::capture::create_capturer()?,
+            upscaler,
+            gpu_info,
+            device: Some(device),
+            queue: Some(queue),
+        })
+    }
+    
+    /// Get the list of available windows for capture
+    pub fn list_windows(&self) -> Result<Vec<WindowInfo>> {
+        self.capture.list_windows()
+    }
+    
+    /// Set the capture target
+    pub fn set_capture_target(&mut self, target: CaptureTarget) -> Result<()> {
+        self.capture.set_target(target)
+    }
+    
+    /// Set the upscaling quality
+    pub fn set_quality(&mut self, quality: UpscalingQuality) -> Result<()> {
+        self.upscaler.set_quality(quality)
+    }
+    
+    /// Capture and upscale a single frame
+    pub fn capture_and_upscale(&mut self, input_width: u32, input_height: u32, output_width: u32, output_height: u32) -> Result<Vec<u8>> {
+        // Initialize upscaler with dimensions if needed
+        self.upscaler.initialize(input_width, input_height, output_width, output_height)?;
+        
+        // Capture frame
+        let frame = self.capture.capture_frame()?;
+        
+        // Upscale the frame
+        let timer = std::time::Instant::now();
+        let result = self.upscaler.upscale(&frame.data)?;
+        let elapsed = timer.elapsed();
+        
+        println!("[NuScaler] Upscaled {}x{} to {}x{} in {:.2}ms", 
+            input_width, input_height, output_width, output_height, elapsed.as_secs_f32() * 1000.0);
+        
+        Ok(result)
+    }
+    
+    /// Get information about the detected GPU
+    pub fn get_gpu_info(&self) -> Option<&GpuInfo> {
+        self.gpu_info.as_ref()
+    }
+    
+    /// Get the name of the active upscaler
+    pub fn get_upscaler_name(&self) -> &'static str {
+        self.upscaler.name()
+    }
+}
+
+// Python module for exported functions
+#[pymodule]
+fn nu_scaler_core(py: Python, m: &PyModule) -> PyResult<()> {
+    // Upscaling quality levels
+    m.add("QUALITY_ULTRA", UpscalingQuality::Ultra)?;
+    m.add("QUALITY_QUALITY", UpscalingQuality::Quality)?;
+    m.add("QUALITY_BALANCED", UpscalingQuality::Balanced)?;
+    m.add("QUALITY_PERFORMANCE", UpscalingQuality::Performance)?;
+    
+    // Upscaling technologies
+    m.add("TECH_FSR", UpscalingTechnology::FSR)?;
+    m.add("TECH_DLSS", UpscalingTechnology::DLSS)?;
+    m.add("TECH_WGPU", UpscalingTechnology::Wgpu)?;
+    m.add("TECH_FALLBACK", UpscalingTechnology::Fallback)?;
+    
+    // GPU vendors
+    m.add("VENDOR_NVIDIA", GpuVendor::Nvidia)?;
+    m.add("VENDOR_AMD", GpuVendor::Amd)?;
+    m.add("VENDOR_INTEL", GpuVendor::Intel)?;
+    m.add("VENDOR_OTHER", GpuVendor::Other)?;
+    
+    // Add Python wrapper classes (skipping implementation details here)
+    // ...
+
+    Ok(())
+}
+
+// Tests
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_create_nuscaler() {
+        let result = NuScaler::new();
+        assert!(result.is_ok(), "Failed to create NuScaler: {:?}", result.err());
+    }
+    
+    #[test]
+    fn test_create_with_technology() {
+        let result = NuScaler::with_technology(UpscalingTechnology::Wgpu, UpscalingQuality::Balanced);
+        assert!(result.is_ok(), "Failed to create NuScaler with technology: {:?}", result.err());
     }
 }
