@@ -105,13 +105,30 @@ impl MemoryPool {
         
         println!("[MemoryPool] Created with {:?} strategy", strategy);
         
-        // Estimate total VRAM
+        // Better estimate for total VRAM - scale up for higher-end cards
         let estimated_vram = if let Some(info) = &gpu_info {
             if info.is_discrete {
                 match info.vendor {
-                    GpuVendor::Nvidia => 8192.0, // Assume 8GB VRAM for NVIDIA
-                    GpuVendor::Amd => 8192.0,    // Assume 8GB VRAM for AMD
-                    _ => 4096.0,                // Assume 4GB for other discrete
+                    // Better estimates for high-end cards
+                    GpuVendor::Nvidia => {
+                        if info.name.contains("3090") || info.name.contains("4090") || 
+                           info.name.contains("A6000") || info.name.contains("A100") {
+                            24576.0 // 24GB for high-end NVIDIA
+                        } else if info.name.contains("3080") || info.name.contains("4080") ||
+                                  info.name.contains("2080 Ti") {
+                            12288.0 // 12GB for mid-high end
+                        } else {
+                            8192.0  // 8GB for regular cards
+                        }
+                    },
+                    GpuVendor::Amd => {
+                        if info.name.contains("7900") || info.name.contains("6900") {
+                            16384.0 // 16GB for high-end AMD
+                        } else {
+                            8192.0  // 8GB for regular AMD cards
+                        }
+                    },
+                    _ => 4096.0,  // Assume 4GB for other discrete
                 }
             } else {
                 match info.vendor {
