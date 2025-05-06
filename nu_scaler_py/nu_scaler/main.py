@@ -349,7 +349,14 @@ class LiveFeedScreen(QWidget):
                 except (AttributeError, Exception) as e:
                     print(f"[GUI] Error initializing advanced upscaler: {e}")
                     print("[GUI] Falling back to best available upscaler")
-                    self.upscaler = nu_scaler_core.create_best_upscaler(quality.lower())
+                    try:
+                        self.upscaler = nu_scaler_core.create_best_upscaler(quality.lower())
+                    except (AttributeError, Exception) as e2:
+                        print(f"[GUI] Error with fallback upscaler: {e2}")
+                        print("[GUI] Falling back to basic upscaler")
+                        # Use the basic upscaler as final fallback
+                        self.upscaler = nu_scaler_core.PyWgpuUpscaler(quality.lower(), "bilinear")
+                    
                     # Disable advanced-only options when falling back
                     self.memory_strategy_box.setEnabled(False)
                     self.adaptive_quality_check.setEnabled(False)
@@ -369,18 +376,28 @@ class LiveFeedScreen(QWidget):
                 # Use appropriate upscaler based on technology selection
                 if technology == "Auto (Best for GPU)":
                     # Use core's automatic detection for best technology
-                    self.upscaler = nu_scaler_core.create_best_upscaler(quality.lower())
+                    try:
+                        self.upscaler = nu_scaler_core.create_best_upscaler(quality.lower())
+                    except (AttributeError, Exception) as e:
+                        print(f"[GUI] Error with best upscaler: {e}")
+                        # Fall back to basic upscaler
+                        self.upscaler = nu_scaler_core.PyWgpuUpscaler(quality.lower(), "bilinear")
                 elif technology == "FSR 3.0":
                     # Use FSR upscaler
-                    self.upscaler = nu_scaler_core.create_fsr_upscaler(quality.lower())
+                    try:
+                        self.upscaler = nu_scaler_core.create_fsr_upscaler(quality.lower())
+                    except (AttributeError, Exception) as e:
+                        print(f"[GUI] Error initializing FSR upscaler: {e}")
+                        print("[GUI] Falling back to basic upscaler")
+                        self.upscaler = nu_scaler_core.PyWgpuUpscaler(quality.lower(), "bilinear")
                 elif technology == "DLSS":
                     # Use DLSS upscaler
                     try:
                         self.upscaler = nu_scaler_core.create_dlss_upscaler(quality.lower())
                     except (AttributeError, Exception) as e:
                         print(f"[GUI] Error initializing DLSS upscaler: {e}")
-                        print("[GUI] Falling back to best available upscaler")
-                        self.upscaler = nu_scaler_core.create_best_upscaler(quality.lower())
+                        print("[GUI] Falling back to basic upscaler")
+                        self.upscaler = nu_scaler_core.PyWgpuUpscaler(quality.lower(), "bilinear")
                 else:
                     # Default to basic upscaler
                     self.upscaler = nu_scaler_core.PyWgpuUpscaler(quality.lower(), algorithm.lower())
