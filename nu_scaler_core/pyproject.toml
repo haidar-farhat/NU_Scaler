@@ -25,5 +25,4 @@ Repository = "https://github.com/nuscaler/nu_scaler"
 
 [tool.maturin]
 features = ["python"]
-module-name = "nu_scaler_core"
-python-source = "python" 
+module-name = "nu_scaler_core" 
