@@ -246,27 +246,112 @@ impl PyCaptureTarget {
 }
 
 #[pymodule]
-fn nu_scaler(_py: Python, m: &PyModule) -> PyResult<()> {
+fn nu_scaler_core(py: Python, m: &PyModule) -> PyResult<()> {
+    // Upscaling quality levels
+    m.add("QUALITY_ULTRA", UpscalingQuality::Ultra)?;
+    m.add("QUALITY_QUALITY", UpscalingQuality::Quality)?;
+    m.add("QUALITY_BALANCED", UpscalingQuality::Balanced)?;
+    m.add("QUALITY_PERFORMANCE", UpscalingQuality::Performance)?;
+    
+    // Upscaling technologies
+    m.add("TECH_FSR", UpscalingTechnology::FSR)?;
+    m.add("TECH_DLSS", UpscalingTechnology::DLSS)?;
+    m.add("TECH_WGPU", UpscalingTechnology::Wgpu)?;
+    m.add("TECH_FALLBACK", UpscalingTechnology::Fallback)?;
+    
+    // GPU vendors
+    m.add("VENDOR_NVIDIA", GpuVendor::Nvidia)?;
+    m.add("VENDOR_AMD", GpuVendor::Amd)?;
+    m.add("VENDOR_INTEL", GpuVendor::Intel)?;
+    m.add("VENDOR_OTHER", GpuVendor::Other)?;
+    
+    // Add Python wrapper classes
     m.add_class::<PyWgpuUpscaler>()?;
     m.add_class::<PyScreenCapture>()?;
     m.add_class::<PyCaptureTarget>()?;
     m.add_class::<PyWindowByTitle>()?;
     m.add_class::<PyRegion>()?;
+    
+    // Add benchmark classes and functions
+    m.add_class::<PyBenchmarkResult>()?;
+    m.add_function(wrap_pyfunction!(py_benchmark_upscaler, m)?)?;
+    m.add_function(wrap_pyfunction!(py_run_comparison_benchmark, m)?)?;
+    
+    // Add factory functions for creating upscalers
+    #[pyfn(m)]
+    fn create_best_upscaler(quality: &str) -> PyResult<PyWgpuUpscaler> {
+        // Initialize GPU detector
+        let mut gpu_detector = GpuDetector::new();
+        match gpu_detector.detect_gpus() {
+            Ok(_) => {},
+            Err(e) => return Err(pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to detect GPUs: {}", e))),
+        }
+        
+        // Determine best upscaling technology
+        let tech = gpu_detector.determine_best_upscaling_technology();
+        
+        // Convert quality string to enum
+        let q = match quality.to_lowercase().as_str() {
+            "ultra" => UpscalingQuality::Ultra,
+            "quality" => UpscalingQuality::Quality,
+            "balanced" => UpscalingQuality::Balanced,
+            "performance" => UpscalingQuality::Performance,
+            _ => UpscalingQuality::Quality,
+        };
+        
+        // For now, we can only create WgpuUpscaler directly from Python
+        // So we determine the algorithm based on the best tech
+        let algorithm = match tech {
+            UpscalingTechnology::FSR => "bilinear",   // FSR works best with bilinear base
+            UpscalingTechnology::DLSS => "bilinear",  // DLSS works best with bilinear base
+            _ => "nearest",                           // Default to nearest for other tech
+        };
+        
+        // Log the detected GPU and selected technology
+        let gpu_info = gpu_detector.get_primary_gpu().cloned();
+        if let Some(gpu) = gpu_info {
+            println!("[PyO3] Detected GPU: {} (Vendor: {:?})", gpu.name, gpu.vendor);
+        }
+        println!("[PyO3] Selected upscaling technology: {:?}", tech);
+        
+        // Create the upscaler
+        PyWgpuUpscaler::new(quality, algorithm)
+    }
+    
+    #[pyfn(m)]
+    fn create_fsr_upscaler(quality: &str) -> PyResult<PyWgpuUpscaler> {
+        // For now, we create a WgpuUpscaler configured for FSR-like operation
+        // In a real implementation, this would create an actual FSR upscaler
+        println!("[PyO3] Creating FSR-optimized upscaler");
+        PyWgpuUpscaler::new(quality, "bilinear")
+    }
+    
+    #[pyfn(m)]
+    fn create_dlss_upscaler(quality: &str) -> PyResult<PyWgpuUpscaler> {
+        // For now, we create a WgpuUpscaler configured for DLSS-like operation
+        // In a real implementation, this would create an actual DLSS upscaler
+        println!("[PyO3] Creating DLSS-optimized upscaler");
+        PyWgpuUpscaler::new(quality, "bilinear")
+    }
+
     Ok(())
 }
 
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
-
+// Tests
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    
     #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+    fn test_create_nuscaler() {
+        let result = NuScaler::new();
+        assert!(result.is_ok(), "Failed to create NuScaler: {:?}", result.err());
+    }
+    
+    #[test]
+    fn test_create_with_technology() {
+        let result = NuScaler::with_technology(UpscalingTechnology::Wgpu, UpscalingQuality::Balanced);
+        assert!(result.is_ok(), "Failed to create NuScaler with technology: {:?}", result.err());
     }
 }
 
@@ -379,111 +464,5 @@ impl NuScaler {
     /// Get the name of the active upscaler
     pub fn get_upscaler_name(&self) -> &'static str {
         self.upscaler.name()
-    }
-}
-
-// Python module for exported functions
-#[pymodule]
-fn nu_scaler_core(py: Python, m: &PyModule) -> PyResult<()> {
-    // Upscaling quality levels
-    m.add("QUALITY_ULTRA", UpscalingQuality::Ultra)?;
-    m.add("QUALITY_QUALITY", UpscalingQuality::Quality)?;
-    m.add("QUALITY_BALANCED", UpscalingQuality::Balanced)?;
-    m.add("QUALITY_PERFORMANCE", UpscalingQuality::Performance)?;
-    
-    // Upscaling technologies
-    m.add("TECH_FSR", UpscalingTechnology::FSR)?;
-    m.add("TECH_DLSS", UpscalingTechnology::DLSS)?;
-    m.add("TECH_WGPU", UpscalingTechnology::Wgpu)?;
-    m.add("TECH_FALLBACK", UpscalingTechnology::Fallback)?;
-    
-    // GPU vendors
-    m.add("VENDOR_NVIDIA", GpuVendor::Nvidia)?;
-    m.add("VENDOR_AMD", GpuVendor::Amd)?;
-    m.add("VENDOR_INTEL", GpuVendor::Intel)?;
-    m.add("VENDOR_OTHER", GpuVendor::Other)?;
-    
-    // Add Python wrapper classes
-    m.add_class::<PyWgpuUpscaler>()?;
-    m.add_class::<PyScreenCapture>()?;
-    m.add_class::<PyCaptureTarget>()?;
-    m.add_class::<PyWindowByTitle>()?;
-    m.add_class::<PyRegion>()?;
-    
-    // Add factory functions for creating upscalers
-    #[pyfn(m)]
-    fn create_best_upscaler(quality: &str) -> PyResult<PyWgpuUpscaler> {
-        // Initialize GPU detector
-        let mut gpu_detector = GpuDetector::new();
-        match gpu_detector.detect_gpus() {
-            Ok(_) => {},
-            Err(e) => return Err(pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to detect GPUs: {}", e))),
-        }
-        
-        // Determine best upscaling technology
-        let tech = gpu_detector.determine_best_upscaling_technology();
-        
-        // Convert quality string to enum
-        let q = match quality.to_lowercase().as_str() {
-            "ultra" => UpscalingQuality::Ultra,
-            "quality" => UpscalingQuality::Quality,
-            "balanced" => UpscalingQuality::Balanced,
-            "performance" => UpscalingQuality::Performance,
-            _ => UpscalingQuality::Quality,
-        };
-        
-        // For now, we can only create WgpuUpscaler directly from Python
-        // So we determine the algorithm based on the best tech
-        let algorithm = match tech {
-            UpscalingTechnology::FSR => "bilinear",   // FSR works best with bilinear base
-            UpscalingTechnology::DLSS => "bilinear",  // DLSS works best with bilinear base
-            _ => "nearest",                           // Default to nearest for other tech
-        };
-        
-        // Log the detected GPU and selected technology
-        let gpu_info = gpu_detector.get_primary_gpu().cloned();
-        if let Some(gpu) = gpu_info {
-            println!("[PyO3] Detected GPU: {} (Vendor: {:?})", gpu.name, gpu.vendor);
-        }
-        println!("[PyO3] Selected upscaling technology: {:?}", tech);
-        
-        // Create the upscaler
-        PyWgpuUpscaler::new(quality, algorithm)
-    }
-    
-    #[pyfn(m)]
-    fn create_fsr_upscaler(quality: &str) -> PyResult<PyWgpuUpscaler> {
-        // For now, we create a WgpuUpscaler configured for FSR-like operation
-        // In a real implementation, this would create an actual FSR upscaler
-        println!("[PyO3] Creating FSR-optimized upscaler");
-        PyWgpuUpscaler::new(quality, "bilinear")
-    }
-    
-    #[pyfn(m)]
-    fn create_dlss_upscaler(quality: &str) -> PyResult<PyWgpuUpscaler> {
-        // For now, we create a WgpuUpscaler configured for DLSS-like operation
-        // In a real implementation, this would create an actual DLSS upscaler
-        println!("[PyO3] Creating DLSS-optimized upscaler");
-        PyWgpuUpscaler::new(quality, "bilinear")
-    }
-
-    Ok(())
-}
-
-// Tests
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    #[test]
-    fn test_create_nuscaler() {
-        let result = NuScaler::new();
-        assert!(result.is_ok(), "Failed to create NuScaler: {:?}", result.err());
-    }
-    
-    #[test]
-    fn test_create_with_technology() {
-        let result = NuScaler::with_technology(UpscalingTechnology::Wgpu, UpscalingQuality::Balanced);
-        assert!(result.is_ok(), "Failed to create NuScaler with technology: {:?}", result.err());
     }
 }
