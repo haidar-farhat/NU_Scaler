@@ -17,34 +17,17 @@ return [
 
     'paths' => ['api/*', 'sanctum/csrf-cookie'],
 
-    'allowed_methods' => ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    'allowed_methods' => ['*'],
 
-    'allowed_origins' => [
-        'http://localhost:3000',
-        'https://localhost:3000',
-        'http://127.0.0.1:3000',
-        'https://nu-scaler.com',
-        'https://*.nu-scaler.com',
-    ],
+    'allowed_origins' => ['http://localhost:5173', 'http://127.0.0.1:5173'],
 
     'allowed_origins_patterns' => [],
 
-    'allowed_headers' => [
-        'X-Requested-With',
-        'Content-Type',
-        'Accept',
-        'Authorization',
-        'X-CSRF-TOKEN',
-        'X-XSRF-TOKEN',
-    ],
+    'allowed_headers' => ['*'],
 
-    'exposed_headers' => [
-        'X-RateLimit-Limit',
-        'X-RateLimit-Remaining',
-        'Retry-After',
-    ],
+    'exposed_headers' => [],
 
-    'max_age' => 86400, // 24 hours in seconds
+    'max_age' => 0,
 
     'supports_credentials' => true,
 
