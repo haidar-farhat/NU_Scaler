@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\Admin\AdminAuthController; // Assuming separate adm
 use App\Http\Controllers\Api\Admin\LogDashboardController;
 use App\Http\Controllers\Api\Admin\UserManagementController;
 use App\Http\Controllers\Api\DebugController;
+use App\Http\Controllers\Api\Admin\AdminSessionController;
 
 /*
 |--------------------------------------------------------------------------
@@ -73,6 +74,9 @@ Route::prefix('v1')->middleware('auth:sanctum')->name('api.v1.')->group(function
 Route::prefix('admin')->name('api.admin.')
     ->middleware(['auth:sanctum', \App\Http\Middleware\IsAdmin::class])
     ->group(function () {
+        // Admin session check
+        Route::get('/session/check', [AdminSessionController::class, 'check'])->name('session.check');
+
         // Admin Auth (Login might be separate or handled differently)
         // The test hits /login/admin - let's map it, assuming a dedicated controller/method
         // Note: The login route itself shouldn't typically require auth middleware
