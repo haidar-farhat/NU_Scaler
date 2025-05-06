@@ -544,8 +544,8 @@ impl MemoryPool {
             let mut current_stats = self.stats.lock().unwrap();
             *current_stats = stats;
             
-            // Log VRAM usage
-            println!("[MemoryPool] VRAM: {:.1f}MB used / {:.1f}MB total ({:.1f}%)",
+            // Log VRAM usage - fix formatting for Rust
+            println!("[MemoryPool] VRAM: {}MB used / {}MB total ({}%)",
                     current_stats.used_mb, current_stats.total_mb, 
                     current_stats.used_mb / current_stats.total_mb * 100.0);
         }
