@@ -176,7 +176,7 @@ class AdminFeedbackController extends Controller
     }
 
     /**
-     * Export reviews as CSV or Excel.
+     * Export reviews as CSV.
      */
     public function exportReviews(Request $request)
     {
@@ -185,20 +185,12 @@ class AdminFeedbackController extends Controller
         $filename = 'reviews_' . now()->format('Ymd_His');
 
         if ($format === 'xlsx') {
-            try {
-                // Create a new Excel export with our legacy adapter
-                $export = new \App\Exports\LegacyExcelExport($reviews);
-
-                // Use the Excel facade to download the file
-                return \Maatwebsite\Excel\Facades\Excel::download($export, $filename . '.xlsx');
-            } catch (\Exception $e) {
-                // Log the error for debugging
-                \Illuminate\Support\Facades\Log::error('Excel export failed: ' . $e->getMessage());
-                return response()->json(['message' => 'Excel export failed: ' . $e->getMessage()], 500);
-            }
+            return response()->json([
+                'message' => 'Excel export is currently unavailable. Please use CSV format instead.'
+            ], 400);
         }
 
-        // CSV fallback
+        // CSV export
         $headers = [
             'Content-Type' => 'text/csv',
             'Content-Disposition' => "attachment; filename=$filename.csv",
@@ -216,7 +208,7 @@ class AdminFeedbackController extends Controller
     }
 
     /**
-     * Export bug reports as CSV or Excel.
+     * Export bug reports as CSV.
      */
     public function exportBugReports(Request $request)
     {
@@ -225,20 +217,12 @@ class AdminFeedbackController extends Controller
         $filename = 'bug_reports_' . now()->format('Ymd_His');
 
         if ($format === 'xlsx') {
-            try {
-                // Create a new Excel export with our legacy adapter
-                $export = new \App\Exports\LegacyExcelExport($reports);
-
-                // Use the Excel facade to download the file
-                return \Maatwebsite\Excel\Facades\Excel::download($export, $filename . '.xlsx');
-            } catch (\Exception $e) {
-                // Log the error for debugging
-                \Illuminate\Support\Facades\Log::error('Excel export failed: ' . $e->getMessage());
-                return response()->json(['message' => 'Excel export failed: ' . $e->getMessage()], 500);
-            }
+            return response()->json([
+                'message' => 'Excel export is currently unavailable. Please use CSV format instead.'
+            ], 400);
         }
 
-        // CSV fallback
+        // CSV export
         $headers = [
             'Content-Type' => 'text/csv',
             'Content-Disposition' => "attachment; filename=$filename.csv",
@@ -256,7 +240,7 @@ class AdminFeedbackController extends Controller
     }
 
     /**
-     * Export hardware surveys as CSV or Excel.
+     * Export hardware surveys as CSV.
      */
     public function exportHardwareSurveys(Request $request)
     {
@@ -265,20 +249,12 @@ class AdminFeedbackController extends Controller
         $filename = 'hardware_surveys_' . now()->format('Ymd_His');
 
         if ($format === 'xlsx') {
-            try {
-                // Create a new Excel export with our legacy adapter
-                $export = new \App\Exports\LegacyExcelExport($surveys);
-
-                // Use the Excel facade to download the file
-                return \Maatwebsite\Excel\Facades\Excel::download($export, $filename . '.xlsx');
-            } catch (\Exception $e) {
-                // Log the error for debugging
-                \Illuminate\Support\Facades\Log::error('Excel export failed: ' . $e->getMessage());
-                return response()->json(['message' => 'Excel export failed: ' . $e->getMessage()], 500);
-            }
+            return response()->json([
+                'message' => 'Excel export is currently unavailable. Please use CSV format instead.'
+            ], 400);
         }
 
-        // CSV fallback
+        // CSV export
         $headers = [
             'Content-Type' => 'text/csv',
             'Content-Disposition' => "attachment; filename=$filename.csv",
