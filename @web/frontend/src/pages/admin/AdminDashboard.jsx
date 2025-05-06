@@ -189,15 +189,6 @@ const AdminDashboard = () => {
         >
           {exportLoading ? 'Exporting...' : 'Export Reviews CSV'}
         </button>
-        <button
-          style={exportBtnStyle}
-          onClick={() => exportData('reviews', 'xlsx')}
-          disabled={exportLoading}
-          aria-busy={exportLoading}
-          title="Export all reviews as Excel (XLSX)"
-        >
-          {exportLoading ? 'Exporting...' : 'Export Reviews Excel'}
-        </button>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {reviewsLoading ? <div>Loading reviews...</div> : reviewsError ? <div className="text-red-600">{reviewsError}</div> :
@@ -218,15 +209,6 @@ const AdminDashboard = () => {
               title="Export all bug reports as CSV"
             >
               {exportLoading ? 'Exporting...' : 'Export Bug Reports CSV'}
-            </button>
-            <button
-              style={exportBtnStyle}
-              onClick={() => exportData('bugReports', 'xlsx')}
-              disabled={exportLoading}
-              aria-busy={exportLoading}
-              title="Export all bug reports as Excel (XLSX)"
-            >
-              {exportLoading ? 'Exporting...' : 'Export Bug Reports Excel'}
             </button>
           </div>
           {bugReportsLoading ? <div>Loading bug reports...</div> : bugReportsError ? <div className="text-red-600">{bugReportsError}</div> :
@@ -250,15 +232,6 @@ const AdminDashboard = () => {
               title="Export all surveys as CSV"
             >
               {exportLoading ? 'Exporting...' : 'Export Surveys CSV'}
-            </button>
-            <button
-              style={exportBtnStyle}
-              onClick={() => exportData('surveys', 'xlsx')}
-              disabled={exportLoading}
-              aria-busy={exportLoading}
-              title="Export all surveys as Excel (XLSX)"
-            >
-              {exportLoading ? 'Exporting...' : 'Export Surveys Excel'}
             </button>
           </div>
           {surveysLoading ? <div>Loading surveys...</div> : surveysError ? <div className="text-red-600">{surveysError}</div> :
