@@ -66,17 +66,27 @@ class AuthController extends Controller
             ]);
         }
 
-        $token = $user->createToken('auth-token')->plainTextToken;
+        // Generate token with explicit name for better tracking
+        $tokenName = 'api-token-' . now()->timestamp;
+        $token = $user->createToken($tokenName)->plainTextToken;
+
+        \Log::info('User login successful', [
+            'user_id' => $user->id,
+            'email' => $user->email,
+            'is_admin' => $user->is_admin ?? false,
+            'ip' => $request->ip(),
+            'user_agent' => $request->userAgent(),
+        ]);
 
         return response()->json([
             'message' => 'Login successful',
             'token_type' => 'Bearer',
-            'access_token' => $token,
+            'access_token' => $token, // Key name matching front-end expectations
             'user' => [
                 'id' => $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
-                'is_admin' => $user->is_admin,
+                'is_admin' => $user->is_admin ?? false,
             ],
         ]);
     }
