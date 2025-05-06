@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { useSelector } from 'react-redux';
 
 const LandingPage = () => {
-  const { isAuthenticated } = useSelector((state) => state.auth);
+  const { isAuthenticated, user } = useSelector((state) => state.auth);
 
   return (
     <div className="bg-white">
@@ -19,12 +19,22 @@ const LandingPage = () => {
             </p>
             <div className="mt-10 flex items-center justify-center gap-x-6">
               {isAuthenticated ? (
-                <Link
-                  to="/download"
-                  className="rounded-md bg-indigo-600 px-8 py-3 text-lg font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
-                >
-                  Download Now
-                </Link>
+                <>
+                  <Link
+                    to="/download"
+                    className="rounded-md bg-indigo-600 px-8 py-3 text-lg font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600"
+                  >
+                    Download Now
+                  </Link>
+                  {user?.is_admin && (
+                    <Link
+                      to="/admin"
+                      className="rounded-md bg-red-600 px-8 py-3 text-lg font-semibold text-white shadow-sm hover:bg-red-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
+                    >
+                      Admin Panel
+                    </Link>
+                  )}
+                </>
               ) : (
                 <>
                   <Link
