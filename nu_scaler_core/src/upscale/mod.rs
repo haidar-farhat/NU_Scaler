@@ -213,8 +213,8 @@ pub struct WgpuUpscaler {
     initialized: bool,
     // WGPU fields - internal device and queue for self-managed mode
     instance: Option<Instance>,
-    device: Option<Device>,
-    queue: Option<Queue>,
+    device: Option<Arc<Device>>,
+    queue: Option<Arc<Queue>>,
     // Shared resources - for external device and queue mode
     gpu_resources: Option<Arc<GpuResources>>,
     // Upscaler resources
@@ -264,11 +264,11 @@ impl WgpuUpscaler {
             buffer_pool_bind_groups: Vec::new(),
             fallback_bind_group: None,
             staging_buffer: None,
-            thread_count: 4,
-            buffer_pool_size: 4,
-            gpu_allocator: "Default".to_string(),
+            thread_count: 1,
+            buffer_pool_size: 3,
+            gpu_allocator: "Balanced".to_string(),
             shader_path: "".to_string(),
-            use_memory_pool: true,
+            use_memory_pool: false,
             adaptive_quality: true,
         }
     }
