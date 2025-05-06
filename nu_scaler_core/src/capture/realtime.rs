@@ -215,7 +215,7 @@ impl ScreenCapture {
 }
 
 impl RealTimeCapture for ScreenCapture {
-    fn start(&mut self, target: CaptureTarget) -> Result<(), String> {
+    fn start(&mut self, target: CaptureTarget) -> std::result::Result<(), String> {
         self.debug_print(&format!("Starting capture: {:?}", target));
         self.target = Some(target.clone());
         self.stop(); 
