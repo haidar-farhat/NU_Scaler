@@ -57,10 +57,11 @@ const LoginPage = () => {
   }, [isAuthenticated, user, navigate, from]);
 
   const handleSubmit = async (form) => {
+    setLoginAttempts(prev => prev + 1);
+    setLoginError(null); // Clear previous local errors
+    
     try {
       console.log('Attempting login with:', { email: form.email });
-      setLoginAttempts(prev => prev + 1);
-      setLoginError(null); // Clear previous local errors
       
       const result = await dispatch(login({ email: form.email, password: form.password })).unwrap();
       console.log('Login result:', result);
@@ -83,43 +84,22 @@ const LoginPage = () => {
     const currentError = error || loginError;
     if (!currentError) return null;
     
-    try {
-      // Safely check if the error is an account disabled error
-      const isAccountDisabled = 
-        (typeof currentError === 'object' && currentError !== null && currentError.account_disabled) ||
-        (typeof currentError === 'string' && currentError.includes('deactivated'));
-      
-      // Get the message safely
-      let errorMessage = '';
-      if (typeof currentError === 'string') {
-        errorMessage = currentError;
-      } else if (typeof currentError === 'object' && currentError !== null && currentError.message) {
-        errorMessage = currentError.message;
-      } else {
-        errorMessage = 'Login failed. Please try again.';
-      }
-      
-      return (
-        <div className={`border px-4 py-3 rounded relative max-w-md mx-auto mb-4 ${
-          isAccountDisabled ? 'bg-yellow-100 border-yellow-400 text-yellow-800' : 'bg-red-100 border-red-400 text-red-700'
-        }`}>
-          <strong className="font-bold">{isAccountDisabled ? 'Account Deactivated: ' : 'Error: '}</strong>
-          <span className="block sm:inline">{errorMessage}</span>
-          {isAccountDisabled && (
-            <p className="mt-2">Please contact an administrator to reactivate your account.</p>
-          )}
-        </div>
-      );
-    } catch (displayError) {
-      console.error('Error displaying error message:', displayError);
-      // Fallback error display
-      return (
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative max-w-md mx-auto mb-4">
-          <strong className="font-bold">Error: </strong>
-          <span className="block sm:inline">Login failed. Please try again.</span>
-        </div>
-      );
-    }
+    // Check if this might be a deactivated account message
+    const errorStr = String(currentError);
+    const isAccountDisabled = errorStr.toLowerCase().includes('deactivated') || 
+                              errorStr.toLowerCase().includes('disabled');
+    
+    return (
+      <div className={`border px-4 py-3 rounded relative max-w-md mx-auto mb-4 ${
+        isAccountDisabled ? 'bg-yellow-100 border-yellow-400 text-yellow-800' : 'bg-red-100 border-red-400 text-red-700'
+      }`}>
+        <strong className="font-bold">{isAccountDisabled ? 'Account Deactivated: ' : 'Error: '}</strong>
+        <span className="block sm:inline">{errorStr}</span>
+        {isAccountDisabled && (
+          <p className="mt-2">Please contact an administrator to reactivate your account.</p>
+        )}
+      </div>
+    );
   };
   
   return (
