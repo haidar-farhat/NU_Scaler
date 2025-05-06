@@ -344,7 +344,15 @@ class LiveFeedScreen(QWidget):
             if self.advanced_upscaling:
                 # Use the advanced GPU-optimized upscaler with memory management
                 print(f"Creating advanced upscaler with quality: {quality}")
-                self.upscaler = nu_scaler_core.create_advanced_upscaler(quality.lower())
+                try:
+                    self.upscaler = nu_scaler_core.create_advanced_upscaler(quality.lower())
+                except (AttributeError, Exception) as e:
+                    print(f"[GUI] Error initializing advanced upscaler: {e}")
+                    print("[GUI] Falling back to best available upscaler")
+                    self.upscaler = nu_scaler_core.create_best_upscaler(quality.lower())
+                    # Disable advanced-only options when falling back
+                    self.memory_strategy_box.setEnabled(False)
+                    self.adaptive_quality_check.setEnabled(False)
                 
                 # Set adaptive quality based on checkbox
                 if hasattr(self.upscaler, 'set_adaptive_quality'):
