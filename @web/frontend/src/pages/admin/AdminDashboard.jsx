@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import SummaryCards from './SummaryCards';
 import ReviewsTable from './ReviewsTable';
@@ -9,9 +9,10 @@ import { fetchReviews } from '../../features/admin/reviewsSlice';
 import { fetchBugReports } from '../../features/admin/bugReportsSlice';
 import { fetchSurveys } from '../../features/admin/surveysSlice';
 import { fetchUserGrowth } from '../../features/admin/userGrowthSlice';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useToast } from '../../components/ToastContext';
 import { useDataExport } from '../../features/admin/useDataExport';
+import adminApiService from '../../api/adminApi';
 
 const exportBtnStyle = {
   marginRight: 8,
@@ -27,19 +28,66 @@ const exportBtnStyle = {
 
 const AdminDashboard = () => {
   const dispatch = useDispatch();
+  const navigate = useNavigate();
   const { list: reviews, meta: reviewsMeta, loading: reviewsLoading, error: reviewsError } = useSelector(state => state.reviews);
   const { list: bugReports, meta: bugReportsMeta, loading: bugReportsLoading, error: bugReportsError } = useSelector(state => state.bugReports);
   const { list: surveys, meta: surveysMeta, loading: surveysLoading, error: surveysError } = useSelector(state => state.surveys);
   const { list: userGrowth, loading: userGrowthLoading, error: userGrowthError } = useSelector(state => state.userGrowth);
   const { showToast } = useToast();
   const { exportData, loading: exportLoading, error: exportError } = useDataExport();
+  const { isAuthenticated, user } = useSelector(state => state.auth);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
 
+  // Check if the user is authenticated and is an admin
   useEffect(() => {
-    dispatch(fetchReviews());
-    dispatch(fetchBugReports());
-    dispatch(fetchSurveys());
-    dispatch(fetchUserGrowth());
-  }, [dispatch]);
+    const checkAdminAuth = async () => {
+      try {
+        // Make sure CSRF cookie is set up
+        await adminApiService.ensureCSRF();
+        
+        // Check authentication status
+        console.log('Checking admin authentication status...');
+        const response = await adminApiService.checkAuthStatus();
+        console.log('Auth check response:', response.data);
+        
+        const isAdmin = response.data.user?.is_admin === true;
+        const authenticated = response.data.authenticated === true;
+        
+        if (!authenticated) {
+          console.error('User is not authenticated for admin dashboard');
+          showToast('Please log in as an admin to access this page', 'error');
+          navigate('/login');
+          return;
+        }
+        
+        if (!isAdmin) {
+          console.error('User is authenticated but not an admin');
+          showToast('You do not have admin privileges', 'error');
+          navigate('/');
+          return;
+        }
+        
+        // If we get here, the user is authenticated and is an admin
+        console.log('Admin authentication confirmed');
+        setAuthChecked(true);
+        
+        // Load the dashboard data
+        dispatch(fetchReviews());
+        dispatch(fetchBugReports());
+        dispatch(fetchSurveys());
+        dispatch(fetchUserGrowth());
+      } catch (error) {
+        console.error('Error checking admin auth:', error);
+        showToast('Authentication error: ' + (error.message || 'Unknown error'), 'error');
+        navigate('/login');
+      } finally {
+        setAuthLoading(false);
+      }
+    };
+    
+    checkAdminAuth();
+  }, [dispatch, navigate, showToast]);
 
   const handleExport = async (type, format) => {
     const urlMap = {
@@ -73,6 +121,23 @@ const AdminDashboard = () => {
   const handleBugReportsPage = (page) => dispatch(fetchBugReports({ ...bugReportsMeta, page }));
   const handleSurveysFilter = (params) => dispatch(fetchSurveys(params));
   const handleSurveysPage = (page) => dispatch(fetchSurveys({ ...surveysMeta, page }));
+
+  if (authLoading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <div className="spinner-border animate-spin inline-block w-8 h-8 border-4 rounded-full text-blue-600 mb-4" role="status">
+            <span className="visually-hidden">Loading...</span>
+          </div>
+          <p className="text-lg">Verifying admin access...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!authChecked) {
+    return null;
+  }
 
   return (
     <div className="p-6">
