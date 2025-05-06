@@ -314,6 +314,7 @@ impl MemoryPool {
         use windows::Win32::Graphics::Dxgi;
         use windows::core::Interface;
         use std::time::Instant;
+        use std::mem::zeroed;
 
         unsafe {
             // Create DXGI factory
@@ -327,12 +328,19 @@ impl MemoryPool {
                         let mut dedicated_vram: u64 = 0;
                         let mut usage_vram: u64 = 0;
 
-                        if let Ok(desc) = adapter.GetDesc1() {
+                        // Get adapter description with properly created descriptor
+                        let mut desc = zeroed::<Dxgi::DXGI_ADAPTER_DESC1>();
+                        if adapter.GetDesc1(&mut desc).is_ok() {
                             dedicated_vram = desc.DedicatedVideoMemory;
                         }
 
-                        // Get current usage
-                        if let Ok(budget) = adapter3.QueryVideoMemoryInfo(0, Dxgi::DXGI_MEMORY_SEGMENT_GROUP_LOCAL) {
+                        // Get current usage with properly created memory info struct
+                        let mut budget = zeroed::<Dxgi::DXGI_QUERY_VIDEO_MEMORY_INFO>();
+                        if adapter3.QueryVideoMemoryInfo(
+                            0, 
+                            Dxgi::DXGI_MEMORY_SEGMENT_GROUP_LOCAL,
+                            &mut budget
+                        ).is_ok() {
                             usage_vram = budget.CurrentUsage;
                         }
 
