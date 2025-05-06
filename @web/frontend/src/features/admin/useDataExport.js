@@ -48,7 +48,27 @@ export const useDataExport = () => {
       return true;
     } catch (err) {
       console.error('Export error:', err);
-      setError(`Export failed: ${err.message}`);
+      
+      // Handle server error messages that come as JSON
+      if (err.response?.data) {
+        try {
+          // If the error data is a Blob, read it as JSON
+          if (err.response.data instanceof Blob) {
+            const textData = await new Response(err.response.data).text();
+            const jsonData = JSON.parse(textData);
+            setError(jsonData.message || `Export failed: ${err.message}`);
+          } else {
+            // If it's already a parsed object
+            setError(err.response.data.message || `Export failed: ${err.message}`);
+          }
+        } catch (jsonError) {
+          // If we can't parse the error response
+          setError(`Export failed: ${err.message}`);
+        }
+      } else {
+        setError(`Export failed: ${err.message}`);
+      }
+      
       setLoading(false);
       return false;
     }
