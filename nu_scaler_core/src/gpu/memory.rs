@@ -536,6 +536,45 @@ impl MemoryPool {
         let stats = self.stats.lock().unwrap();
         self.get_memory_pressure(&stats)
     }
+    
+    /// Update VRAM usage periodically
+    pub fn update_vram_usage(&self) -> Result<(), anyhow::Error> {
+        // Try to get actual VRAM stats
+        if let Some(stats) = self.query_vram_stats() {
+            let mut current_stats = self.stats.lock().unwrap();
+            *current_stats = stats;
+            
+            // Log VRAM usage
+            println!("[MemoryPool] VRAM: {:.1f}MB used / {:.1f}MB total ({:.1f}%)",
+                    current_stats.used_mb, current_stats.total_mb, 
+                    current_stats.used_mb / current_stats.total_mb * 100.0);
+        }
+        
+        Ok(())
+    }
+
+    /// Get allocated buffers count
+    pub fn get_allocated_buffers_count(&self) -> usize {
+        self.allocated_buffers.load(Ordering::Relaxed)
+    }
+
+    /// Get allocated bytes
+    pub fn get_allocated_bytes(&self) -> usize {
+        self.allocated_bytes.load(Ordering::Relaxed)
+    }
+    
+    /// Force update VRAM usage on Windows using DXGI
+    #[cfg(target_os = "windows")]
+    pub fn force_update_vram_usage_windows(&self) -> Result<VramStats, anyhow::Error> {
+        match self.query_vram_windows() {
+            Some(stats) => {
+                let mut current_stats = self.stats.lock().unwrap();
+                *current_stats = stats.clone();
+                Ok(stats)
+            },
+            None => Err(anyhow::anyhow!("Failed to query VRAM stats"))
+        }
+    }
 }
 
 /// Implementation of `Drop` for proper cleanup
