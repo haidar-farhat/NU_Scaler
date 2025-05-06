@@ -361,13 +361,30 @@ impl WgpuUpscaler {
             return;
         }
 
-        // Get device before clearing buffers
-        let device = if let Some(d) = self.device() { d.clone() } else { return };
-        let layout = if let Some(l) = self.bind_group_layout.as_ref() { l } else { return };
-        let input_buf = if let Some(b) = self.input_buffer.as_ref() { b } else { return };
-        let dims_buf = if let Some(b) = self.dimensions_buffer.as_ref() { b } else { return };
+        // First get the device if available
+        let device_opt = self.device();
+        let device = match device_opt {
+            Some(d) => d.clone(),
+            None => return,
+        };
         
-        // Clear buffers before borrowing device
+        // Get other resources needed
+        let layout = match self.bind_group_layout.as_ref() {
+            Some(l) => l,
+            None => return,
+        };
+        
+        let input_buf = match self.input_buffer.as_ref() {
+            Some(b) => b,
+            None => return,
+        };
+        
+        let dims_buf = match self.dimensions_buffer.as_ref() {
+            Some(b) => b,
+            None => return,
+        };
+        
+        // Clear buffers now that we have all the resources
         self.buffer_pool.clear();
         self.buffer_pool_bind_groups.clear();
 
@@ -436,10 +453,14 @@ impl WgpuUpscaler {
                 // Pre-allocate a large pool, never shrink
                 let n = self.buffer_pool_size.max(8);
                 
-                // Get device before clearing buffers
-                let device = if let Some(d) = self.device() { d.clone() } else { return };
+                // First get the device if available
+                let device_opt = self.device();
+                let device = match device_opt {
+                    Some(d) => d.clone(),
+                    None => return,
+                };
                 
-                // Clear buffers before using device
+                // Clear buffers now that we have the device
                 self.buffer_pool.clear();
                 
                 let mut new_buffers = Vec::with_capacity(n as usize);
