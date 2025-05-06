@@ -125,6 +125,7 @@ export default function AdminUsersPage() {
           ))}
         </tbody>
       </table>
+      
       <ConfirmDialog open={dialog.open} message={dialogMessage} onConfirm={handleConfirm} onCancel={closeDialog} />
     </div>
   );
