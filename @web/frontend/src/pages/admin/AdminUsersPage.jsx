@@ -1,7 +1,8 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchUsers, updateUserRole, updateUserStatus } from '../../features/admin/usersSlice';
 import { useToast } from '../../components/ToastContext';
+import ConfirmDialog from '../../components/ConfirmDialog';
 
 const tableStyle = {
   width: '100%',
@@ -27,34 +28,47 @@ export default function AdminUsersPage() {
   const { user } = useSelector(state => state.auth);
   const { showToast } = useToast();
 
+  // Dialog state
+  const [dialog, setDialog] = useState({ open: false, type: '', targetUser: null });
+
   useEffect(() => {
     dispatch(fetchUsers())
       .unwrap()
       .catch(e => showToast(e.message || 'Failed to load users', 'error'));
   }, [dispatch, showToast]);
 
-  const handleRole = async (u) => {
-    if (u.id === user.id) return;
-    const action = u.is_admin ? 'demote this admin to user' : 'promote this user to admin';
-    if (!window.confirm(`Are you sure you want to ${action}?`)) return;
+  const openDialog = (type, targetUser) => setDialog({ open: true, type, targetUser });
+  const closeDialog = () => setDialog({ open: false, type: '', targetUser: null });
+
+  const handleConfirm = async () => {
+    const { type, targetUser } = dialog;
+    if (!targetUser) return closeDialog();
     try {
-      await dispatch(updateUserRole({ userId: u.id, is_admin: !u.is_admin })).unwrap();
-      showToast(`User ${u.is_admin ? 'demoted' : 'promoted'} successfully.`, 'success');
+      if (type === 'role') {
+        await dispatch(updateUserRole({ userId: targetUser.id, is_admin: !targetUser.is_admin })).unwrap();
+        showToast(`User ${targetUser.is_admin ? 'demoted' : 'promoted'} successfully.`, 'success');
+      } else if (type === 'status') {
+        await dispatch(updateUserStatus({ userId: targetUser.id, is_active: !targetUser.is_active })).unwrap();
+        showToast(`User ${targetUser.is_active ? 'deactivated' : 'activated'} successfully.`, 'success');
+      }
     } catch (e) {
-      showToast(e.message || 'Failed to update user role', 'error');
+      showToast(e.message || 'Action failed', 'error');
     }
+    closeDialog();
   };
-  const handleStatus = async (u) => {
-    if (u.id === user.id) return;
-    const action = u.is_active ? 'deactivate this user' : 'activate this user';
-    if (!window.confirm(`Are you sure you want to ${action}?`)) return;
-    try {
-      await dispatch(updateUserStatus({ userId: u.id, is_active: !u.is_active })).unwrap();
-      showToast(`User ${u.is_active ? 'deactivated' : 'activated'} successfully.`, 'success');
-    } catch (e) {
-      showToast(e.message || 'Failed to update user status', 'error');
+
+  let dialogMessage = '';
+  if (dialog.open && dialog.targetUser) {
+    if (dialog.type === 'role') {
+      dialogMessage = dialog.targetUser.is_admin
+        ? 'Are you sure you want to demote this admin to user?'
+        : 'Are you sure you want to promote this user to admin?';
+    } else if (dialog.type === 'status') {
+      dialogMessage = dialog.targetUser.is_active
+        ? 'Are you sure you want to deactivate this user?'
+        : 'Are you sure you want to activate this user?';
     }
-  };
+  }
 
   return (
     <div style={{ maxWidth: 900, margin: '0 auto', padding: 24 }}>
@@ -81,7 +95,7 @@ export default function AdminUsersPage() {
               <td style={thtd}>
                 <button
                   style={{ ...actionBtn, background: u.is_admin ? '#ffc107' : '#007bff', color: '#fff' }}
-                  onClick={() => handleRole(u)}
+                  onClick={() => u.id !== user.id && openDialog('role', u)}
                   disabled={u.id === user.id}
                   title={u.id === user.id ? 'Cannot change your own role' : u.is_admin ? 'Demote to user' : 'Promote to admin'}
                 >
@@ -89,7 +103,7 @@ export default function AdminUsersPage() {
                 </button>
                 <button
                   style={{ ...actionBtn, background: u.is_active ? '#dc3545' : '#28a745', color: '#fff' }}
-                  onClick={() => handleStatus(u)}
+                  onClick={() => u.id !== user.id && openDialog('status', u)}
                   disabled={u.id === user.id}
                   title={u.id === user.id ? 'Cannot change your own status' : u.is_active ? 'Deactivate' : 'Activate'}
                 >
@@ -100,6 +114,7 @@ export default function AdminUsersPage() {
           ))}
         </tbody>
       </table>
+      <ConfirmDialog open={dialog.open} message={dialogMessage} onConfirm={handleConfirm} onCancel={closeDialog} />
     </div>
   );
 } 
