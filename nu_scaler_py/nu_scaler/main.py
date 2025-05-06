@@ -1,9 +1,9 @@
 import sys
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QListWidget, QStackedWidget, QFrame,
-    QPushButton, QComboBox, QSpinBox, QCheckBox, QSlider, QGroupBox, QFormLayout
+    QPushButton, QComboBox, QSpinBox, QCheckBox, QSlider, QGroupBox, QFormLayout, QProgressBar, QFileDialog
 )
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QTimer, Signal, QThread, QObject
 from PySide6.QtGui import QPixmap, QImage
 import time
 import random
@@ -11,8 +11,12 @@ import traceback
 
 try:
     import nu_scaler_core
+    from nu_scaler.benchmark import run_benchmark, run_comparison_benchmark, BenchmarkResult, plot_benchmark_results
 except ImportError:
     nu_scaler_core = None
+    run_benchmark = None
+    run_comparison_benchmark = None
+    plot_benchmark_results = None
 
 class LiveFeedScreen(QWidget):
     log_signal = Signal(str)
