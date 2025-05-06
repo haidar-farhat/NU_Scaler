@@ -479,8 +479,8 @@ class LiveFeedScreen(QWidget):
         out_w = int(in_w * scale)
         out_h = int(in_h * scale)
 
-        # If a previous upscale thread is running, skip this frame
-        if hasattr(self, '_upscale_thread') and self._upscale_thread is not None and self._upscale_thread.isRunning():
+        # Only start a new upscale if no thread is running
+        if getattr(self, '_upscale_thread', None) is not None:
             return
 
         # Start worker thread for upscaling
@@ -512,6 +512,8 @@ class LiveFeedScreen(QWidget):
             else:
                 self.warning_signal.emit("", False)
             self.last_frame_time = time.perf_counter()
+        self._upscale_thread = None
+        self._upscale_worker = None
 
     def on_upscale_error(self, error_msg):
         import traceback
@@ -519,6 +521,8 @@ class LiveFeedScreen(QWidget):
         self.status_bar.setText(f"Error: {str(error_msg)}")
         self.upscaler = None
         self.upscaler_initialized = False
+        self._upscale_thread = None
+        self._upscale_worker = None
 
 class SettingsScreen(QWidget):
     def __init__(self, live_feed_screen=None):
