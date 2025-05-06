@@ -9,11 +9,6 @@ use Illuminate\Validation\Rule;
 
 class UserManagementController extends Controller
 {
-    public function __construct()
-    {
-        $this->middleware(['auth:sanctum', 'is_admin']);
-    }
-
     // List users (paginated)
     public function index(Request $request)
     {
