@@ -67,6 +67,14 @@ class AuthController extends Controller
             ]);
         }
 
+        // Check if user account is active
+        if (isset($user->is_active) && !$user->is_active) {
+            return response()->json([
+                'message' => 'Your account has been deactivated. Please contact an administrator.',
+                'account_disabled' => true
+            ], 403);
+        }
+
         // Generate token with explicit name for better tracking
         $tokenName = 'api-token-' . now()->timestamp;
         $token = $user->createToken($tokenName)->plainTextToken;
