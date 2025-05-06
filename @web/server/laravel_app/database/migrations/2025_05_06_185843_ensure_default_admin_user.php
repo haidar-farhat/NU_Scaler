@@ -195,53 +195,85 @@ return new class extends Migration
             [
                 'rating' => 5,
                 'comment' => 'Great software, helped me optimize my PC significantly!',
+                'name' => 'John Smith',
+                'email' => 'johnsmith@example.com',
             ],
             [
                 'rating' => 4,
                 'comment' => 'Very useful tool. Would be perfect with a few more features.',
+                'name' => 'Sarah Johnson',
+                'email' => 'sarahj@example.com',
             ],
             [
                 'rating' => 5,
                 'comment' => 'Excellent performance improvements after using this.',
+                'name' => 'Michael Brown',
+                'email' => 'mbrown@example.com',
             ],
             [
                 'rating' => 3,
                 'comment' => 'Good but could use a more intuitive interface.',
+                'name' => 'Emily Davis',
+                'email' => 'emilyd@example.com',
             ],
             [
                 'rating' => 5,
                 'comment' => 'My games run much smoother now. Thank you!',
+                'name' => 'David Wilson',
+                'email' => 'davidw@example.com',
             ],
             [
                 'rating' => 4,
                 'comment' => 'Solid tool for PC optimization.',
+                'name' => 'Jessica Martinez',
+                'email' => 'jmartinez@example.com',
             ],
             [
                 'rating' => 5,
                 'comment' => 'Best optimization software I\'ve used so far.',
+                'name' => 'Robert Taylor',
+                'email' => 'rtaylor@example.com',
             ],
             [
                 'rating' => 4,
                 'comment' => 'Very helpful for my old computer.',
+                'name' => 'Amanda Garcia',
+                'email' => 'agarcia@example.com',
             ],
             [
                 'rating' => 3,
                 'comment' => 'Decent tool but had some compatibility issues.',
+                'name' => 'Thomas Lee',
+                'email' => 'tlee@example.com',
             ],
             [
                 'rating' => 5,
                 'comment' => 'Incredible performance boost on my gaming PC!',
+                'name' => 'Laura Miller',
+                'email' => 'lmiller@example.com',
             ],
         ];
 
+        // Get the UUIDs for each user
+        $userUuids = [];
+        if (Schema::hasColumn('users', 'uuid')) {
+            $userUuids = DB::table('users')->pluck('uuid', 'id')->toArray();
+        }
+
         foreach ($reviews as $review) {
             $userId = $users[array_rand($users)];
-
-            DB::table('reviews')->insert(array_merge($review, [
+            $reviewData = [
                 'user_id' => $userId,
                 'created_at' => now()->subDays(rand(1, 30)),
                 'updated_at' => now()->subDays(rand(0, 5)),
-            ]));
+            ];
+
+            // Add user_uuid if it exists in the users table and the reviews table
+            if (Schema::hasColumn('reviews', 'user_uuid') && !empty($userUuids) && isset($userUuids[$userId])) {
+                $reviewData['user_uuid'] = $userUuids[$userId];
+            }
+
+            DB::table('reviews')->insert(array_merge($review, $reviewData));
         }
     }
 
