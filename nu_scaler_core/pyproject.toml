@@ -1,0 +1,29 @@
+[build-system]
+requires = ["maturin>=1.1,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "nu_scaler_core"
+version = "0.1.0"
+description = "GPU-accelerated image scaling core functionality for Nu_Scaler"
+authors = [
+    {name = "Nu_Scaler Team", email = "info@nuscaler.io"}
+]
+requires-python = ">=3.8"
+readme = "README.md"
+license = {text = "MIT"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+
+[project.urls]
+Homepage = "https://github.com/nusealer/nu_scaler"
+Repository = "https://github.com/nuscaler/nu_scaler"
+
+[tool.maturin]
+features = ["python"]
+module-name = "nu_scaler_core"
+python-source = "python" 
