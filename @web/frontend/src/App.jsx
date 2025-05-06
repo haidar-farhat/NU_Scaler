@@ -1,6 +1,7 @@
 import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Navbar from './components/Navbar';
+import { ToastProvider } from './components/ToastContext';
 
 // Layout component (optional, for shared structure like header/footer)
 // import Layout from './components/Layout'; 
@@ -24,42 +25,44 @@ const LoadingSpinner = () => (
 
 function App() {
   return (
-    <BrowserRouter>
-      <Navbar />
-      {/* <Layout> You could wrap Routes in a Layout component */}
-      <Suspense fallback={<LoadingSpinner />}>
-        <Routes>
-          {/* Public Routes */}
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
+    <ToastProvider>
+      <BrowserRouter>
+        <Navbar />
+        {/* <Layout> You could wrap Routes in a Layout component */}
+        <Suspense fallback={<LoadingSpinner />}>
+          <Routes>
+            {/* Public Routes */}
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/register" element={<RegisterPage />} />
 
-          {/* Protected Routes */}
-          <Route 
-            path="/download" 
-            element={
-              <ProtectedRoute>
-                <DownloadPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route 
-            path="/admin" 
-            element={
-              <ProtectedRoute role="admin">
-                <AdminDashboard />
-              </ProtectedRoute>
-            }
-          />
-          
-          {/* Add other routes here */}
+            {/* Protected Routes */}
+            <Route 
+              path="/download" 
+              element={
+                <ProtectedRoute>
+                  <DownloadPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route 
+              path="/admin" 
+              element={
+                <ProtectedRoute role="admin">
+                  <AdminDashboard />
+                </ProtectedRoute>
+              }
+            />
+            
+            {/* Add other routes here */}
 
-          {/* Optional: 404 Not Found Route */}
-          {/* <Route path="*" element={<NotFoundPage />} /> */}
-        </Routes>
-      </Suspense>
-      {/* </Layout> */}
-    </BrowserRouter>
+            {/* Optional: 404 Not Found Route */}
+            {/* <Route path="*" element={<NotFoundPage />} /> */}
+          </Routes>
+        </Suspense>
+        {/* </Layout> */}
+      </BrowserRouter>
+    </ToastProvider>
   );
 }
 
