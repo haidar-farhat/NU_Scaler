@@ -10,4 +10,16 @@ export default defineConfig({
         }),
         tailwindcss(),
     ],
+    build: {
+        sourcemap: true
+    },
+    server: {
+        hmr: {
+            host: 'localhost'
+        },
+        // Prevent React DevTools source map errors
+        fs: {
+            strict: false
+        }
+    }
 });
