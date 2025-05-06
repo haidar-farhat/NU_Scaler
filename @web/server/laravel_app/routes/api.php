@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\Admin\AdminFeedbackController;
 use App\Http\Controllers\Api\Admin\AdminMetricsController;
 use App\Http\Controllers\Api\Admin\AdminAuthController; // Assuming separate admin auth controller
 use App\Http\Controllers\Api\Admin\LogDashboardController;
+use App\Http\Controllers\Api\Admin\UserManagementController;
 
 /*
 |--------------------------------------------------------------------------
@@ -104,6 +105,11 @@ Route::prefix('admin')->name('api.admin.')
             Route::get('/file/{filename}', [LogDashboardController::class, 'show'])->name('show');
             Route::delete('/file/{filename}', [LogDashboardController::class, 'destroy'])->name('destroy');
         });
+
+        // User Management
+        Route::get('/users', [UserManagementController::class, 'index'])->name('users.index');
+        Route::patch('/users/{user}/role', [UserManagementController::class, 'updateRole'])->name('users.updateRole');
+        Route::patch('/users/{user}/status', [UserManagementController::class, 'updateStatus'])->name('users.updateStatus');
     });
 
 // Protected Admin Routes
