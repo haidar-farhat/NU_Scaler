@@ -480,6 +480,198 @@ impl WgpuUpscaler {
         println!("[Batch] Total time: {:.2} ms for {} frames", total.as_secs_f64() * 1000.0, frames.len());
         results.into_iter().collect()
     }
+    
+    /// Initialize the upscaler using shared GPU resources
+    fn initialize_with_resources(&mut self, input_width: u32, input_height: u32, output_width: u32, output_height: u32) -> Result<()> {
+        // Store dimensions
+        self.input_width = input_width;
+        self.input_height = input_height;
+        self.output_width = output_width;
+        self.output_height = output_height;
+        
+        if input_width == 0 || input_height == 0 || output_width == 0 || output_height == 0 {
+            return Err(anyhow!("Invalid dimensions: {}x{} -> {}x{}", 
+                input_width, input_height, output_width, output_height));
+        }
+        
+        // Get resources
+        let resources = self.gpu_resources.as_ref()
+            .ok_or_else(|| anyhow!("No GPU resources"))?;
+            
+        let device = &resources.device;
+        let queue = &resources.queue;
+        let memory_pool = &resources.memory_pool;
+        
+        println!("[WgpuUpscaler] Initializing with shared resources: {}x{} -> {}x{}", 
+            input_width, input_height, output_width, output_height);
+        
+        // Determine shader based on algorithm
+        let shader_src = match self.algorithm {
+            UpscaleAlgorithm::Nearest => NN_UPSCALE_SHADER,
+            UpscaleAlgorithm::Bilinear => BILINEAR_UPSCALE_SHADER,
+        };
+        
+        // Create shader module
+        let shader = device.create_shader_module(ShaderModuleDescriptor {
+            label: Some("Upscale Shader"),
+            source: ShaderSource::Wgsl(shader_src.into()),
+        });
+        
+        // Create bind group layout
+        let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("Upscale Bind Group Layout"),
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        
+        // Create pipeline layout
+        let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+            label: Some("Upscale Pipeline Layout"),
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        
+        // Create compute pipeline
+        let pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("Upscale Pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: "main",
+        });
+        
+        // Create buffers using memory pool if enabled
+        let (input_buffer, output_buffer, staging_buffer) = if self.use_memory_pool {
+            // Create buffers using memory pool
+            let input_buffer = memory_pool.get_buffer(
+                (input_width * input_height * 4) as usize, 
+                BufferUsages::STORAGE | BufferUsages::COPY_DST,
+                Some("Input Buffer"),
+            );
+            
+            let output_buffer = memory_pool.get_buffer(
+                (output_width * output_height * 4) as usize,
+                BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+                Some("Output Buffer"),
+            );
+            
+            let staging_buffer = memory_pool.get_buffer(
+                (output_width * output_height * 4) as usize,
+                BufferUsages::MAP_READ | BufferUsages::COPY_DST,
+                Some("Staging Buffer"),
+            );
+            
+            (input_buffer, output_buffer, staging_buffer)
+        } else {
+            // Create buffers directly
+            let input_buffer = device.create_buffer(&BufferDescriptor {
+                label: Some("Input Buffer"),
+                size: (input_width * input_height * 4) as u64,
+                usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            
+            let output_buffer = device.create_buffer(&BufferDescriptor {
+                label: Some("Output Buffer"),
+                size: (output_width * output_height * 4) as u64,
+                usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            });
+            
+            let staging_buffer = device.create_buffer(&BufferDescriptor {
+                label: Some("Staging Buffer"),
+                size: (output_width * output_height * 4) as u64,
+                usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            
+            (input_buffer, output_buffer, staging_buffer)
+        };
+        
+        // Create dimensions buffer
+        let dimensions = [input_width, input_height, output_width, output_height];
+        let dimensions_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Dimensions Buffer"),
+            contents: bytemuck::cast_slice(&dimensions),
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+        });
+        
+        // Create bind group
+        let bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Upscale Bind Group"),
+            layout: &bind_group_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: input_buffer.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: output_buffer.as_entire_binding(),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: dimensions_buffer.as_entire_binding(),
+                },
+            ],
+        });
+        
+        // Store state
+        self.shader = Some(shader);
+        self.pipeline = Some(pipeline);
+        self.input_buffer = Some(input_buffer);
+        self.output_buffer = Some(output_buffer);
+        self.dimensions_buffer = Some(dimensions_buffer);
+        self.bind_group_layout = Some(bind_group_layout);
+        self.fallback_bind_group = Some(bind_group);
+        self.staging_buffer = Some(staging_buffer);
+        
+        // Mark as initialized
+        self.initialized = true;
+        
+        // Update allocation strategy based on quality
+        if let Some(resources) = &self.gpu_resources {
+            use crate::gpu::memory::AllocationStrategy;
+            let strategy = match self.quality {
+                UpscalingQuality::Ultra => AllocationStrategy::Aggressive,
+                UpscalingQuality::Quality => AllocationStrategy::Balanced,
+                UpscalingQuality::Balanced => AllocationStrategy::Balanced,
+                UpscalingQuality::Performance => AllocationStrategy::Conservative,
+            };
+            resources.memory_pool.set_allocation_strategy(strategy);
+        }
+        
+        Ok(())
+    }
 }
 
 impl Upscaler for WgpuUpscaler {
