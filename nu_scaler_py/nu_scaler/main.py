@@ -353,6 +353,9 @@ class LiveFeedScreen(QWidget):
                     # Disable advanced-only options when falling back
                     self.memory_strategy_box.setEnabled(False)
                     self.adaptive_quality_check.setEnabled(False)
+                    self.advanced_check.setChecked(False)
+                    self.advanced_check.setEnabled(False)
+                    self.log_signal.emit("Advanced GPU optimization not available, using standard upscaler")
                 
                 # Set adaptive quality based on checkbox
                 if hasattr(self.upscaler, 'set_adaptive_quality'):
