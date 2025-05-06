@@ -108,6 +108,7 @@ class DatabaseSeeder extends Seeder
                     'cpu_model' => $cpuModels[$index],
                     'gpu_model' => $gpuModels[$index],
                     'ram_size' => $ramSizes[$index],
+                    'resolution' => '1920x1080',
                     'additional_info' => 'Survey submitted via app',
                     'created_at' => now()->subDays(rand(1, 30))
                 ]);
