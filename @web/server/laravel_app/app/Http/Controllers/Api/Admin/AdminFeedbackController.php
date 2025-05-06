@@ -189,15 +189,8 @@ class AdminFeedbackController extends Controller
                 // Create a new Excel export with our legacy adapter
                 $export = new \App\Exports\LegacyExcelExport($reviews);
 
-                // Load Excel
-                $excel = app('excel');
-
-                // Create Excel file
-                return $excel->create($filename, function($excel) use ($export) {
-                    $excel->sheet('Reviews', function($sheet) use ($export) {
-                        $sheet->fromArray($export->getSheetContent());
-                    });
-                })->download('xlsx');
+                // Use the Excel facade to download the file
+                return \Maatwebsite\Excel\Facades\Excel::download($export, $filename . '.xlsx');
             } catch (\Exception $e) {
                 // Log the error for debugging
                 \Illuminate\Support\Facades\Log::error('Excel export failed: ' . $e->getMessage());
@@ -236,15 +229,8 @@ class AdminFeedbackController extends Controller
                 // Create a new Excel export with our legacy adapter
                 $export = new \App\Exports\LegacyExcelExport($reports);
 
-                // Load Excel
-                $excel = app('excel');
-
-                // Create Excel file
-                return $excel->create($filename, function($excel) use ($export) {
-                    $excel->sheet('Bug Reports', function($sheet) use ($export) {
-                        $sheet->fromArray($export->getSheetContent());
-                    });
-                })->download('xlsx');
+                // Use the Excel facade to download the file
+                return \Maatwebsite\Excel\Facades\Excel::download($export, $filename . '.xlsx');
             } catch (\Exception $e) {
                 // Log the error for debugging
                 \Illuminate\Support\Facades\Log::error('Excel export failed: ' . $e->getMessage());
@@ -283,15 +269,8 @@ class AdminFeedbackController extends Controller
                 // Create a new Excel export with our legacy adapter
                 $export = new \App\Exports\LegacyExcelExport($surveys);
 
-                // Load Excel
-                $excel = app('excel');
-
-                // Create Excel file
-                return $excel->create($filename, function($excel) use ($export) {
-                    $excel->sheet('Hardware Surveys', function($sheet) use ($export) {
-                        $sheet->fromArray($export->getSheetContent());
-                    });
-                })->download('xlsx');
+                // Use the Excel facade to download the file
+                return \Maatwebsite\Excel\Facades\Excel::download($export, $filename . '.xlsx');
             } catch (\Exception $e) {
                 // Log the error for debugging
                 \Illuminate\Support\Facades\Log::error('Excel export failed: ' . $e->getMessage());

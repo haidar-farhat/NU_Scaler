@@ -4,9 +4,12 @@ namespace App\Exports;
 
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
+use Maatwebsite\Excel\Concerns\FromArray;
+use Maatwebsite\Excel\Concerns\WithHeadings;
+use Maatwebsite\Excel\Concerns\ShouldAutoSize;
 
-class LegacyExcelExport {
-
+class LegacyExcelExport implements FromArray, WithHeadings, ShouldAutoSize
+{
     protected $data;
     protected $columns;
 
@@ -29,16 +32,11 @@ class LegacyExcelExport {
     }
 
     /**
-     * Get the sheet content as an array of rows
-     *
      * @return array
      */
-    public function getSheetContent()
+    public function array(): array
     {
         $rows = [];
-
-        // Add headers as first row
-        $rows[] = $this->columns;
 
         // Add data rows
         foreach ($this->data as $item) {
@@ -62,5 +60,23 @@ class LegacyExcelExport {
         }
 
         return $rows;
+    }
+
+    /**
+     * @return array
+     */
+    public function headings(): array
+    {
+        return $this->columns;
+    }
+
+    /**
+     * Get the sheet content as an array of rows (for backward compatibility)
+     *
+     * @return array
+     */
+    public function getSheetContent()
+    {
+        return array_merge([$this->headings()], $this->array());
     }
 }
