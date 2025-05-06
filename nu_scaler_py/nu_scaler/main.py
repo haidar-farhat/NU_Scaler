@@ -373,12 +373,35 @@ class LiveFeedScreen(QWidget):
             self.log_signal.emit(f"Error starting capture: {e}")
 
     def stop_capture(self):
+        print('[DEBUG] stop_capture: called')
         if self.capture:
-            self.capture.stop()
+            try:
+                self.capture.stop()
+                print('[DEBUG] stop_capture: capture stopped')
+            except Exception as e:
+                print(f'[DEBUG] stop_capture: error stopping capture: {e}')
+            self.capture = None
         self.timer.stop()
+        print('[DEBUG] stop_capture: timer stopped')
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         self.status_bar.setText("Capture stopped")
+        # Clean up worker and thread
+        if self._upscale_thread is not None:
+            print('[DEBUG] stop_capture: waiting for worker thread to finish')
+            self._upscale_thread.quit()
+            self._upscale_thread.wait(2000)
+            self._upscale_thread = None
+            self._upscale_worker = None
+            print('[DEBUG] stop_capture: worker thread cleaned up')
+        # Optionally, disable settings controls while worker is running
+        self.technology_box.setEnabled(True)
+        self.quality_box.setEnabled(True)
+        self.algorithm_box.setEnabled(True)
+        self.scale_slider.setEnabled(True)
+        self.advanced_check.setEnabled(True)
+        self.memory_strategy_box.setEnabled(True)
+        self.adaptive_quality_check.setEnabled(True)
 
     def update_technology_ui(self, technology):
         """Update UI based on selected upscaling technology"""
