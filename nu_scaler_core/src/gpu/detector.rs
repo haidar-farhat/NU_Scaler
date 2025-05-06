@@ -54,6 +54,12 @@ impl From<AdapterInfo> for GpuInfo {
         };
         
         let is_discrete = matches!(info.device_type, DeviceType::DiscreteGpu);
+
+        // Print GPU info during detection
+        println!("[GPU Detector] Found GPU: {} (Vendor ID: 0x{:X}, Device ID: 0x{:X})", 
+            info.name, info.vendor, info.device);
+        println!("[GPU Detector] Device type: {:?}, Backend: {:?}", info.device_type, info.backend);
+        println!("[GPU Detector] Driver info: {}", info.driver_info);
         
         Self {
             name: info.name,
