@@ -1035,9 +1035,8 @@ impl Upscaler for WgpuUpscaler {
             let padded_buffer = buffer_slice.get_mapped_range();
             let result = padded_buffer.to_vec();
             
-            // Unmap the buffer
+            // Unmap the buffer by dropping the mapped range
             drop(padded_buffer);
-            buffer_slice.unmap();
             
             Ok(result)
         } else {
