@@ -7,6 +7,9 @@ use crate::capture::realtime::RealTimeCapture;
 use anyhow::Result;
 use std::sync::Arc;
 use crate::benchmark::{PyBenchmarkResult, py_benchmark_upscaler, py_run_comparison_benchmark};
+use crate::gpu::memory::{PyVramStats, AllocationStrategy, MemoryPressure};
+use crate::gpu::GpuResources;
+use crate::gpu::detector::GpuDetector;
 
 pub mod capture;
 pub mod gpu;
@@ -245,6 +248,207 @@ impl PyCaptureTarget {
     }
 }
 
+/// WGPU Upscaler with added features
+#[pyclass]
+pub struct PyAdvancedWgpuUpscaler {
+    inner: upscale::WgpuUpscaler,
+    gpu_resources: Option<Arc<GpuResources>>,
+    upscale_scale: f32,
+}
+
+#[pymethods]
+impl PyAdvancedWgpuUpscaler {
+    #[new]
+    #[pyo3(signature = (quality = "quality", algorithm = "nearest", adaptive_quality = true))]
+    /// Create a new advanced WgpuUpscaler with memory management features
+    pub fn new(quality: &str, algorithm: &str, adaptive_quality: bool) -> PyResult<Self> {
+        let q = match quality.to_lowercase().as_str() {
+            "ultra" => upscale::UpscalingQuality::Ultra,
+            "quality" => upscale::UpscalingQuality::Quality,
+            "balanced" => upscale::UpscalingQuality::Balanced,
+            "performance" => upscale::UpscalingQuality::Performance,
+            _ => upscale::UpscalingQuality::Quality,
+        };
+        
+        let alg = match algorithm.to_lowercase().as_str() {
+            "bilinear" => upscale::UpscaleAlgorithm::Bilinear,
+            _ => upscale::UpscaleAlgorithm::Nearest,
+        };
+        
+        let mut upscaler = upscale::WgpuUpscaler::new(q, alg);
+        upscaler.set_adaptive_quality(adaptive_quality);
+        
+        // Create a GPU detector and get resources
+        let mut detector = GpuDetector::new();
+        if let Err(e) = detector.detect_gpus() {
+            println!("Warning: GPU detection failed: {}", e);
+        }
+        
+        let primary_gpu = detector.get_primary_gpu().cloned();
+        
+        // Create GPU resources with memory management
+        let gpu_resources = match pollster::block_on(detector.create_device_queue()) {
+            Ok((device, queue)) => {
+                let resources = Arc::new(GpuResources::new(device, queue, primary_gpu));
+                upscaler.set_gpu_resources(resources.clone());
+                Some(resources)
+            },
+            Err(e) => {
+                println!("Warning: Failed to create GPU device and queue: {}", e);
+                None
+            }
+        };
+        
+        Ok(Self {
+            inner: upscaler,
+            gpu_resources,
+            upscale_scale: 2.0,
+        })
+    }
+    
+    /// Initialize the upscaler with the given dimensions
+    pub fn initialize(&mut self, input_width: u32, input_height: u32, output_width: u32, output_height: u32) -> PyResult<()> {
+        if let Err(e) = self.inner.initialize(input_width, input_height, output_width, output_height) {
+            Err(pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to initialize upscaler: {}", e)))
+        } else {
+            self.upscale_scale = output_width as f32 / input_width as f32;
+            Ok(())
+        }
+    }
+    
+    /// Upscale an image
+    pub fn upscale(&self, input: &[u8]) -> PyResult<PyObject> {
+        match self.inner.upscale(input) {
+            Ok(output) => Python::with_gil(|py| {
+                Ok(PyBytes::new(py, &output).into())
+            }),
+            Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to upscale: {}", e))),
+        }
+    }
+    
+    /// Get the upscale scale factor
+    #[getter]
+    pub fn get_upscale_scale(&self) -> PyResult<f32> {
+        Ok(self.upscale_scale)
+    }
+    
+    /// Set the upscale scale factor
+    #[setter]
+    pub fn set_upscale_scale(&mut self, scale: f32) -> PyResult<()> {
+        if scale < 1.0 || scale > 4.0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "Scale factor must be between 1.0 and 4.0"
+            ));
+        }
+        self.upscale_scale = scale;
+        Ok(())
+    }
+    
+    /// Get current VRAM statistics
+    pub fn get_vram_stats(&self) -> PyResult<PyVramStats> {
+        if let Some(resources) = &self.gpu_resources {
+            Ok(resources.get_vram_stats().into())
+        } else {
+            Err(pyo3::exceptions::PyRuntimeError::new_err("GPU resources not initialized"))
+        }
+    }
+    
+    /// Set the memory allocation strategy
+    pub fn set_memory_strategy(&self, strategy: &str) -> PyResult<()> {
+        if let Some(resources) = &self.gpu_resources {
+            let strategy = match strategy.to_lowercase().as_str() {
+                "aggressive" => AllocationStrategy::Aggressive,
+                "balanced" => AllocationStrategy::Balanced,
+                "conservative" => AllocationStrategy::Conservative,
+                "minimal" => AllocationStrategy::Minimal,
+                _ => AllocationStrategy::Balanced,
+            };
+            resources.set_allocation_strategy(strategy);
+            Ok(())
+        } else {
+            Err(pyo3::exceptions::PyRuntimeError::new_err("GPU resources not initialized"))
+        }
+    }
+    
+    /// Get current VRAM usage as a percentage
+    pub fn get_vram_usage_percent(&self) -> PyResult<f32> {
+        if let Some(resources) = &self.gpu_resources {
+            let stats = resources.get_vram_stats();
+            if stats.total_mb > 0.0 {
+                Ok((stats.used_mb / stats.total_mb) * 100.0)
+            } else {
+                Ok(0.0)
+            }
+        } else {
+            Err(pyo3::exceptions::PyRuntimeError::new_err("GPU resources not initialized"))
+        }
+    }
+    
+    /// Check if adaptive quality is enabled
+    #[getter]
+    pub fn get_adaptive_quality(&self) -> PyResult<bool> {
+        // Directly access inner struct to check the setting
+        Python::with_gil(|_py| {
+            // Use unsafe to get mutable access (only reading, not writing)
+            let inner = unsafe { &mut *(&self.inner as *const _ as *mut upscale::WgpuUpscaler) };
+            Ok(inner.adaptive_quality)
+        })
+    }
+    
+    /// Enable or disable adaptive quality
+    #[setter]
+    pub fn set_adaptive_quality(&mut self, enabled: bool) -> PyResult<()> {
+        self.inner.set_adaptive_quality(enabled);
+        Ok(())
+    }
+    
+    /// Clean up GPU memory
+    pub fn cleanup_memory(&self) -> PyResult<()> {
+        if let Some(resources) = &self.gpu_resources {
+            resources.cleanup_memory();
+            Ok(())
+        } else {
+            Err(pyo3::exceptions::PyRuntimeError::new_err("GPU resources not initialized"))
+        }
+    }
+    
+    /// Get name of the upscaler
+    #[getter]
+    pub fn name(&self) -> PyResult<&'static str> {
+        Ok(self.inner.name())
+    }
+    
+    /// Get quality level
+    #[getter]
+    pub fn quality(&self) -> PyResult<String> {
+        let quality = self.inner.quality();
+        Ok(format!("{:?}", quality))
+    }
+    
+    /// Set quality level
+    #[setter]
+    pub fn set_quality(&mut self, quality: &str) -> PyResult<()> {
+        let q = match quality.to_lowercase().as_str() {
+            "ultra" => upscale::UpscalingQuality::Ultra,
+            "quality" => upscale::UpscalingQuality::Quality,
+            "balanced" => upscale::UpscalingQuality::Balanced,
+            "performance" => upscale::UpscalingQuality::Performance,
+            _ => upscale::UpscalingQuality::Quality,
+        };
+        
+        match self.inner.set_quality(q) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to set quality: {}", e))),
+        }
+    }
+}
+
+/// Create an advanced GPU-managed upscaler with automatic memory management
+#[pyfunction]
+pub fn create_advanced_upscaler(quality: &str) -> PyResult<PyAdvancedWgpuUpscaler> {
+    PyAdvancedWgpuUpscaler::new(quality, "bilinear", true)
+}
+
 #[pymodule]
 fn nu_scaler_core(py: Python, m: &PyModule) -> PyResult<()> {
     // Upscaling quality levels
@@ -277,63 +481,15 @@ fn nu_scaler_core(py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(py_benchmark_upscaler, m)?)?;
     m.add_function(wrap_pyfunction!(py_run_comparison_benchmark, m)?)?;
     
-    // Add factory functions for creating upscalers
-    #[pyfn(m)]
-    fn create_best_upscaler(quality: &str) -> PyResult<PyWgpuUpscaler> {
-        // Initialize GPU detector
-        let mut gpu_detector = GpuDetector::new();
-        match gpu_detector.detect_gpus() {
-            Ok(_) => {},
-            Err(e) => return Err(pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to detect GPUs: {}", e))),
-        }
-        
-        // Determine best upscaling technology
-        let tech = gpu_detector.determine_best_upscaling_technology();
-        
-        // Convert quality string to enum
-        let q = match quality.to_lowercase().as_str() {
-            "ultra" => UpscalingQuality::Ultra,
-            "quality" => UpscalingQuality::Quality,
-            "balanced" => UpscalingQuality::Balanced,
-            "performance" => UpscalingQuality::Performance,
-            _ => UpscalingQuality::Quality,
-        };
-        
-        // For now, we can only create WgpuUpscaler directly from Python
-        // So we determine the algorithm based on the best tech
-        let algorithm = match tech {
-            UpscalingTechnology::FSR => "bilinear",   // FSR works best with bilinear base
-            UpscalingTechnology::DLSS => "bilinear",  // DLSS works best with bilinear base
-            _ => "nearest",                           // Default to nearest for other tech
-        };
-        
-        // Log the detected GPU and selected technology
-        let gpu_info = gpu_detector.get_primary_gpu().cloned();
-        if let Some(gpu) = gpu_info {
-            println!("[PyO3] Detected GPU: {} (Vendor: {:?})", gpu.name, gpu.vendor);
-        }
-        println!("[PyO3] Selected upscaling technology: {:?}", tech);
-        
-        // Create the upscaler
-        PyWgpuUpscaler::new(quality, algorithm)
-    }
+    // Register PyVramStats
+    m.add_class::<PyVramStats>()?;
     
-    #[pyfn(m)]
-    fn create_fsr_upscaler(quality: &str) -> PyResult<PyWgpuUpscaler> {
-        // For now, we create a WgpuUpscaler configured for FSR-like operation
-        // In a real implementation, this would create an actual FSR upscaler
-        println!("[PyO3] Creating FSR-optimized upscaler");
-        PyWgpuUpscaler::new(quality, "bilinear")
-    }
+    // Register advanced upscaler
+    m.add_class::<PyAdvancedWgpuUpscaler>()?;
     
-    #[pyfn(m)]
-    fn create_dlss_upscaler(quality: &str) -> PyResult<PyWgpuUpscaler> {
-        // For now, we create a WgpuUpscaler configured for DLSS-like operation
-        // In a real implementation, this would create an actual DLSS upscaler
-        println!("[PyO3] Creating DLSS-optimized upscaler");
-        PyWgpuUpscaler::new(quality, "bilinear")
-    }
-
+    // Add memory-managed upscaler factory function
+    m.add_function(wrap_pyfunction!(create_advanced_upscaler, m)?)?;
+    
     Ok(())
 }
 
