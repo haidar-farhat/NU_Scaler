@@ -528,6 +528,8 @@ class LiveFeedScreen(QWidget):
         self.upscaler_initialized = False
         # self._upscale_thread = None
         # self._upscale_worker = None
+        # Also print traceback if available
+        traceback.print_exc()
 
 class SettingsScreen(QWidget):
     def __init__(self, live_feed_screen=None):
@@ -688,11 +690,15 @@ class DebugScreen(QWidget):
     def append_log(self, msg):
         prev = self.log_view.text()
         self.log_view.setText(prev + "\n" + msg)
+        print(f"[GUI LOG] {msg}")
     def update_profiler(self, frame_time, fps, in_w, in_h):
         self.profiler_label.setText(f"Frame: {frame_time:.1f} ms | FPS: {fps:.1f} | Input: {in_w}×{in_h}")
+        print(f"[PROFILER] Frame: {frame_time:.1f} ms | FPS: {fps:.1f} | Input: {in_w}×{in_h}")
     def show_warning(self, msg, show):
         self.warning_label.setText(msg)
         self.warning_label.setVisible(show)
+        if show and msg:
+            print(f"[GUI WARNING] {msg}")
 
 class AdvancedScreen(QWidget):
     def __init__(self, live_feed_screen=None):
