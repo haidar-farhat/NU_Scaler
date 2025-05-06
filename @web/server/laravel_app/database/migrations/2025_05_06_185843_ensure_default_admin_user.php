@@ -26,28 +26,40 @@ return new class extends Migration
      */
     private function createDefaultAdminUsers(): void
     {
+        // Check if all required columns exist in the users table
+        $hasUuidColumn = Schema::hasColumn('users', 'uuid');
+        $hasAdminColumn = Schema::hasColumn('users', 'is_admin');
+        $hasActiveColumn = Schema::hasColumn('users', 'is_active');
+
         $defaultAdmins = [
             [
                 'name' => 'Admin',
                 'email' => 'admin@nuscaler.com',
                 'password' => Hash::make('password'),
-                'uuid' => Str::uuid()->toString(),
-                'is_admin' => true,
-                'is_active' => true,
                 'email_verified_at' => now(),
             ],
             [
                 'name' => 'Haydar',
                 'email' => 'haydar@nuscaler.com',
                 'password' => Hash::make('password'),
-                'uuid' => Str::uuid()->toString(),
-                'is_admin' => true,
-                'is_active' => true,
                 'email_verified_at' => now(),
             ]
         ];
 
         foreach ($defaultAdmins as $admin) {
+            // Add optional columns if they exist
+            if ($hasUuidColumn) {
+                $admin['uuid'] = Str::uuid()->toString();
+            }
+
+            if ($hasAdminColumn) {
+                $admin['is_admin'] = true;
+            }
+
+            if ($hasActiveColumn) {
+                $admin['is_active'] = true;
+            }
+
             if (!DB::table('users')->where('email', $admin['email'])->exists()) {
                 DB::table('users')->insert(array_merge($admin, [
                     'created_at' => now(),
@@ -62,24 +74,33 @@ return new class extends Migration
      */
     private function createMockData(): void
     {
+        // Check if we have enough users to create mock data
+        if (DB::table('users')->count() < 2) {
+            return;
+        }
+
         // Create regular users if none exist
-        if (DB::table('users')->where('is_admin', false)->count() < 5) {
+        if (DB::table('users')->where('is_admin', false)->count() < 5 && Schema::hasColumn('users', 'is_admin')) {
             $this->createMockUsers();
         }
 
-        // Create reviews if none exist
-        if (DB::table('reviews')->count() < 10) {
-            $this->createMockReviews();
+        // Only create related data if the tables exist
+        if (Schema::hasTable('reviews')) {
+            if (DB::table('reviews')->count() < 10) {
+                $this->createMockReviews();
+            }
         }
 
-        // Create bug reports if none exist
-        if (DB::table('bug_reports')->count() < 10) {
-            $this->createMockBugReports();
+        if (Schema::hasTable('bug_reports')) {
+            if (DB::table('bug_reports')->count() < 10) {
+                $this->createMockBugReports();
+            }
         }
 
-        // Create hardware surveys if none exist
-        if (DB::table('hardware_surveys')->count() < 10) {
-            $this->createMockHardwareSurveys();
+        if (Schema::hasTable('hardware_surveys')) {
+            if (DB::table('hardware_surveys')->count() < 10) {
+                $this->createMockHardwareSurveys();
+            }
         }
     }
 
@@ -88,55 +109,58 @@ return new class extends Migration
      */
     private function createMockUsers(): void
     {
+        // Check if all required columns exist
+        $hasUuidColumn = Schema::hasColumn('users', 'uuid');
+        $hasAdminColumn = Schema::hasColumn('users', 'is_admin');
+        $hasActiveColumn = Schema::hasColumn('users', 'is_active');
+
         $users = [
             [
                 'name' => 'John Doe',
                 'email' => 'john@example.com',
                 'password' => Hash::make('password'),
-                'uuid' => Str::uuid()->toString(),
-                'is_admin' => false,
-                'is_active' => true,
                 'email_verified_at' => now(),
             ],
             [
                 'name' => 'Jane Smith',
                 'email' => 'jane@example.com',
                 'password' => Hash::make('password'),
-                'uuid' => Str::uuid()->toString(),
-                'is_admin' => false,
-                'is_active' => true,
                 'email_verified_at' => now(),
             ],
             [
                 'name' => 'Alice Johnson',
                 'email' => 'alice@example.com',
                 'password' => Hash::make('password'),
-                'uuid' => Str::uuid()->toString(),
-                'is_admin' => false,
-                'is_active' => true,
                 'email_verified_at' => now(),
             ],
             [
                 'name' => 'Bob Williams',
                 'email' => 'bob@example.com',
                 'password' => Hash::make('password'),
-                'uuid' => Str::uuid()->toString(),
-                'is_admin' => false,
-                'is_active' => true,
                 'email_verified_at' => now(),
             ],
             [
                 'name' => 'Carol Brown',
                 'email' => 'carol@example.com',
                 'password' => Hash::make('password'),
-                'uuid' => Str::uuid()->toString(),
-                'is_admin' => false,
-                'is_active' => true,
                 'email_verified_at' => now(),
             ],
         ];
 
         foreach ($users as $user) {
+            // Add optional columns if they exist
+            if ($hasUuidColumn) {
+                $user['uuid'] = Str::uuid()->toString();
+            }
+
+            if ($hasAdminColumn) {
+                $user['is_admin'] = false;
+            }
+
+            if ($hasActiveColumn) {
+                $user['is_active'] = true;
+            }
+
             if (!DB::table('users')->where('email', $user['email'])->exists()) {
                 DB::table('users')->insert(array_merge($user, [
                     'created_at' => now(),
@@ -151,7 +175,21 @@ return new class extends Migration
      */
     private function createMockReviews(): void
     {
+        // Only proceed if we have the user_id column in reviews
+        if (!Schema::hasColumn('reviews', 'user_id')) {
+            return;
+        }
+
         $users = DB::table('users')->where('is_admin', false)->pluck('id')->toArray();
+
+        // If no regular users exist, get any users
+        if (empty($users)) {
+            $users = DB::table('users')->pluck('id')->toArray();
+        }
+
+        if (empty($users)) {
+            return;
+        }
 
         $reviews = [
             [
@@ -212,7 +250,21 @@ return new class extends Migration
      */
     private function createMockBugReports(): void
     {
+        // Only proceed if we have the user_id column in bug_reports
+        if (!Schema::hasColumn('bug_reports', 'user_id')) {
+            return;
+        }
+
         $users = DB::table('users')->where('is_admin', false)->pluck('id')->toArray();
+
+        // If no regular users exist, get any users
+        if (empty($users)) {
+            $users = DB::table('users')->pluck('id')->toArray();
+        }
+
+        if (empty($users)) {
+            return;
+        }
 
         $statuses = ['pending', 'in_progress', 'resolved', 'closed'];
         $bugReports = [
@@ -284,7 +336,21 @@ return new class extends Migration
      */
     private function createMockHardwareSurveys(): void
     {
+        // Only proceed if we have the user_id column in hardware_surveys
+        if (!Schema::hasColumn('hardware_surveys', 'user_id')) {
+            return;
+        }
+
         $users = DB::table('users')->where('is_admin', false)->pluck('id')->toArray();
+
+        // If no regular users exist, get any users
+        if (empty($users)) {
+            $users = DB::table('users')->pluck('id')->toArray();
+        }
+
+        if (empty($users)) {
+            return;
+        }
 
         $cpus = ['Intel Core i9-13900K', 'AMD Ryzen 9 7950X', 'Intel Core i7-12700K', 'AMD Ryzen 7 5800X', 'Intel Core i5-13600K'];
         $gpus = ['NVIDIA RTX 4090', 'AMD Radeon RX 7900 XTX', 'NVIDIA RTX 3080', 'AMD Radeon RX 6800 XT', 'NVIDIA RTX 4070'];
