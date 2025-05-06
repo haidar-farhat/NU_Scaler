@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex, atomic::{AtomicUsize, Ordering}};
 use anyhow::{Result, anyhow};
-use wgpu::{Device, Queue, Buffer, BufferDescriptor, BufferUsages};
+use wgpu::{Device, Queue, Buffer, BufferDescriptor, BufferUsages, CommandEncoderDescriptor};
 use crate::gpu::detector::{GpuInfo, GpuVendor};
 use std::collections::HashMap;
 use std::time::{Instant, Duration};
@@ -105,7 +105,7 @@ impl MemoryPool {
         
         println!("[MemoryPool] Created with {:?} strategy", strategy);
         
-        // Better estimate for total VRAM - scale up for higher-end cards
+        // Better estimate for total VRAM - properly detect high-end cards
         let estimated_vram = if let Some(info) = &gpu_info {
             if info.is_discrete {
                 match info.vendor {
@@ -117,13 +117,17 @@ impl MemoryPool {
                         } else if info.name.contains("3080") || info.name.contains("4080") ||
                                   info.name.contains("2080 Ti") {
                             12288.0 // 12GB for mid-high end
+                        } else if info.name.contains("3070") || info.name.contains("2080") {
+                            8192.0 // 8GB for mid-range
                         } else {
-                            8192.0  // 8GB for regular cards
+                            6144.0  // 6GB for regular cards
                         }
                     },
                     GpuVendor::Amd => {
                         if info.name.contains("7900") || info.name.contains("6900") {
                             16384.0 // 16GB for high-end AMD
+                        } else if info.name.contains("6800") {
+                            12288.0 // 12GB for mid-high AMD
                         } else {
                             8192.0  // 8GB for regular AMD cards
                         }
@@ -132,7 +136,7 @@ impl MemoryPool {
                 }
             } else {
                 match info.vendor {
-                    GpuVendor::Intel => 1536.0,  // Assume 1.5GB for Intel integrated
+                    GpuVendor::Intel => 2048.0,  // Assume 2GB for Intel integrated
                     _ => 2048.0,                // Assume 2GB for other integrated
                 }
             }
@@ -148,18 +152,58 @@ impl MemoryPool {
             timestamp: Instant::now(),
         };
         
-        Self {
+        let pool = Self {
             device,
             queue,
             buffer_pools: Mutex::new(HashMap::new()),
             stats: Mutex::new(stats),
             allocated_buffers: AtomicUsize::new(0),
             allocated_bytes: AtomicUsize::new(0),
-            max_pool_size: AtomicUsize::new(8), // Default pool size
+            max_pool_size: AtomicUsize::new(16), // Increase default pool size for better reuse
             strategy: Mutex::new(strategy),
             last_cleanup: Mutex::new(Instant::now()),
             gpu_info,
+        };
+        
+        // Pre-allocate buffers for common sizes to improve initial performance
+        if strategy == AllocationStrategy::Aggressive {
+            pool.preallocate_common_buffers();
         }
+        
+        pool
+    }
+    
+    /// Pre-allocate buffers for common sizes to improve initial performance
+    fn preallocate_common_buffers(&self) {
+        let common_sizes = [
+            1920 * 1080 * 4,      // Full HD
+            2560 * 1440 * 4,      // 2K
+            3840 * 2160 * 4,      // 4K
+            5120 * 2880 * 4,      // 5K
+        ];
+        
+        for &size in &common_sizes {
+            // Pre-allocate input, output and staging buffers
+            let _input_buffer = self.get_buffer(
+                size,
+                BufferUsages::STORAGE | BufferUsages::COPY_DST,
+                Some(&format!("Preallocated Input Buffer ({})", size)),
+            );
+            
+            let _output_buffer = self.get_buffer(
+                size,
+                BufferUsages::STORAGE | BufferUsages::COPY_SRC,
+                Some(&format!("Preallocated Output Buffer ({})", size)),
+            );
+            
+            let _staging_buffer = self.get_buffer(
+                size,
+                BufferUsages::MAP_READ | BufferUsages::COPY_DST,
+                Some(&format!("Preallocated Staging Buffer ({})", size)),
+            );
+        }
+        
+        println!("[MemoryPool] Pre-allocated buffers for common resolutions");
     }
     
     /// Get a buffer from the pool or create a new one
@@ -544,7 +588,7 @@ impl MemoryPool {
             let mut current_stats = self.stats.lock().unwrap();
             *current_stats = stats;
             
-            // Log VRAM usage - fix formatting for Rust
+            // Log VRAM usage with better formatting
             println!("[MemoryPool] VRAM: {}MB used / {}MB total ({}%)",
                     current_stats.used_mb, current_stats.total_mb, 
                     current_stats.used_mb / current_stats.total_mb * 100.0);
@@ -574,6 +618,68 @@ impl MemoryPool {
             },
             None => Err(anyhow::anyhow!("Failed to query VRAM stats"))
         }
+    }
+
+    /// Force VRAM usage on Windows (useful for ensuring GPU is active)
+    #[cfg(target_os = "windows")]
+    pub fn force_gpu_usage(&self) -> Result<(), anyhow::Error> {
+        // Create a large buffer to force the GPU to activate
+        let size = 256 * 1024 * 1024; // 256MB
+        let buffer = self.device.create_buffer(&BufferDescriptor {
+            label: Some("GPU Wake Buffer"),
+            size: size as u64,
+            usage: BufferUsages::COPY_DST | BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        
+        // Create a small staging buffer
+        let staging = self.device.create_buffer(&BufferDescriptor {
+            label: Some("Wake Staging Buffer"),
+            size: 4096,
+            usage: BufferUsages::COPY_SRC | BufferUsages::MAP_WRITE,
+            mapped_at_creation: true,
+        });
+        
+        // Initialize staging buffer
+        {
+            let mut view = staging.slice(..).get_mapped_range_mut();
+            for i in 0..1024 {
+                let idx = i * 4;
+                if idx + 3 < view.len() {
+                    view[idx] = (i % 256) as u8;
+                    view[idx + 1] = ((i + 85) % 256) as u8;
+                    view[idx + 2] = ((i + 170) % 256) as u8;
+                    view[idx + 3] = 255;
+                }
+            }
+        }
+        
+        // Unmap staging buffer
+        staging.unmap();
+        
+        // Create command encoder
+        let mut encoder = self.device.create_command_encoder(&CommandEncoderDescriptor {
+            label: Some("Wake GPU Encoder"),
+        });
+        
+        // Copy staging buffer to large buffer multiple times with different offsets
+        for i in 0..64 {
+            let offset = i * 4096;
+            encoder.copy_buffer_to_buffer(&staging, 0, &buffer, offset as u64, 4096);
+        }
+        
+        // Submit command
+        self.queue.submit(Some(encoder.finish()));
+        
+        // Poll device
+        self.device.poll(wgpu::Maintain::Wait);
+        
+        println!("[MemoryPool] Forced GPU wake-up with {}MB allocation", size / (1024 * 1024));
+        
+        // Update VRAM stats
+        self.update_vram_usage()?;
+        
+        Ok(())
     }
 }
 
