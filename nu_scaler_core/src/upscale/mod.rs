@@ -343,11 +343,15 @@ impl WgpuUpscaler {
             return;
         }
 
+        // Get device reference before clearing buffers
+        let device_opt = self.device();
+        
+        // Clear existing buffers first
         self.buffer_pool.clear();
         self.buffer_pool_bind_groups.clear();
 
         if let (Some(device), Some(layout), Some(input_buf), Some(dims_buf)) = (
-            self.device(),
+            device_opt,
             self.bind_group_layout.as_ref(),
             self.input_buffer.as_ref(),
             self.dimensions_buffer.as_ref(),
@@ -355,16 +359,23 @@ impl WgpuUpscaler {
             let buffer_size = (self.output_width * self.output_height * 4) as u64;
             if buffer_size == 0 { return; } // Avoid creating zero-sized buffers
 
+            // Create all buffers up front
+            let mut output_buffers = Vec::with_capacity(n as usize);
             for i in 0..n {
-                let output_buf = device.create_buffer(&BufferDescriptor {
+                let buf = device.create_buffer(&BufferDescriptor {
                     label: Some(&format!("Output Buffer (Pool {})", i)),
                     size: buffer_size,
                     usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
                     mapped_at_creation: false,
                 });
+                output_buffers.push(buf);
+            }
+            
+            // Create bind groups using the buffers
+            for (i, output_buf) in output_buffers.iter().enumerate() {
                 let bind_group = device.create_bind_group(&BindGroupDescriptor {
                     label: Some(&format!("Upscale Bind Group (Pool {})", i)),
-                    layout: layout,
+                    layout,
                     entries: &[BindGroupEntry {
                         binding: 0,
                         resource: input_buf.as_entire_binding(),
@@ -376,9 +387,11 @@ impl WgpuUpscaler {
                         resource: dims_buf.as_entire_binding(),
                     }],
                 });
-                self.buffer_pool.push(output_buf);
                 self.buffer_pool_bind_groups.push(bind_group);
             }
+            
+            // Move output buffers to self.buffer_pool
+            self.buffer_pool = output_buffers;
         }
         self.buffer_pool_index.store(0, Ordering::SeqCst);
     }
@@ -406,8 +419,13 @@ impl WgpuUpscaler {
             "Aggressive" => {
                 // Pre-allocate a large pool, never shrink
                 let n = self.buffer_pool_size.max(8);
+                
+                // Get device before clearing buffers
+                let device_opt = self.device();
                 self.buffer_pool.clear();
-                if let Some(device) = self.device() {
+                
+                if let Some(device) = device_opt {
+                    let mut new_buffers = Vec::with_capacity(n as usize);
                     for _ in 0..n {
                         let buf = device.create_buffer(&BufferDescriptor {
                             label: Some("Output Buffer (Aggressive)"),
@@ -415,8 +433,9 @@ impl WgpuUpscaler {
                             usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
                             mapped_at_creation: false,
                         });
-                        self.buffer_pool.push(buf);
+                        new_buffers.push(buf);
                     }
+                    self.buffer_pool = new_buffers;
                 }
                 println!("[WgpuUpscaler] Aggressive allocator: pre-allocated {} large buffers", n);
             }
