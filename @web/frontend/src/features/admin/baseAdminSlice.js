@@ -1,4 +1,5 @@
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
+import adminApiService from '../../api/adminApi';
 
 // Base query with auth
 export const baseQuery = fetchBaseQuery({
@@ -15,36 +16,38 @@ export const baseQuery = fetchBaseQuery({
   },
 });
 
-// Helper function for fetching admin data
+// Helper function for fetching admin data using our specialized admin API service
 export const fetchAdminData = async (endpoint, params = {}) => {
-  const token = localStorage.getItem('token');
-  const queryParams = new URLSearchParams(params).toString();
-  const url = `http://localhost:8000/api/admin/${endpoint}${queryParams ? `?${queryParams}` : ''}`;
-  
-  console.log(`Fetching admin data from: ${url}`);
-  console.log('With token:', token ? `${token.substring(0, 10)}...` : 'No token');
+  console.log(`Fetching admin data from endpoint: ${endpoint}`, params);
   
   try {
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      credentials: 'include'
-    });
+    let response;
     
-    if (!response.ok) {
-      console.error(`Error fetching ${endpoint}:`, response.status, response.statusText);
-      throw new Error(`Error fetching ${endpoint}: ${response.statusText}`);
+    switch (endpoint) {
+      case 'reviews':
+        response = await adminApiService.getReviews(params);
+        break;
+      case 'bug-reports':
+        response = await adminApiService.getBugReports(params);
+        break;
+      case 'hardware-surveys':
+        response = await adminApiService.getHardwareSurveys(params);
+        break;
+      case 'metrics/user-growth':
+        response = await adminApiService.getUserGrowth();
+        break;
+      case 'users':
+        response = await adminApiService.getUsers(params);
+        break;
+      default:
+        // For any other endpoints, use a direct API call through our service
+        response = await adminApiService.get(`/admin/${endpoint}`, { params });
     }
     
-    const data = await response.json();
-    console.log(`Data received for ${endpoint}:`, data);
-    return data;
+    console.log(`Data received for ${endpoint}:`, response.data);
+    return response.data;
   } catch (error) {
     console.error(`Error in fetchAdminData for ${endpoint}:`, error);
-    throw error;
+    throw new Error(`Error fetching ${endpoint}: ${error.response?.data?.message || error.message}`);
   }
 }; 
