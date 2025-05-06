@@ -1,11 +1,13 @@
 use anyhow::Result;
 use wgpu::{Adapter, AdapterInfo, Backends, Instance, DeviceType};
 use std::sync::Arc;
+use pyo3::prelude::*;
 
 use crate::upscale::UpscalingTechnology;
 
 /// GPU vendor identification
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[pyclass]
 pub enum GpuVendor {
     Nvidia,
     Amd,
