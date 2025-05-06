@@ -32,6 +32,17 @@ impl Default for VramStats {
     }
 }
 
+impl VramStats {
+    /// Get the usage percentage
+    pub fn usage_percent(&self) -> f32 {
+        if self.total_mb > 0.0 {
+            (self.used_mb / self.total_mb) * 100.0
+        } else {
+            0.0
+        }
+    }
+}
+
 /// GPU memory pressure level
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryPressure {
