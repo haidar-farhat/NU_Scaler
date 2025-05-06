@@ -469,24 +469,41 @@ class LiveFeedScreen(QWidget):
         current_scale = self.scale_slider.value() / 10.0
         if abs(current_scale - self.upscale_scale) > 0.01:
             self.upscale_scale = current_scale
-            self.upscaler.set_upscale_scale(current_scale)
-            # Re-initialize with new output size
-            out_w = int(in_w * current_scale)
-            out_h = int(in_h * current_scale)
+            # Use upscaler.upscale_scale directly if available, otherwise use set_upscale_scale method
             try:
+                # First try direct attribute assignment if available
+                if hasattr(self.upscaler, 'upscale_scale'):
+                    self.upscaler.upscale_scale = current_scale
+                # Re-initialize with new output size
+                out_w = int(in_w * current_scale)
+                out_h = int(in_h * current_scale)
                 self.upscaler.initialize(in_w, in_h, out_w, out_h)
             except Exception as e:
                 print(f"Error re-initializing upscaler: {e}")
                 return
 
         try:
-            out_bytes = self.upscaler.upscale(frame) # Frame is now RGBA
+            # Protect against GPU buffer errors by catching specific exceptions
+            try:
+                out_bytes = self.upscaler.upscale(frame) # Frame is now RGBA
+            except Exception as e:
+                # If we get a WGPU buffer error, try to reinitialize the upscaler
+                if "Buffer Id" in str(e) and "still mapped" in str(e):
+                    print("[GUI] Buffer mapping error detected. Attempting to recover...")
+                    self.upscaler = None
+                    self.upscaler_initialized = False
+                    scale = self.scale_slider.value() / 10.0
+                    self.init_upscaler(in_w, in_h, scale)
+                    # Try again with the new upscaler
+                    out_bytes = self.upscaler.upscale(frame)
+                else:
+                    # Re-raise other exceptions
+                    raise
             
             # Get scale factor from upscaler directly if possible
-            if hasattr(self.upscaler, 'get_upscale_scale'):
-                scale = self.upscaler.get_upscale_scale
-            else:
-                scale = self.upscale_scale
+            scale = self.upscale_scale
+            if hasattr(self.upscaler, 'upscale_scale'):
+                scale = self.upscaler.upscale_scale
                 
             # Calculate output dimensions
             out_w = int(in_w * scale)
@@ -525,7 +542,9 @@ class LiveFeedScreen(QWidget):
             traceback.print_exc()
             print(f"[GUI] Error in upscaling: {e}")
             self.status_bar.setText(f"Error: {str(e)}")
-            self.stop_capture() # Stop on error
+            # Don't immediately stop on error, just reset the upscaler for the next frame
+            self.upscaler = None
+            self.upscaler_initialized = False
 
 class SettingsScreen(QWidget):
     def __init__(self, live_feed_screen=None):
