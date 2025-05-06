@@ -45,17 +45,23 @@ export const login = createAsyncThunk(
       console.log('Login successful', { token: token.substring(0, 10) + '...', user });
       return { token, user };
     } catch (error) {
-      console.error('Login error:', error.response?.data || error.message);
+      console.error('Login error details:', {
+        status: error.response?.status,
+        data: error.response?.data,
+        message: error.message
+      });
       
-      // Check if this is an account disabled error
+      // For account disabled errors
       if (error.response?.status === 403 && error.response?.data?.account_disabled) {
-        return rejectWithValue({
-          message: error.response.data.message || 'Your account has been deactivated',
-          account_disabled: true
-        });
+        return rejectWithValue('Your account has been deactivated. Please contact an administrator.');
       }
       
-      return rejectWithValue(error.response?.data?.message || 'Login failed');
+      // For all other errors, keep it simple with just a string
+      return rejectWithValue(
+        error.response?.data?.message || 
+        error.message || 
+        'Login failed. Please check your credentials and try again.'
+      );
     }
   }
 );
