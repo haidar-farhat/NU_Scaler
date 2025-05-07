@@ -963,6 +963,7 @@ impl Upscaler for WgpuUpscaler {
         Ok(())
     }
     fn upscale(&self, input: &[u8]) -> Result<Vec<u8>> {
+        println!("[Rust] WgpuUpscaler::upscale CALLED");
         // Quick validation
         if !self.initialized {
             return Err(anyhow!("WgpuUpscaler not initialized"));
