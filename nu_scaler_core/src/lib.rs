@@ -892,7 +892,7 @@ async fn init_wgpu_for_standalone_upscaler() -> Result<(Arc<wgpu::Device>, Arc<w
     Ok((Arc::new(device), Arc::new(queue), gpu_info))
 }
 
-#[pyclass(name = "DlssUpscaler")]
+#[pyclass(name = "DlssUpscaler", unsendable)]
 pub struct PyDlssUpscaler {
     inner: InnerDlssUpscaler,
     // Keep Arcs to ensure device and queue live as long as this Python object
