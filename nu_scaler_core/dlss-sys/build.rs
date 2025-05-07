@@ -9,7 +9,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // --- IMPORTANT: Set this path to your OFFICIAL Streamline SDK installation ---
     let streamline_sdk_root_path = PathBuf::from(
         env::var("NVIDIA_STREAMLINE_SDK_PATH")
-            .unwrap_or_else(|_| r"C:\\NVIDIA_SDKs\\Streamline_Latest".to_string()), // <-- UPDATE THIS DEFAULT PATH
+            .unwrap_or_else(|_| r"C:\nvideasdk\bckup\Streamline".to_string()), // <-- UPDATE THIS DEFAULT PATH
     );
 
     // Path and link ONLY for sl.interposer.lib (assuming it's needed for loading)
