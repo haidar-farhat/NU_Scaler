@@ -2,7 +2,9 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("cargo:rerun-if-changed=wrapper.h");
+    println!("cargo:rerun-if-changed=src/lib.rs"); // Rerun if manual bindings change
+    // Potentially rerun if you copy SDK headers into the project for reference
+    // println!("cargo:rerun-if-changed=include/sl_dlss.h"); 
 
     let streamline_sdk_path = PathBuf::from(
         env::var("NVIDIA_STREAMLINE_SDK_PATH")
@@ -16,12 +18,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    let include_path = streamline_sdk_path.join("include");
     let lib_path = streamline_sdk_path.join("lib/x64"); // User needs to verify this path
 
-    if !include_path.exists() {
-        panic!("NVIDIA Streamline SDK include path does not exist: {}", include_path.display());
-    }
     if !lib_path.exists() {
         panic!(
             "NVIDIA Streamline SDK library path does not exist: {}. Please verify e.g., Streamline/lib/x64 or Streamline/lib/x64/Release",
@@ -31,63 +29,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("cargo:rustc-link-search=native={}", lib_path.display());
     println!("cargo:rustc-link-lib=sl.interposer"); // User needs to verify this library name
-
-    let mut builder = bindgen::Builder::default()
-        .header("wrapper.h")
-        // Sanitize attributes (from user advice)
-        .clang_arg("-Ddeprecated=")
-        .clang_arg(r#"-D__attribute__(x)=#""#)
-        // Include paths
-        .clang_arg(format!("-I{}", include_path.display()))
-        // Other clang args
-        .clang_arg("-x")
-        .clang_arg("c++")
-        .clang_arg("-std=c++17") // Or newer if Streamline requires
-        // MSVC Compatibility
-        .clang_arg("-fms-compatibility") // Enable MSVC compatibility
-        .clang_arg("-fms-extensions")    // Allow MSVC-specific extensions
-        // Existing MSVC specific args
-        .clang_arg("-D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH=1") // Try to suppress MSVC STL version checks
-        .clang_arg("--target=x86_64-pc-windows-msvc"); // Try to force targeting the msvc ABI
-        
-    // Attempt to add MSVC include paths. This is highly environment-dependent.
-    // You might need to find these paths from your Visual Studio installation.
-    // These are common locations for VS 2022 Community. ADJUST AS NEEDED.
-    if let Ok(vc_tools_dir) = env::var("VCToolsInstallDir") {
-        let msvc_include_path = PathBuf::from(vc_tools_dir).join("include");
-        if msvc_include_path.exists() {
-            builder = builder.clang_arg(format!("-I{}", msvc_include_path.display()));
-            println!("cargo:warning=Added MSVC include path: {}", msvc_include_path.display());
-        }
-    }
-    // Potentially add Windows Kits includes if problems persist (e.g. for <tuple>)
-    // if let Ok(sdk_dir) = env::var("WindowsSdkDir") { ... sdk_dir.join("Include/<version>/ucrt") ... }
-
-    let bindings = builder
-        // Blocklist problematic C++ std constructs (from user advice)
-        .blocklist_function("std::get")
-        .blocklist_type("std::tuple<.*>")
-        // Allowlist, derives, etc. (merged from user advice and existing)
-        .allowlist_function("sl[A-Z].*")
-        .allowlist_type("sl[A-Z].*")
-        .allowlist_var("sl[A-Z_].*")
-        .allowlist_type("SL_.*")
-        .allowlist_var("SL_.*")
-        .generate_comments(true)
-        .derive_debug(true)
-        .derive_default(true)
-        .enable_cxx_namespaces()
-        // Keep existing opaque type for broader std protection
-        .opaque_type("std::.*")
-        // Crucial for cargo integration
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-        .generate()
-        .expect("Unable to generate Streamline/DLSS bindings");
-
-    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
-    bindings
-        .write_to_file(out_path.join("dlss_bindings.rs"))
-        .expect("Couldn't write Streamline/DLSS bindings!");
 
     Ok(())
 } 

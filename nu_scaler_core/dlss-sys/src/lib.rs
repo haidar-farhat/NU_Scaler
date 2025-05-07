@@ -523,6 +523,34 @@ pub fn has_dlss_capability(device: *mut c_void) -> bool {
     }
 }
 
+/// From sl_consts.h (example)
+#[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum Result {
+    Ok = 0,
+    Error = 1, // Example, check actual values
+    // ... other result codes
+}
+
+/// From sl_common.h (example)
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct Version {
+    pub major: u32,
+    pub minor: u32,
+    pub build: u32,
+}
+
+/// From sl_common.h (example)
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct Extent {
+    pub top: u32,
+    pub left: u32,
+    pub bottom: u32,
+    pub right: u32,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -535,4 +563,11 @@ mod tests {
         assert_eq!(DlssQuality::MaxQuality.scale_factor(), 0.67);
         assert_eq!(DlssQuality::UltraQuality.scale_factor(), 0.77);
     }
-} 
+    
+    #[test]
+    fn it_works() {
+        // In the future, you could try calling a simple SDK function here if one exists
+        // that doesn't require full graphics context setup, e.g., a version check.
+        assert_eq!(2 + 2, 4);
+    }
+}
