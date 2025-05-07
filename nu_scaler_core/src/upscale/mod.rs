@@ -357,12 +357,12 @@ impl WgpuUpscaler {
 
     // Helper to get the device, preferring shared GpuResources if available
     fn device(&self) -> Option<&Device> {
-        self.gpu_resources.as_ref().map(|r| &r.device).or(self.device.as_deref())
+        self.gpu_resources.as_ref().map(|r| &*r.device).or(self.device.as_deref())
     }
 
     // Helper to get the queue, preferring shared GpuResources if available
     fn queue(&self) -> Option<&Queue> {
-        self.gpu_resources.as_ref().map(|r| &r.queue).or(self.queue.as_deref())
+        self.gpu_resources.as_ref().map(|r| &*r.queue).or(self.queue.as_deref())
     }
     
     // Get a cloned Arc<Device> if available
