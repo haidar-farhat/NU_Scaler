@@ -243,48 +243,52 @@ macro_rules! load_sl_symbol {
     };
 }
 
-// Function to load the library and symbols
-fn load_streamline_api() -> Result<StreamlineApi, LoadError> {
-    unsafe {
-        // Define the expected name of the interposer DLL
-        let dll_name = if cfg!(target_os = "windows") {
-            "sl.interposer.dll"
-        } else {
-            "libsl.interposer.so" // Example for Linux
-        };
+// Function to load the library symbols
+// This function now takes the loaded Library as an argument
+impl StreamlineApi {
+    fn load_symbols(lib: Library) -> Result<Self, LoadError> {
+        unsafe {
+            // Load symbols using the macro. Note: lib is moved into _lib field at the end.
+            let slInitializeSDK_sym_raw = load_sl_symbol!(lib, FnSlInitializeSDK, b"slInitializeSDK\0");
+            let slShutdownSDK_sym_raw = load_sl_symbol!(lib, FnSlShutdownSDK, b"slShutdownSDK\0");
+            let slIsFeatureSupported_sym_raw = load_sl_symbol!(lib, FnSlIsFeatureSupported, b"slIsFeatureSupported\0");
+            let slCreateDlssFeature_sym_raw = load_sl_symbol!(lib, FnSlCreateDlssFeature, b"slCreateDlssFeature\0");
+            let slEvaluateDlssFeature_sym_raw = load_sl_symbol!(lib, FnSlEvaluateDlssFeature, b"slEvaluateDlssFeature\0");
+            let slDestroyDlssFeature_sym_raw = load_sl_symbol!(lib, FnSlDestroyDlssFeature, b"slDestroyDlssFeature\0");
+            let slDLSSSetOptions_sym_raw = load_sl_symbol!(lib, FnSlDLSSSetOptions, b"slDLSSSetOptions\0");
 
-        let lib = Library::new(dll_name).map_err(|e| LoadError(format!("Failed to load library '{}': {}", dll_name, e)))?;
-
-        // Load symbols using the macro
-        let slInitializeSDK_sym_raw = load_sl_symbol!(lib, FnSlInitializeSDK, b"slInitializeSDK\0");
-        let slShutdownSDK_sym_raw = load_sl_symbol!(lib, FnSlShutdownSDK, b"slShutdownSDK\0");
-        let slIsFeatureSupported_sym_raw = load_sl_symbol!(lib, FnSlIsFeatureSupported, b"slIsFeatureSupported\0");
-        let slCreateDlssFeature_sym_raw = load_sl_symbol!(lib, FnSlCreateDlssFeature, b"slCreateDlssFeature\0");
-        let slEvaluateDlssFeature_sym_raw = load_sl_symbol!(lib, FnSlEvaluateDlssFeature, b"slEvaluateDlssFeature\0");
-        let slDestroyDlssFeature_sym_raw = load_sl_symbol!(lib, FnSlDestroyDlssFeature, b"slDestroyDlssFeature\0");
-        let slDLSSSetOptions_sym_raw = load_sl_symbol!(lib, FnSlDLSSSetOptions, b"slDLSSSetOptions\0");
-        
-        // The rest of the function that transmutes these to 'static lifetimes and stores them in StreamlineApi
-        // This part remains the same, but using the *_sym_raw variables.
-        // Example for one, repeat for all:
-        // let slInitializeSDK_sym = std::mem::transmute::<_, Symbol<'static, FnSlInitializeSDK>>(slInitializeSDK_sym_raw);
-
-        Ok(StreamlineApi {
-            _lib: lib,
-            slInitializeSDK: std::mem::transmute::<Symbol<'_, FnSlInitializeSDK>, Symbol<'static, FnSlInitializeSDK>>(slInitializeSDK_sym_raw),
-            slShutdownSDK: std::mem::transmute::<Symbol<'_, FnSlShutdownSDK>, Symbol<'static, FnSlShutdownSDK>>(slShutdownSDK_sym_raw),
-            slIsFeatureSupported: std::mem::transmute::<Symbol<'_, FnSlIsFeatureSupported>, Symbol<'static, FnSlIsFeatureSupported>>(slIsFeatureSupported_sym_raw),
-            slCreateDlssFeature: std::mem::transmute::<Symbol<'_, FnSlCreateDlssFeature>, Symbol<'static, FnSlCreateDlssFeature>>(slCreateDlssFeature_sym_raw),
-            slEvaluateDlssFeature: std::mem::transmute::<Symbol<'_, FnSlEvaluateDlssFeature>, Symbol<'static, FnSlEvaluateDlssFeature>>(slEvaluateDlssFeature_sym_raw),
-            slDestroyDlssFeature: std::mem::transmute::<Symbol<'_, FnSlDestroyDlssFeature>, Symbol<'static, FnSlDestroyDlssFeature>>(slDestroyDlssFeature_sym_raw),
-            slDLSSSetOptions: std::mem::transmute::<Symbol<'_, FnSlDLSSSetOptions>, Symbol<'static, FnSlDLSSSetOptions>>(slDLSSSetOptions_sym_raw),
-        })
+            Ok(StreamlineApi {
+                _lib: lib, // Ownership of lib is taken here
+                slInitializeSDK: std::mem::transmute(slInitializeSDK_sym_raw),
+                slShutdownSDK: std::mem::transmute(slShutdownSDK_sym_raw),
+                slIsFeatureSupported: std::mem::transmute(slIsFeatureSupported_sym_raw),
+                slCreateDlssFeature: std::mem::transmute(slCreateDlssFeature_sym_raw),
+                slEvaluateDlssFeature: std::mem::transmute(slEvaluateDlssFeature_sym_raw),
+                slDestroyDlssFeature: std::mem::transmute(slDestroyDlssFeature_sym_raw),
+                slDLSSSetOptions: std::mem::transmute(slDLSSSetOptions_sym_raw),
+            })
+        }
     }
 }
 
-// Function to access the loaded API
+// Renamed: Function to ONLY load the dynamic library
+fn load_library_only() -> Result<Library, LoadError> {
+    unsafe {
+        let dll_name = if cfg!(target_os = "windows") {
+            "sl.interposer.dll"
+        } else {
+            "libsl.interposer.so"
+        };
+        Library::new(dll_name).map_err(|e| LoadError(format!("Failed to load library '{}': {}", dll_name, e)))
+    }
+}
+
+// Function to get or initialize the API - updated logic
 fn get_sl_api() -> Result<&'static StreamlineApi, &'static LoadError> {
-     SL_API.get_or_init(load_streamline_api).as_ref()
+    SL_API.get_or_init(|| {
+        let library = load_library_only()?;
+        StreamlineApi::load_symbols(library) // Call the new method
+    }).as_ref()
 }
 
 
