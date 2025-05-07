@@ -608,10 +608,15 @@ impl PyAdvancedWgpuUpscaler {
     }
 
     /// Get quality level
-    #[getter]
-    pub fn quality(&self) -> PyResult<String> {
-        let quality = self.inner.quality();
-        Ok(format!("{:?}", quality))
+    pub fn get_quality_str(&self) -> PyResult<String> {
+        match self.inner.quality() {
+            UpscalingQuality::UltraPerformance => Ok("ultra_performance".to_string()),
+            UpscalingQuality::Ultra => Ok("ultra".to_string()),
+            UpscalingQuality::Quality => Ok("quality".to_string()),
+            UpscalingQuality::Balanced => Ok("balanced".to_string()),
+            UpscalingQuality::Performance => Ok("performance".to_string()),
+            UpscalingQuality::Native => Ok("native".to_string()),
+        }
     }
 
     /// Set quality level
@@ -1098,10 +1103,12 @@ impl PyDlssUpscaler {
     #[getter]
     pub fn quality(&self) -> PyResult<String> {
         match self.inner.quality() {
+            UpscalingQuality::UltraPerformance => Ok("ultra_performance".to_string()),
             UpscalingQuality::Ultra => Ok("ultra".to_string()),
             UpscalingQuality::Quality => Ok("quality".to_string()),
             UpscalingQuality::Balanced => Ok("balanced".to_string()),
             UpscalingQuality::Performance => Ok("performance".to_string()),
+            UpscalingQuality::Native => Ok("native".to_string()),
         }
     }
 
