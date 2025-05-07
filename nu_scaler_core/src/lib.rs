@@ -677,25 +677,34 @@ fn nu_scaler_core(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(create_advanced_upscaler, m)?)?;
     
     // Add factory functions for creating upscalers
-    #[cfg(feature = "fsr3")]
     #[pyfn(m)]
     fn create_fsr_upscaler(quality: &str) -> PyResult<PyWgpuUpscaler> {
-        // In a real implementation, this would create an actual FSR upscaler
-        // using types from fsr3_sys and the FsrUpscaler struct.
-        println!("[PyO3] Creating FSR-optimized upscaler (fsr3 feature enabled)");
-        // For now, still returning PyWgpuUpscaler for consistency with existing stubs.
-        // This would ideally return a PyFsrUpscaler or similar.
-        let q = match quality.to_lowercase().as_str() {
-            "ultra" => UpscalingQuality::Ultra,
-            "quality" => UpscalingQuality::Quality,
-            "balanced" => UpscalingQuality::Balanced,
-            "performance" => UpscalingQuality::Performance,
-            _ => UpscalingQuality::Quality,
-        };
-        // This is a placeholder. Real FSR upscaler creation would go here.
-        // let fsr_upscaler = upscale::FsrUpscaler::new(q); 
-        // Ok(PyFsrUpscaler { inner: fsr_upscaler })
-        PyWgpuUpscaler::new(quality, "bilinear") // Placeholder return
+        #[cfg(feature = "fsr3")]
+        {
+            // In a real implementation, this would create an actual FSR upscaler
+            // using types from fsr3_sys and the FsrUpscaler struct.
+            println!("[PyO3] Creating FSR-optimized upscaler (fsr3 feature enabled)");
+            // For now, still returning PyWgpuUpscaler for consistency with existing stubs.
+            // This would ideally return a PyFsrUpscaler or similar.
+            let _q = match quality.to_lowercase().as_str() {
+                "ultra" => UpscalingQuality::Ultra,
+                "quality" => UpscalingQuality::Quality,
+                "balanced" => UpscalingQuality::Balanced,
+                "performance" => UpscalingQuality::Performance,
+                _ => UpscalingQuality::Quality,
+            };
+            // Placeholder - Real FSR upscaler creation would go here.
+            // let fsr_upscaler = upscale::FsrUpscaler::new(q); 
+            // Ok(PyFsrUpscaler { inner: fsr_upscaler })
+            PyWgpuUpscaler::new(quality, "bilinear") // Placeholder return
+        }
+        #[cfg(not(feature = "fsr3"))]
+        {
+             println!("[PyO3] Warning: create_fsr_upscaler called, but 'fsr3' feature is not enabled in nu_scaler_core.");
+             Err(pyo3::exceptions::PyNotImplementedError::new_err(
+                 "FSR3 support is not enabled in this build."
+             ))
+        }
     }
 
     #[pyfn(m)]
