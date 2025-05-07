@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use pyo3::types::PyBytes;
+// use pyo3::types::PyBytes; // Remove unused
 use std::time::Instant;
 use crate::upscale::{/*Upscaler,*/ UpscalingQuality, UpscalingTechnology, UpscalerFactory};
 use crate::gpu::detector::GpuDetector;
