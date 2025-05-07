@@ -10,7 +10,7 @@ use std::sync::Arc;
 use crate::benchmark::{PyBenchmarkResult, py_benchmark_upscaler, py_run_comparison_benchmark};
 #[cfg(feature = "python")]
 use crate::gpu::memory::PyVramStats;
-use crate::gpu::memory::{VramStats, AllocationStrategy, MemoryPressure};
+use crate::gpu::memory::{/*VramStats,*/ AllocationStrategy, MemoryPressure};
 use crate::gpu::GpuResources;
 use crate::gpu::detector::GpuDetector;
 
@@ -681,6 +681,8 @@ fn nu_scaler_core(_py: Python, m: &PyModule) -> PyResult<()> {
     
     // Add factory functions for creating upscalers
     #[pyfn(m)]
+    #[pyo3(name = "create_fsr_upscaler")]
+    fn create_fsr_upscaler_pyfn(_quality: &str) -> PyResult<()> {
     fn create_fsr_upscaler(quality: &str) -> PyResult<PyWgpuUpscaler> {
         #[cfg(feature = "fsr3")]
         {
