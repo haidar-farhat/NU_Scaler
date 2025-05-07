@@ -13,7 +13,7 @@ fsr3 = ["dep:fsr3-sys"]
 
 [dependencies]
 anyhow = "1.0"
-pyo3 = { version = "0.20", features = ["extension-module"] }
+pyo3 = { version = "0.21.0", features = ["extension-module"] }
 wgpu = "0.19"
 scrap = "0.5"
 windows = { version = "0.56", features = [
