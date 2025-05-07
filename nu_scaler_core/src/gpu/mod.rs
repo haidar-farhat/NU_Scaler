@@ -189,6 +189,55 @@ impl GpuResources {
 
         Err(GpuError::UnsupportedBackend)
     }
+
+    /// # Safety
+    ///
+    /// The returned pointer is a raw, non-null, native buffer handle (e.g., ID3D12Resource* or VkBuffer).
+    /// The caller is responsible for ensuring that the handle is used correctly
+    /// and within the lifetime of the WGPU buffer and device.
+    /// The underlying WGPU instance, device, and buffer must remain alive while this handle is in use.
+    pub unsafe fn get_native_buffer_handle(&self, _buffer: &wgpu::Buffer) -> Result<*mut std::ffi::c_void, GpuError> {
+        // Determine if running on Windows (DX12) or Linux (Vulkan)
+        // For now, mirroring the structure of get_native_texture_handle
+
+        #[cfg(target_os = "windows")]
+        {
+            // TODO: Find the correct way to get ID3D12Resource* from wgpu_hal::dx12::Buffer in wgpu-hal 0.19
+            // The `resource` field in wgpu_hal::dx12::Buffer is pub(super).
+            eprintln!("[get_native_buffer_handle] DX12: Buffer resource access not yet implemented correctly for wgpu-hal 0.19.");
+            return Err(GpuError::UnsupportedBackend);
+            /*
+            use wgpu::hal::dx12::Api as Dx12Api;
+            let native_handle_opt: Option<*mut std::ffi::c_void> =
+                _buffer.as_hal::<Dx12Api, _, _>(|hal_buffer_opt| {
+                    hal_buffer_opt.map(|b| b.resource.as_ptr() as *mut std::ffi::c_void) // b.resource is pub(super)
+                }).flatten();
+
+            if let Some(handle) = native_handle_opt {
+                if !handle.is_null() {
+                    return Ok(handle);
+                }
+            }
+            */
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            use wgpu::hal::vulkan::Api as VulkanApi;
+            let native_handle_opt: Option<*mut std::ffi::c_void> =
+                _buffer.as_hal::<VulkanApi, _, _>(|hal_buffer_opt| {
+                    hal_buffer_opt.map(|b| b.raw_handle().as_raw() as *mut std::ffi::c_void)
+                }).flatten(); // VKBuffer is u64, as_raw() converts to pointer
+            
+            if let Some(handle) = native_handle_opt {
+                if !handle.is_null() { 
+                    return Ok(handle);
+                }
+            }
+        }
+        
+        Err(GpuError::UnsupportedBackend)
+    }
 }
 
 #[cfg(test)]
