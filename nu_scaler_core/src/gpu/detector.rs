@@ -173,25 +173,35 @@ impl GpuDetector {
         match self.primary_gpu {
             Some(ref gpu) => match gpu.vendor {
                 GpuVendor::Nvidia => {
-                    // TODO: Check for DLSS support based on GPU model
-                    // For now, return DLSS for all NVIDIA GPUs
                     UpscalingTechnology::DLSS
                 },
                 GpuVendor::Amd => {
-                    // For AMD GPUs, use FSR
-                    UpscalingTechnology::FSR
+                    #[cfg(feature = "fsr3")]
+                    {
+                        UpscalingTechnology::FSR
+                    }
+                    #[cfg(not(feature = "fsr3"))]
+                    {
+                        println!("[GpuDetector] AMD GPU detected, but 'fsr3' feature not enabled. Falling back to Wgpu.");
+                        UpscalingTechnology::Wgpu // Fallback if fsr3 feature is off
+                    }
                 },
                 GpuVendor::Intel => {
-                    // Intel GPUs can use FSR as well
-                    UpscalingTechnology::FSR
+                    #[cfg(feature = "fsr3")]
+                    {
+                        UpscalingTechnology::FSR // Intel GPUs can use FSR as well
+                    }
+                    #[cfg(not(feature = "fsr3"))]
+                    {
+                        println!("[GpuDetector] Intel GPU detected, but 'fsr3' feature not enabled. Falling back to Wgpu.");
+                        UpscalingTechnology::Wgpu // Fallback if fsr3 feature is off
+                    }
                 },
                 _ => {
-                    // Default to Wgpu for unknown GPUs
                     UpscalingTechnology::Wgpu
                 }
             },
             None => {
-                // If no GPU detected, use the fallback
                 UpscalingTechnology::Fallback
             }
         }
