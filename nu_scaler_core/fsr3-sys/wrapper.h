@@ -2,27 +2,17 @@
 #ifndef FSR3_WRAPPER_H
 #define FSR3_WRAPPER_H
 
-// Standard includes
-#include <stdint.h>
-#include <stdbool.h>
+// This wrapper header includes the necessary AMD FSR3 SDK headers.
+// Bindgen will process this file.
 
-// Try to include FSR 3.0 SDK headers
-#if __has_include(<ffx_fsr3.h>)
-    // Main FSR 3.0 header
-    #include <ffx_fsr3.h>
-    #include <ffx_fsr3_api.h>
-    
-    // FSR 3.0 specific components
-    #include <ffx_fsr3_upscaler.h>
-    #include <ffx_fsr3_frameinterpolation.h>
-    
-    // Define this macro so the stub implementation can be conditionally excluded
-    #define HAS_REAL_FSR3_SDK
-#else
-    // FSR 3.0 SDK not available, use stub headers
-    #include "stub/ffx_fsr3.h"
-    #include "stub/ffx_fsr3_upscaler.h"
-    #include "stub/ffx_fsr3_frameinterpolation.h"
-#endif
+// Replace with the actual main header file from the FSR3 SDK
+// For example, if the main header is ffx_fsr3.h or similar:
+#include "ffx_fsr3.h" // Or specific API header e.g. ffx_fsr3_api.h
 
-#endif // FSR3_WRAPPER_H 
+// You might need to include other specific headers if the main one doesn't cover everything
+// For example, for the DX12 backend:
+// #include "ffx_fsr3_dx12.h"
+// Or for Vulkan:
+// #include "ffx_fsr3_vulkan.h"
+
+#endif // FSR3_WRAPPER_H
