@@ -149,6 +149,11 @@ impl PyWgpuUpscaler {
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         Ok(outs.into_iter().map(|out| PyBytes::new(py, &out)).collect())
     }
+
+    #[getter]
+    fn name(&self) -> &'static str {
+        self.inner.name()
+    }
 }
 
 impl Drop for PyWgpuUpscaler {
