@@ -32,23 +32,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rustc-link-search=native={}", lib_path.display());
     println!("cargo:rustc-link-lib=sl.interposer"); // User needs to verify this library name
 
-    // (Optional) clang-sys version query removed because it isn’t supported in this version
+    // (Optional) clang-sys version query removed because it isn't supported in this version
 
- 
-   
+    let clang_version_str = if version_cxstring.data.is_null() {
+        "Unknown"
+    } else {
+        unsafe { CStr::from_ptr(version_cxstring.data).to_string_lossy().into_owned() }
+    };
+
+    println!("cargo:warning=bindgen is using libclang version: {}", clang_version_str);
+
     let mut builder = bindgen::Builder::default()
         .header("wrapper.h")
+        // Sanitize attributes (from user advice)
+        .clang_arg("-Ddeprecated=")
+        .clang_arg(r#"-D__attribute__(x)=#""#)
+        // Include paths
         .clang_arg(format!("-I{}", include_path.display()))
+        // Other clang args
         .clang_arg("-x")
         .clang_arg("c++")
         .clang_arg("-std=c++17") // Or newer if Streamline requires
-        // --- MSVC Integration Args ---
+        // MSVC Compatibility
         .clang_arg("-fms-compatibility") // Enable MSVC compatibility
         .clang_arg("-fms-extensions")    // Allow MSVC-specific extensions
-        // Try to suppress MSVC STL version checks
-        .clang_arg("-D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH=1")
-        // Try to force targeting the msvc ABI
-        .clang_arg("--target=x86_64-pc-windows-msvc");
+        // Existing MSVC specific args
+        .clang_arg("-D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH=1") // Try to suppress MSVC STL version checks
+        .clang_arg("--target=x86_64-pc-windows-msvc"); // Try to force targeting the msvc ABI
         
     // Attempt to add MSVC include paths. This is highly environment-dependent.
     // You might need to find these paths from your Visual Studio installation.
@@ -64,7 +74,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // if let Ok(sdk_dir) = env::var("WindowsSdkDir") { ... sdk_dir.join("Include/<version>/ucrt") ... }
 
     let bindings = builder
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+        // Blocklist problematic C++ std constructs (from user advice)
+        .blocklist_function("std::get")
+        .blocklist_type("std::tuple<.*>")
+        // Allowlist, derives, etc. (merged from user advice and existing)
         .allowlist_function("sl[A-Z].*")
         .allowlist_type("sl[A-Z].*")
         .allowlist_var("sl[A-Z_].*")
@@ -74,7 +87,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .derive_debug(true)
         .derive_default(true)
         .enable_cxx_namespaces()
+        // Keep existing opaque type for broader std protection
         .opaque_type("std::.*")
+        // Crucial for cargo integration
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .generate()
         .expect("Unable to generate Streamline/DLSS bindings");
 
