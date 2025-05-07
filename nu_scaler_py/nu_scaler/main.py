@@ -373,7 +373,9 @@ class LiveFeedScreen(QWidget):
             self.log_signal.emit(f"Error starting capture: {e}")
 
     def stop_capture(self):
+        import threading as _threading
         print('[DEBUG] stop_capture: called')
+        print(f'[DEBUG] stop_capture: active threads before: {_threading.active_count()}')
         if self.capture:
             try:
                 self.capture.stop()
@@ -388,20 +390,32 @@ class LiveFeedScreen(QWidget):
         self.status_bar.setText("Capture stopped")
         # Clean up worker and thread
         if self._upscale_thread is not None:
-            print('[DEBUG] stop_capture: waiting for worker thread to finish')
+            print(f'[DEBUG] stop_capture: thread id={id(self._upscale_thread)}, worker id={id(self._upscale_worker)}')
+            print(f'[DEBUG] stop_capture: thread isRunning={self._upscale_thread.isRunning()}, isFinished={self._upscale_thread.isFinished()}')
             self._upscale_thread.quit()
             self._upscale_thread.wait(2000)
+            print(f'[DEBUG] stop_capture: after wait, isRunning={self._upscale_thread.isRunning()}, isFinished={self._upscale_thread.isFinished()}')
+            if self._upscale_worker is not None:
+                self._upscale_worker.deleteLater()
+                print('[DEBUG] stop_capture: worker deleteLater called')
+            self._upscale_thread.deleteLater()
+            print('[DEBUG] stop_capture: thread deleteLater called')
             self._upscale_thread = None
             self._upscale_worker = None
             print('[DEBUG] stop_capture: worker thread cleaned up')
-        # Optionally, disable settings controls while worker is running
-        self.technology_box.setEnabled(True)
-        self.quality_box.setEnabled(True)
-        self.algorithm_box.setEnabled(True)
-        self.scale_slider.setEnabled(True)
-        self.advanced_check.setEnabled(True)
-        self.memory_strategy_box.setEnabled(True)
-        self.adaptive_quality_check.setEnabled(True)
+        print(f'[DEBUG] stop_capture: active threads after: {_threading.active_count()}')
+        # Delay re-enabling controls to allow Qt to finish cleanup
+        from PySide6.QtCore import QTimer
+        def _reenable_controls():
+            self.technology_box.setEnabled(True)
+            self.quality_box.setEnabled(True)
+            self.algorithm_box.setEnabled(True)
+            self.scale_slider.setEnabled(True)
+            self.advanced_check.setEnabled(True)
+            self.memory_strategy_box.setEnabled(True)
+            self.adaptive_quality_check.setEnabled(True)
+            print('[DEBUG] stop_capture: controls re-enabled')
+        QTimer.singleShot(200, _reenable_controls)
 
     def update_technology_ui(self, technology):
         """Update UI based on selected upscaling technology"""
