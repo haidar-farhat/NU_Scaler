@@ -3,10 +3,8 @@ name = "dlss-sys"
 version = "0.1.0"
 edition = "2021"
 
-[dependencies]
-# Add any dependencies needed for the DLSS bindings, e.g., FFI helpers
-# For now, we'll assume the DLSS SDK provides C headers.
+[lib]
+crate-type = ["staticlib", "rlib"]
 
-[build-dependencies]
-cc = "1.0" # For compiling C/C++ code if needed for shims or helpers
-# bindgen and clang-sys are no longer needed for manual FFI bindings 
+[dependencies]
+# No dependencies needed for these minimal FFI stubs 
