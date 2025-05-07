@@ -9,6 +9,7 @@ crate-type = ["cdylib", "rlib"]
 [features]
 default = ["python"]
 python = []
+fsr3 = ["dep:fsr3-sys"]
 
 [dependencies]
 anyhow = "1.0"
@@ -44,7 +45,7 @@ uuid = { version = "1.6", features = ["v4"] }
 # Official DLSS integration
 dlss-sys = { version = "0.1.0", path = "./dlss-sys" }
 # Official FSR3 integration
-fsr3-sys = { version = "0.1.0", path = "./fsr3-sys" }
+fsr3-sys = { version = "0.1.0", path = "./fsr3-sys", optional = true }
 
 [build-dependencies]
 # ... existing build dependencies ...
