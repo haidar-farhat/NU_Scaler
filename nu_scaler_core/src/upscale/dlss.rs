@@ -284,28 +284,47 @@ impl Upscaler for DlssUpscaler {
             unsafe { gpu_res.get_native_texture_handle(&output_texture)? };
 
         // 3. Depth Texture (passing null for now)
-        let native_input_depth_handle: *const c_void = std::ptr::null();
+        let native_input_depth_handle: *mut c_void = std::ptr::null_mut(); // Example: not providing depth
+        let native_motion_vectors_handle: *mut c_void = std::ptr::null_mut(); // Example: not providing motion vectors
+        let cmd_buffer_handle: *mut c_void = std::ptr::null_mut(); // Example: not providing command buffer directy
 
-        // 4. Jitter (0,0 for now)
-        let jitter_x = 0.0f32;
-        let jitter_y = 0.0f32;
+        // Jitter offsets - typically (0,0) if not implementing temporal anti-aliasing jitter
+        let jitter_x: f32 = 0.0;
+        let jitter_y: f32 = 0.0;
 
-        // 5. Call slEvaluateDlssFeature
-        let eval_status = unsafe {
+        // Prepare options for evaluation (can be same as init or different)
+        let eval_dlss_options = SlDLSSOptions {
+            mode: self.quality.to_sl_dlss_mode(),
+            output_width: self.output_width,
+            output_height: self.output_height,
+            color_input_format: 0, // Placeholder
+            motion_vector_format: 0, // Placeholder
+            depth_input_format: 0, // Placeholder
+            is_hdr: dlss_sys::SL_FALSE,
+            pre_exposure: 0.0,
+            enable_auto_exposure: dlss_sys::SL_FALSE,
+        };
+
+        let status = unsafe {
             dlss_sys::slEvaluateDlssFeature(
-                dlss_feature,
-                native_input_color_handle,
-                native_input_depth_handle,
-                jitter_x,
-                jitter_y,
-                native_output_color_handle,
+                dlss_feature,               // SlDlssFeature
+                cmd_buffer_handle,          // *mut c_void
+                native_input_color_handle,  // *mut c_void (texture handle)
+                native_output_color_handle, // *mut c_void (texture handle)
+                native_motion_vectors_handle, // *mut c_void
+                native_input_depth_handle,  // *mut c_void
+                jitter_x,                   // f32
+                jitter_y,                   // f32
+                self.input_width,           // u32 (render width)
+                self.input_height,          // u32 (render height)
+                &eval_dlss_options,         // *const SlDLSSOptions
             )
         };
 
-        if eval_status != SlStatus::Success {
+        if status != SlStatus::Success {
             return Err(anyhow!(
                 "slEvaluateDlssFeature failed with status: {:?}",
-                eval_status
+                status
             ));
         }
 
