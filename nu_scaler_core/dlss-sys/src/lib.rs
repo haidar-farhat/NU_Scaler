@@ -15,7 +15,7 @@
 // Any custom Rust helper functions or structs that operate on these FFI types
 // can also be defined here if needed.
 
-use std::ffi::{c_char, c_void};
+use std::ffi::c_void;
 use std::fmt;
 use std::sync::OnceLock;
 
@@ -251,13 +251,13 @@ fn load_streamline_api() -> Result<StreamlineApi, LoadError> {
         // we ensure the Library ('lib') lives as long as the symbols (which we do
         // by storing it in the StreamlineApi struct).
         let api = StreamlineApi {
-            slInitializeSDK: lib.get(b"slInitializeSDK\0")?.into_raw(),
-            slShutdownSDK: lib.get(b"slShutdownSDK\0")?.into_raw(),
-            slIsFeatureSupported: lib.get(b"slIsFeatureSupported\0")?.into_raw(),
-            slCreateDlssFeature: lib.get(b"slCreateDlssFeature\0")?.into_raw(),
-            slEvaluateDlssFeature: lib.get(b"slEvaluateDlssFeature\0")?.into_raw(),
-            slDestroyDlssFeature: lib.get(b"slDestroyDlssFeature\0")?.into_raw(),
-            slDLSSSetOptions: lib.get(b"slDLSSSetOptions\0")?.into_raw(),
+            slInitializeSDK: lib.get::<FnSlInitializeSDK>(b"slInitializeSDK\0")?.into_raw(),
+            slShutdownSDK: lib.get::<FnSlShutdownSDK>(b"slShutdownSDK\0")?.into_raw(),
+            slIsFeatureSupported: lib.get::<FnSlIsFeatureSupported>(b"slIsFeatureSupported\0")?.into_raw(),
+            slCreateDlssFeature: lib.get::<FnSlCreateDlssFeature>(b"slCreateDlssFeature\0")?.into_raw(),
+            slEvaluateDlssFeature: lib.get::<FnSlEvaluateDlssFeature>(b"slEvaluateDlssFeature\0")?.into_raw(),
+            slDestroyDlssFeature: lib.get::<FnSlDestroyDlssFeature>(b"slDestroyDlssFeature\0")?.into_raw(),
+            slDLSSSetOptions: lib.get::<FnSlDLSSSetOptions>(b"slDLSSSetOptions\0")?.into_raw(),
             // Load other symbols here
             _lib: lib, // Keep the library loaded
         };
