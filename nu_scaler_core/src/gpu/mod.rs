@@ -101,10 +101,10 @@ impl GpuResources {
         #[cfg(target_os = "windows")]
         {
             use wgpu::hal::dx12::Api as Dx12Api;
-            use windows::core::Interface; // Needed for .as_raw()
+            use windows::core::Interface; // Ensure Interface trait is in scope for .as_raw()
             let native_handle_opt: Option<*mut std::ffi::c_void> = 
                 self.device.as_hal::<Dx12Api, _, _>(|hal_device_opt| {
-                    // Try d.raw_device() -> as_raw() -> cast()
+                    // Call raw_device() -> as_raw() -> cast()
                     hal_device_opt.map(|d| d.raw_device().as_raw().cast::<c_void>())
                 });
 
@@ -142,12 +142,12 @@ impl GpuResources {
         #[cfg(target_os = "windows")]
         {
             use wgpu::hal::dx12::Api as Dx12Api;
-            use windows::core::Interface; // Might be needed if raw_resource_ptr returns ComPtr
+            use windows::core::Interface; // Ensure Interface trait is in scope for .as_raw()
             let mut native_handle_opt: Option<*mut std::ffi::c_void> = None;
             texture.as_hal::<Dx12Api, _>(|hal_texture_opt| {
                 if let Some(ht) = hal_texture_opt {
-                    // Try guessing ht.raw_resource_ptr()
-                    native_handle_opt = Some(ht.raw_resource_ptr().cast::<c_void>());
+                    // Access public `resource` field -> as_raw() -> cast()
+                    native_handle_opt = Some(ht.resource.as_raw().cast::<c_void>());
                 }
             });
             if let Some(handle) = native_handle_opt {
@@ -167,9 +167,7 @@ impl GpuResources {
                 }
             });
             if let Some(handle) = native_handle_opt {
-                // For u64, is_null() might not be the right check if 0 is a valid handle.
-                // However, casting to *mut c_void and checking for null is a common pattern.
-                if !handle.is_null() {
+                if !handle.is_null() { 
                     return Ok(handle);
                 }
             }
