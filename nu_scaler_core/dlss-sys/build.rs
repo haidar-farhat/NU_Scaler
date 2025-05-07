@@ -30,7 +30,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("cargo:rustc-link-search=native={}", lib_path.display());
     println!("cargo:rustc-link-lib=static=sl.interposer");
-    println!("cargo:rustc-link-lib=static=sl");
 
     // Bindgen related code has been removed as we are using manual FFI definitions.
 
