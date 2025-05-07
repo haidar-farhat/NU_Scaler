@@ -445,3 +445,29 @@ impl Drop for DlssUpscaler {
         }
     }
 }
+
+impl UpscalingQuality {
+    pub fn to_sl_dlss_mode(&self) -> SlDLSSMode {
+        match self {
+            UpscalingQuality::UltraPerformance => SlDLSSMode::UltraPerformance,
+            UpscalingQuality::Performance => SlDLSSMode::MaxPerformance,
+            UpscalingQuality::Balanced => SlDLSSMode::Balanced,
+            UpscalingQuality::Quality => SlDLSSMode::MaxQuality,
+            UpscalingQuality::Native => SlDLSSMode::DLAA, // Assuming DLAA is for native
+            // TODO: Decide how other qualities map or if they should error
+            _ => SlDLSSMode::MaxQuality, // Default or error
+        }
+    }
+
+    // Returns (render_resolution_multiplier_width, render_resolution_multiplier_height)
+    pub fn get_resolution_multipliers(&self) -> (f32, f32) {
+        match self {
+            UpscalingQuality::UltraPerformance => (0.333, 0.333),
+            UpscalingQuality::Performance => (0.5, 0.5),
+            UpscalingQuality::Balanced => (0.58, 0.58),
+            UpscalingQuality::Quality => (0.667, 0.667),
+            UpscalingQuality::Native => (1.0, 1.0), // DLAA renders at native resolution
+            _ => (1.0, 1.0),                        // Default to native for others
+        }
+    }
+}
