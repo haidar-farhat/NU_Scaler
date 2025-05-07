@@ -2,16 +2,15 @@ use anyhow::{Result, anyhow};
 use std::sync::Arc;
 use std::ffi::c_void;
 
-use crate::dlss_manager::{self, DlssManagerError};
-use crate::dlss_sys::{self, SlDlssFeature, SlStatus, SlDLSSOptions, SlDLSSMode, SlBoolean};
-use crate::gpu::{GpuResources, GpuError, GpuProvider}; // Added GpuProvider if needed for GpuResources construction
+use crate::dlss_manager::{self/*, DlssManagerError*/}; // Removed unused DlssManagerError
+use dlss_sys::{self, SlDlssFeature, SlStatus, SlDLSSOptions, SlDLSSMode, SlBoolean}; // Changed crate::dlss_sys to dlss_sys
+use crate::gpu::{GpuResources, GpuError/*, GpuProvider*/}; // Removed unused GpuProvider
 use crate::upscale::{Upscaler, UpscalingQuality};
 
 pub struct DlssUpscaler {
     quality: UpscalingQuality,
     gpu_resources: Option<Arc<GpuResources>>,
     dlss_feature: Option<SlDlssFeature>,
-    native_device_handle: *mut c_void, 
     input_width: u32,
     input_height: u32,
     output_width: u32,
@@ -25,7 +24,6 @@ impl DlssUpscaler {
             quality,
             gpu_resources: None, // Initialize as None
             dlss_feature: None,
-            native_device_handle: std::ptr::null_mut(),
             input_width: 0,
             input_height: 0,
             output_width: 0,
@@ -102,16 +100,17 @@ impl Upscaler for DlssUpscaler {
         dlss_manager::ensure_sdk_initialized().map_err(|e| anyhow!("DLSS SDK init failed: {:?}", e))?;
         println!("[DLSS Upscaler] DLSS SDK ensured to be initialized.");
 
-        self.native_device_handle = unsafe { gpu_res.get_native_device_handle()? };
-        if self.native_device_handle.is_null() {
+        // Get native device handle dynamically
+        let native_device_handle = unsafe { gpu_res.get_native_device_handle()? };
+        if native_device_handle.is_null() {
             return Err(anyhow!("Failed to get native GPU device handle or handle is null. Potential GpuError: {:?}", GpuError::NullHandle));
         }
-        println!("[DLSS Upscaler] Got native device handle: {:?}", self.native_device_handle);
+        println!("[DLSS Upscaler] Got native device handle: {:?}", native_device_handle);
         
         let mut dlss_feature_handle: SlDlssFeature = std::ptr::null_mut();
         let status = unsafe {
             dlss_sys::slCreateDlssFeature(
-                self.native_device_handle,
+                native_device_handle,
                 input_width, 
                 input_height, 
                 0, 
