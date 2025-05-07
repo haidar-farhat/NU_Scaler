@@ -404,6 +404,15 @@ class LiveFeedScreen(QWidget):
             print('[DEBUG] stop_capture: deleting upscale worker')
             self._upscale_worker = None
         print(f'[DEBUG] stop_capture: active threads after: {_threading.active_count()}')
+        # Explicitly delete upscaler and capture
+        if hasattr(self, 'upscaler') and self.upscaler is not None:
+            print('[DEBUG] stop_capture: deleting upscaler')
+            del self.upscaler
+            self.upscaler = None
+        if hasattr(self, 'capture') and self.capture is not None:
+            print('[DEBUG] stop_capture: deleting capture')
+            del self.capture
+            self.capture = None
         gc.collect()
         print(f'[DEBUG] stop_capture: gc collected, objects: {len(gc.get_objects())}')
         print(f'[DEBUG] stop_capture: OS handle count: {psutil.Process().num_handles()}')
