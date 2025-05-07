@@ -683,25 +683,12 @@ fn nu_scaler_core(_py: Python, m: &PyModule) -> PyResult<()> {
     #[pyfn(m)]
     #[pyo3(name = "create_fsr_upscaler")]
     fn create_fsr_upscaler_pyfn(_quality: &str) -> PyResult<()> {
-    fn create_fsr_upscaler(quality: &str) -> PyResult<PyWgpuUpscaler> {
         #[cfg(feature = "fsr3")]
         {
-            // In a real implementation, this would create an actual FSR upscaler
-            // using types from fsr3_sys and the FsrUpscaler struct.
-            println!("[PyO3] Creating FSR-optimized upscaler (fsr3 feature enabled)");
-            // For now, still returning PyWgpuUpscaler for consistency with existing stubs.
-            // This would ideally return a PyFsrUpscaler or similar.
-            let _q = match quality.to_lowercase().as_str() {
-                "ultra" => UpscalingQuality::Ultra,
-                "quality" => UpscalingQuality::Quality,
-                "balanced" => UpscalingQuality::Balanced,
-                "performance" => UpscalingQuality::Performance,
-                _ => UpscalingQuality::Quality,
-            };
-            // Placeholder - Real FSR upscaler creation would go here.
-            // let fsr_upscaler = upscale::FsrUpscaler::new(q); 
-            // Ok(PyFsrUpscaler { inner: fsr_upscaler })
-            PyWgpuUpscaler::new(quality, "bilinear") // Placeholder return
+            println!("[PyO3] Creating FSR-optimized upscaler (fsr3 feature enabled, but not implemented)");
+             Err(pyo3::exceptions::PyNotImplementedError::new_err(
+                 "PyFsrUpscaler not yet implemented."
+             ))
         }
         #[cfg(not(feature = "fsr3"))]
         {
@@ -713,6 +700,7 @@ fn nu_scaler_core(_py: Python, m: &PyModule) -> PyResult<()> {
     }
 
     #[pyfn(m)]
+    #[pyo3(name = "create_dlss_upscaler")]
     fn create_dlss_upscaler_pyfn(quality: &str) -> PyResult<PyDlssUpscaler> {
         PyDlssUpscaler::new(quality)
     }
@@ -878,7 +866,9 @@ async fn init_wgpu_for_standalone_upscaler() -> Result<(Arc<wgpu::Device>, Arc<w
         .await
         .ok_or_else(|| anyhow!("Failed to find a suitable GPU adapter for standalone upscaler."))?;
     
-    let gpu_info = GpuDetector::detect_from_adapter(&adapter);
+    // Get adapter info and convert to GpuInfo
+    let adapter_info = adapter.get_info();
+    let gpu_info = Some(GpuInfo::from(adapter_info));
 
     // Define features needed. For DLSS, raw resource handles are key.
     // wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES might be relevant for some advanced scenarios
@@ -891,8 +881,8 @@ async fn init_wgpu_for_standalone_upscaler() -> Result<(Arc<wgpu::Device>, Arc<w
         .request_device(
             &wgpu::DeviceDescriptor {
                 label: Some("standalone_upscaler_device"),
-                features,
-                limits: wgpu::Limits::default(), // Consider using downlevel_defaults() for wider compatibility if needed
+                required_features: features,
+                required_limits: wgpu::Limits::default(),
             },
             None, // Trace path
         )
