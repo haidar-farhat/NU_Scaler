@@ -965,21 +965,15 @@ impl Upscaler for WgpuUpscaler {
         if !self.initialized {
             return Err(anyhow!("WgpuUpscaler not initialized"));
         }
-        
         let expected_size = (self.input_width * self.input_height * 4) as usize;
         if input.len() != expected_size {
             return Err(anyhow!("Input buffer size mismatch: expected {} bytes, got {}", expected_size, input.len()));
         }
-        
-        // Get all resources safely
         let pipeline = self.pipeline.as_ref().ok_or_else(|| anyhow::anyhow!("No pipeline"))?;
         let input_buffer = self.input_buffer.as_ref().ok_or_else(|| anyhow::anyhow!("No input buffer"))?;
         let staging_buffer = self.staging_buffer.as_ref().ok_or_else(|| anyhow::anyhow!("No staging buffer"))?;
-        
         let device = self.device().ok_or_else(|| anyhow::anyhow!("No device"))?;
         let queue = self.queue().ok_or_else(|| anyhow::anyhow!("No queue"))?;
-        
-        // Select output buffer and bind group
         let buffer_idx = self.buffer_pool_index.fetch_add(1, Ordering::SeqCst) % self.buffer_pool.len().max(1);
         let (output_buffer, bind_group) = if !self.buffer_pool.is_empty() && !self.buffer_pool_bind_groups.is_empty() {
             (&self.buffer_pool[buffer_idx], &self.buffer_pool_bind_groups[buffer_idx])
@@ -987,46 +981,38 @@ impl Upscaler for WgpuUpscaler {
             (self.output_buffer.as_ref().ok_or_else(|| anyhow::anyhow!("No output buffer"))?, 
              self.fallback_bind_group.as_ref().ok_or_else(|| anyhow::anyhow!("No fallback bind group"))?)
         };
-        
+        let t_start = Instant::now();
         // Copy data to GPU - use an intermediate buffer for large transfers
         if input.len() > 16 * 1024 * 1024 {
-            // For very large inputs, use a staging buffer and command encoder
+            let t_upload_start = Instant::now();
             let staging_upload = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Upload Staging Buffer"),
                 size: input.len() as u64,
                 usage: BufferUsages::COPY_SRC | BufferUsages::MAP_WRITE,
                 mapped_at_creation: true,
             });
-            
-            // Copy input data to staging buffer
             {
                 let mut view = staging_upload.slice(..).get_mapped_range_mut();
                 view.copy_from_slice(input);
             }
-            
-            // Unmap the staging buffer before using it in commands
             staging_upload.unmap();
-            
-            // Create command encoder to copy from staging to input buffer
             let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
                 label: Some("Upload Encoder"),
             });
-            
-            // Copy from staging to input buffer
             encoder.copy_buffer_to_buffer(&staging_upload, 0, input_buffer, 0, input.len() as u64);
-            
-            // Submit the copy command
             queue.submit(Some(encoder.finish()));
+            let t_upload_end = Instant::now();
+            println!("[Rust] Buffer upload (staging): {:.2} ms", (t_upload_end - t_upload_start).as_secs_f64() * 1000.0);
         } else {
-            // For smaller inputs, write directly
+            let t_upload_start = Instant::now();
             queue.write_buffer(input_buffer, 0, input);
+            let t_upload_end = Instant::now();
+            println!("[Rust] Buffer upload (direct): {:.2} ms", (t_upload_end - t_upload_start).as_secs_f64() * 1000.0);
         }
-        
-        // Execute the shader with a fresh command encoder
+        let t_shader_start = Instant::now();
         let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
             label: Some("Upscale Encoder"),
         });
-        
         {
             let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("Upscale Pass"),
@@ -1034,70 +1020,53 @@ impl Upscaler for WgpuUpscaler {
             });
             compute_pass.set_pipeline(pipeline);
             compute_pass.set_bind_group(0, bind_group, &[]);
-            
-            // Handle non-divisible sizes, use more optimal workgroup sizes
             let workgroup_width = 16;
             let workgroup_height = 16;
-            
             let x = (self.output_width + workgroup_width - 1) / workgroup_width;
             let y = (self.output_height + workgroup_height - 1) / workgroup_height;
-            
-            // Use more threads for large outputs
             if self.output_width * self.output_height > 4 * 1920 * 1080 {
-                compute_pass.dispatch_workgroups(x, y, 4); // Use 4 workgroups in z dimension for 4K+ outputs
+                compute_pass.dispatch_workgroups(x, y, 4);
             } else {
-                compute_pass.dispatch_workgroups(x, y, 2); // Use 2 workgroups for smaller outputs
+                compute_pass.dispatch_workgroups(x, y, 2);
             }
         }
-        
-        // Copy result from device to staging buffer
         encoder.copy_buffer_to_buffer(output_buffer, 0, staging_buffer, 0, (self.output_width * self.output_height * 4) as u64);
         queue.submit(Some(encoder.finish()));
-        
-        // Wait for and retrieve results
+        let t_shader_end = Instant::now();
+        println!("[Rust] Shader dispatch + copy: {:.2} ms", (t_shader_end - t_shader_start).as_secs_f64() * 1000.0);
         let buffer_slice = staging_buffer.slice(..);
-        
-        // Use a scope to ensure proper buffer mapping/unmapping
+        let t_map_start = Instant::now();
         let result = {
             let (sender, receiver) = std::sync::mpsc::channel();
-            
             buffer_slice.map_async(MapMode::Read, move |v| {
                 let _ = sender.send(v);
             });
-            
-            // Wait for the GPU with polling to prevent hangs
             device.poll(wgpu::Maintain::Wait);
-            
-            // Use a timeout to prevent deadlocks
             match receiver.recv_timeout(std::time::Duration::from_secs(5)) {
                 Ok(Ok(())) => {
-                    // Get the mapped data
                     let mapped_range = buffer_slice.get_mapped_range();
                     let result = Vec::from(mapped_range.as_ref());
-                    
-                    // Explicitly drop the mapped range before unmapping
                     drop(mapped_range);
-                    
                     result
                 },
                 Ok(Err(e)) => return Err(anyhow!("Buffer mapping error: {:?}", e)),
                 Err(_) => return Err(anyhow!("Timeout waiting for buffer mapping")),
             }
         };
-        
-        // Explicitly unmap the buffer
+        let t_map_end = Instant::now();
+        println!("[Rust] Buffer map/download: {:.2} ms", (t_map_end - t_map_start).as_secs_f64() * 1000.0);
         staging_buffer.unmap();
-        
-        // Ensure device is fully finished
+        let t_poll_start = Instant::now();
         device.poll(wgpu::Maintain::Wait);
-        
-        // Update memory usage stats
+        let t_poll_end = Instant::now();
+        println!("[Rust] Device poll: {:.2} ms", (t_poll_end - t_poll_start).as_secs_f64() * 1000.0);
+        let t_total = Instant::now() - t_start;
+        println!("[Rust] Total upscale time: {:.2} ms", t_total.as_secs_f64() * 1000.0);
         if self.adaptive_quality && self.gpu_resources.is_some() {
             if let Some(resources) = &self.gpu_resources {
                 let _ = resources.memory_pool.update_vram_usage();
             }
         }
-        
         Ok(result)
     }
     fn name(&self) -> &'static str {
