@@ -129,21 +129,28 @@ impl GpuResources {
     /// The caller is responsible for ensuring that the handle is used correctly
     /// and within the lifetime of the WGPU texture and device.
     /// The underlying WGPU instance, device, and texture must remain alive while this handle is in use.
-    pub unsafe fn get_native_texture_handle(&self, texture: &wgpu::Texture) -> Result<*mut std::ffi::c_void, GpuError> {
+    pub unsafe fn get_native_texture_handle(&self, _texture: &wgpu::Texture) -> Result<*mut std::ffi::c_void, GpuError> {
         // Use as_hal directly on the texture object, no separate HAL Texture trait import needed.
         // use wgpu::hal::Texture as HalTexture; // Incorrect path, removed
         #[cfg(feature = "dx12")] // WARNING: This cfg flag might not work as intended
+        use wgpu::hal::dx12::Api as Dx12Api;
+        #[cfg(feature = "vulkan")] // WARNING: This cfg flag might not work as intended
+        use wgpu::hal::vulkan::Api as VulkanApi;
+
+        #[cfg(feature = "dx12")] // WARNING: This cfg flag might not work as intended
         {
             // For ID3D12Resource
-            if let Some(raw_texture_handle) = texture.as_hal::<Dx12Api>().raw_texture() {
+            // We need the actual texture variable here!
+            if let Some(raw_texture_handle) = _texture.as_hal::<Dx12Api>().raw_texture() { 
                  return Ok(raw_texture_handle as *mut std::ffi::c_void);
             }
         }
 
-        #[cfg(feature = "vulkan")]
+        #[cfg(feature = "vulkan")] // WARNING: This cfg flag might not work as intended
         {
             // For VkImage
-            if let Some(vk_image) = texture.as_hal::<VulkanApi>().raw_texture() {
+            // We need the actual texture variable here!
+            if let Some(vk_image) = _texture.as_hal::<VulkanApi>().raw_texture() {
                 return Ok(vk_image as *mut std::ffi::c_void); // vk::VkImage is typically a u64 handle, castable to pointer
             }
         }
