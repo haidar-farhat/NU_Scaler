@@ -1,3 +1,4 @@
+#![cfg(feature = "fsr3")]
 use anyhow::Result;
 use wgpu::{Device, Queue, ShaderModule, ComputePipeline, Buffer, BindGroup, BindGroupLayout, BufferUsages, ShaderModuleDescriptor, ShaderSource, ComputePipelineDescriptor, PipelineLayoutDescriptor, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, BufferBindingType, BindGroupDescriptor, BindGroupEntry, CommandEncoderDescriptor, BufferDescriptor, MapMode};
 use wgpu::util::DeviceExt;
