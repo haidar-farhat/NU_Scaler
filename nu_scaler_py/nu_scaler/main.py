@@ -66,16 +66,17 @@ class UpscaleWorker(QObject):
     @Slot()
     def run(self):
         import time
-        print(f"[DEBUG] UpscaleWorker.run: {id(self)} starting")
+        print(f"[PYTHON DEBUG] About to call upscaler.upscale: {self.upscaler!r}")
+        print(f"[PYTHON DEBUG] type(self.upscaler): {type(self.upscaler)}")
         t0 = time.perf_counter()
         try:
-            print(f"[DEBUG] UpscaleWorker.run: {id(self)} before upscale")
-            out = self.upscaler.upscale(self.frame)
+            print("[DEBUG] UpscaleWorker: Before upscale")
+            result = self.upscaler.upscale(self.frame, self.in_w, self.in_h, self.out_w, self.out_h, self.scale)
+            print("[DEBUG] UpscaleWorker: After upscale")
             t1 = time.perf_counter()
-            print(f"[DEBUG] UpscaleWorker.run: {id(self)} finished upscale in {t1-t0:.2f}s")
-            self.finished.emit(out, self.out_w, self.out_h, (t1-t0)*1000)
+            self.finished.emit(result, self.out_w, self.out_h, t1 - t0)
         except Exception as e:
-            print(f"[DEBUG] UpscaleWorker.run: {id(self)} error: {e}")
+            print(f"[DEBUG] UpscaleWorker: Exception: {e}")
             self.error.emit(str(e))
 
     def __del__(self):
