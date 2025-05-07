@@ -3,55 +3,39 @@ use std::path::PathBuf;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=src/lib.rs");
-    println!("cargo:rerun-if-changed=wrapper.h"); // Rerun if wrapper.h changes
+    // No longer running bindgen, so wrapper.h isn't needed for rerun trigger
+    // println!("cargo:rerun-if-changed=wrapper.h");
 
+    // --- IMPORTANT: Set this path to your OFFICIAL Streamline SDK installation ---
     let streamline_sdk_root_path = PathBuf::from(
         env::var("NVIDIA_STREAMLINE_SDK_PATH")
-            .unwrap_or_else(|_| r"C:\\nvideasdk\\bckup\\Streamline".to_string()),
+            .unwrap_or_else(|_| r"C:\\NVIDIA_SDKs\\Streamline_Latest".to_string()), // <-- UPDATE THIS DEFAULT PATH
     );
 
-    // Path and link for sl.interposer.lib
+    // Path and link ONLY for sl.interposer.lib (assuming it's needed for loading)
     let interposer_lib_path = streamline_sdk_root_path.join(r"lib\x64");
     if !interposer_lib_path.exists() {
         panic!(
-            r"NVIDIA Streamline SDK interposer library path does not exist: {}. Please verify Streamline\lib\x64.",
+            r"NVIDIA Streamline SDK library path does not exist: {}. Please verify the path and that sl.interposer.lib is present.",
             interposer_lib_path.display()
         );
     }
     println!("cargo:rustc-link-search=native={}", interposer_lib_path.display());
     println!("cargo:rustc-link-lib=static=sl.interposer");
 
-    // Path and link for sl.common.lib
-    let common_lib_artifacts_path = streamline_sdk_root_path.join(r"_artifacts\sl.common\Production_x64");
-    if !common_lib_artifacts_path.exists() {
-        panic!(
-            r"NVIDIA Streamline SDK sl.common library path does not exist: {}. Please verify _artifacts\sl.common\Production_x64.",
-            common_lib_artifacts_path.display()
-        );
-    }
-    println!("cargo:rustc-link-search=native={}", common_lib_artifacts_path.display());
-    println!("cargo:rustc-link-lib=static=sl.common");
+    // We are NOT linking sl.common, sl.dlss, nvsdk_ngx_d etc. directly anymore,
+    // as they don't export the public API. We will load functions at runtime.
 
-    // Path and link for sl.dlss.lib
-    let dlss_lib_artifacts_path = streamline_sdk_root_path.join(r"_artifacts\sl.dlss\Production_x64");
-    if !dlss_lib_artifacts_path.exists() {
-        panic!(
-            r"NVIDIA Streamline SDK sl.dlss library path does not exist: {}. Please verify _artifacts\sl.dlss\Production_x64.",
-            dlss_lib_artifacts_path.display()
-        );
-    }
-    println!("cargo:rustc-link-search=native={}", dlss_lib_artifacts_path.display());
-    println!("cargo:rustc-link-lib=static=sl.dlss");
-
-    // Include path (assuming it's still relevant from the root of "bckup\Streamline")
+    // Check for include path, might still be needed for C header consistency checks later if desired
     let sdk_include_path = streamline_sdk_root_path.join("include");
     if !sdk_include_path.exists() {
         panic!(
-            r"NVIDIA Streamline SDK include path does not exist: {}. Please verify Streamline\include.",
+            r"NVIDIA Streamline SDK include path does not exist: {}. Please verify the include path.",
             sdk_include_path.display()
         );
     }
-    // If bindgen were used, you'd add: println!("cargo:include={}", sdk_include_path.display());
+
+    println!("cargo:warning=Streamline build script configured for dynamic loading via sl.interposer.lib. Ensure NVIDIA_STREAMLINE_SDK_PATH is set or the default path is correct.");
 
     Ok(())
 }
