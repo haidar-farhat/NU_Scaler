@@ -904,7 +904,7 @@ mod tests {
 
     #[test]
     fn test_wgpu_upscaler_init() {
-        let mut upscaler = WgpuUpscaler::new(UpscalingQuality::Quality, UpscaleAlgorithm::Nearest);
+        let upscaler = WgpuUpscaler::new(UpscalingQuality::Quality, UpscaleAlgorithm::Nearest);
         // This will try to initialize WGPU device if not already available via GpuResources.
         // It might panic if no adapter is found, or fail if device request fails.
         // For robust testing, mock WGPU or ensure a device is available.
