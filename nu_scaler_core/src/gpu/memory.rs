@@ -91,7 +91,7 @@ pub struct MemoryPool {
     /// Last time the pool was cleaned up
     last_cleanup: Mutex<Instant>,
     /// GPU information
-    gpu_info: Option<GpuInfo>,
+    _gpu_info: Option<GpuInfo>,
 }
 
 impl MemoryPool {
@@ -163,7 +163,7 @@ impl MemoryPool {
             max_pool_size: AtomicUsize::new(16), // Increase default pool size for better reuse
             strategy: Mutex::new(strategy),
             last_cleanup: Mutex::new(Instant::now()),
-            gpu_info,
+            _gpu_info: gpu_info,
         };
         
         // Pre-allocate buffers for common sizes to improve initial performance
@@ -446,7 +446,7 @@ impl MemoryPool {
         use std::fs::File;
         use std::io::Read;
         
-        if let Some(info) = &self.gpu_info {
+        if let Some(info) = &self._gpu_info {
             match info.vendor {
                 GpuVendor::Nvidia => {
                     // Try NVIDIA sysfs path
