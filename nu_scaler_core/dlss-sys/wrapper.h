@@ -1,8 +1,24 @@
 // This wrapper header includes the necessary NVIDIA Streamline SDK headers.
 // Bindgen will process this file.
 
-#ifndef DLSS_STREAMLINE_WRAPPER_H
-#define DLSS_STREAMLINE_WRAPPER_H
+#pragma once
+
+// Use an absolute path to the new SDK 2.7.30 include directory
+#include "C:/nvideasdk/bckup/Streamline/include/sl.h"
+
+// If these were previously included from the old SDK path, update them too.
+// Assuming they are also in C:/nvideasdk/bckup/Streamline/include/
+// If not, adjust or remove as necessary.
+#if SL_DLSS_G
+#include "C:/nvideasdk/bckup/Streamline/include/sl_dlss_g.h" 
+#endif
+
+// Example for other features if needed, ensure these files exist at the new path
+// #include "C:/nvideasdk/bckup/Streamline/include/sl_reflex.h"
+
+// Ensure that the build script (build.rs) can find these headers.
+// The current build.rs doesn't explicitly add include paths to bindgen,
+// so absolute paths here are the most reliable for now.
 
 // Main Streamline header
 // It's common for SDK headers to be in a subdirectory of the main include path.
