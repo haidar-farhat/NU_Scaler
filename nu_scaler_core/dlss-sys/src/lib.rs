@@ -309,20 +309,7 @@ impl StreamlineApi {
         })
     }
     
-    pub fn slEvaluateDlssFeature_method(
-        &self, 
-        dlss_feature_handle: SlDlssFeature,
-        cmd_buffer: *mut std::ffi::c_void, 
-        input_resource: *mut std::ffi::c_void, 
-        output_resource: *mut std::ffi::c_void, 
-        motion_vectors: *mut std::ffi::c_void, 
-        depth: *mut std::ffi::c_void, 
-        jitter_x: f32, 
-        jitter_y: f32, 
-        render_width: u32, 
-        render_height: u32, 
-        params: *const SlDLSSOptions
-    ) -> Result<SlStatus, String> {
+    pub fn slEvaluateDlssFeature_method(&self, dlss_feature_handle: SlDlssFeature, cmd_buffer: *mut c_void, input_resource: *mut c_void, output_resource: *mut c_void, motion_vectors: *mut c_void, depth: *mut c_void, jitter_x: f32, jitter_y: f32, render_width: u32, render_height: u32, params: *const SlDLSSOptions) -> Result<SlStatus, String> {
         self.load_symbol_and_call::<FnSlEvaluateDlssFeature, _, SlStatus>(b"slEvaluateDlssFeature\0", |func| unsafe {
             func(dlss_feature_handle, cmd_buffer, input_resource, output_resource, motion_vectors, depth, jitter_x, jitter_y, render_width, render_height, params)
         })
@@ -403,7 +390,59 @@ pub fn slCreateDlssFeature(
     }).or_else(|err| Err(err))
 }
 
-// ... (Define other public wrapper functions similarly) ...
+// Wrapper for slEvaluateDlssFeature
+pub fn slEvaluateDlssFeature(
+    dlss_feature_handle: SlDlssFeature,
+    cmd_buffer: *mut std::ffi::c_void, 
+    input_resource: *mut std::ffi::c_void, 
+    output_resource: *mut std::ffi::c_void, 
+    motion_vectors: *mut std::ffi::c_void, 
+    depth: *mut std::ffi::c_void, 
+    jitter_x: f32, 
+    jitter_y: f32, 
+    render_width: u32, 
+    render_height: u32, 
+    params: *const SlDLSSOptions
+) -> Result<SlStatus, &'static LoadError> {
+    get_sl_api().and_then(|api| {
+        match api.slEvaluateDlssFeature_method(
+            dlss_feature_handle, cmd_buffer, input_resource, output_resource, 
+            motion_vectors, depth, jitter_x, jitter_y, render_width, render_height, params
+        ) {
+            Ok(status) => Ok(status),
+            Err(specific_error_string) => {
+                eprintln!("[dlss_sys] slEvaluateDlssFeature: {}", specific_error_string);
+                Err(&UNABLE_TO_LOAD_SYMBOL_ERROR)
+            }
+        }
+    }).or_else(|err| Err(err))
+}
+
+// Wrapper for slDestroyDlssFeature
+pub fn slDestroyDlssFeature(dlss_feature_handle: SlDlssFeature) -> Result<SlStatus, &'static LoadError> {
+    get_sl_api().and_then(|api| {
+        match api.slDestroyDlssFeature_method(dlss_feature_handle) {
+            Ok(status) => Ok(status),
+            Err(specific_error_string) => {
+                eprintln!("[dlss_sys] slDestroyDlssFeature: {}", specific_error_string);
+                Err(&UNABLE_TO_LOAD_SYMBOL_ERROR)
+            }
+        }
+    }).or_else(|err| Err(err))
+}
+
+// Wrapper for slDLSSSetOptions
+pub fn slDLSSSetOptions(dlss_feature_handle: SlDlssFeature, options: *const SlDLSSOptions) -> Result<SlStatus, &'static LoadError> {
+    get_sl_api().and_then(|api| {
+        match api.slDLSSSetOptions_method(dlss_feature_handle, options) {
+            Ok(status) => Ok(status),
+            Err(specific_error_string) => {
+                eprintln!("[dlss_sys] slDLSSSetOptions: {}", specific_error_string);
+                Err(&UNABLE_TO_LOAD_SYMBOL_ERROR)
+            }
+        }
+    }).or_else(|err| Err(err))
+}
 
 // Ensure the old get_sl_func macro is removed or not used by these public wrappers.
 // The StreamlineApi struct and get_sl_api() function are central to this on-demand loading.
