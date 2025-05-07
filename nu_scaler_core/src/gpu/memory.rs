@@ -421,7 +421,7 @@ impl MemoryPool {
                         let used_mb = usage_vram as f32 / (1024.0 * 1024.0);
                         let free_mb = total_mb - used_mb;
 
-                        let stats = self.stats.lock().unwrap();
+                        let mut stats = self.stats.lock().unwrap();
                         stats.total_mb = total_mb;
                         stats.used_mb = used_mb;
                         stats.free_mb = free_mb;
