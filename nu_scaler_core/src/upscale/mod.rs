@@ -9,7 +9,8 @@ use std::any::Any;
 use pyo3::prelude::*;
 use crate::gpu::{detector::GpuDetector, memory::{MemoryPool, AllocationStrategy, MemoryPressure}, GpuResources};
 use std::io::{Write, BufWriter};
-use std::fs::OpenOptions;
+use std::fs::{OpenOptions, File};
+use std::path::PathBuf;
 
 // Add new module declarations
 mod fsr;
@@ -1005,32 +1006,28 @@ impl Upscaler for WgpuUpscaler {
             encoder.copy_buffer_to_buffer(&staging_upload, 0, input_buffer, 0, input.len() as u64);
             queue.submit(Some(encoder.finish()));
             let t_upload_end = Instant::now();
-            let log_path = r"C:\Nu_Scaler\NU_Scaler\upscale_debug.log";
-            let log_file = match OpenOptions::new().create(true).append(true).open(log_path) {
-                Ok(f) => BufWriter::new(f),
-                Err(e) => {
-                    println!("[Rust] ERROR: Could not open log file {}: {}", log_path, e);
-                    std::io::stdout().flush().unwrap();
-                    return Err(anyhow!("Could not open log file: {}", e));
+            let mut log_file = match open_log_file_robust() {
+                Some(f) => f,
+                None => {
+                    println!("[Rust] ERROR: Could not open any log file location");
+                    let _ = std::io::stdout().flush();
+                    return Err(anyhow!("Could not open any log file location"));
                 }
             };
-            let mut log_file = log_file;
             writeln!(log_file, "[Rust] Buffer upload (staging): {:.2} ms", (t_upload_end - t_upload_start).as_secs_f64() * 1000.0).unwrap();
             log_file.flush().unwrap();
         } else {
             let t_upload_start = Instant::now();
             queue.write_buffer(input_buffer, 0, input);
             let t_upload_end = Instant::now();
-            let log_path = r"C:\Nu_Scaler\NU_Scaler\upscale_debug.log";
-            let log_file = match OpenOptions::new().create(true).append(true).open(log_path) {
-                Ok(f) => BufWriter::new(f),
-                Err(e) => {
-                    println!("[Rust] ERROR: Could not open log file {}: {}", log_path, e);
-                    std::io::stdout().flush().unwrap();
-                    return Err(anyhow!("Could not open log file: {}", e));
+            let mut log_file = match open_log_file_robust() {
+                Some(f) => f,
+                None => {
+                    println!("[Rust] ERROR: Could not open any log file location");
+                    let _ = std::io::stdout().flush();
+                    return Err(anyhow!("Could not open any log file location"));
                 }
             };
-            let mut log_file = log_file;
             writeln!(log_file, "[Rust] Buffer upload (direct): {:.2} ms", (t_upload_end - t_upload_start).as_secs_f64() * 1000.0).unwrap();
             log_file.flush().unwrap();
         }
@@ -1058,16 +1055,14 @@ impl Upscaler for WgpuUpscaler {
         encoder.copy_buffer_to_buffer(output_buffer, 0, staging_buffer, 0, (self.output_width * self.output_height * 4) as u64);
         queue.submit(Some(encoder.finish()));
         let t_shader_end = Instant::now();
-        let log_path = r"C:\Nu_Scaler\NU_Scaler\upscale_debug.log";
-        let log_file = match OpenOptions::new().create(true).append(true).open(log_path) {
-            Ok(f) => BufWriter::new(f),
-            Err(e) => {
-                println!("[Rust] ERROR: Could not open log file {}: {}", log_path, e);
-                std::io::stdout().flush().unwrap();
-                return Err(anyhow!("Could not open log file: {}", e));
+        let mut log_file = match open_log_file_robust() {
+            Some(f) => f,
+            None => {
+                println!("[Rust] ERROR: Could not open any log file location");
+                let _ = std::io::stdout().flush();
+                return Err(anyhow!("Could not open any log file location"));
             }
         };
-        let mut log_file = log_file;
         writeln!(log_file, "[Rust] Shader dispatch + copy: {:.2} ms", (t_shader_end - t_shader_start).as_secs_f64() * 1000.0).unwrap();
         log_file.flush().unwrap();
         let buffer_slice = staging_buffer.slice(..);
@@ -1090,45 +1085,39 @@ impl Upscaler for WgpuUpscaler {
             }
         };
         let t_map_end = Instant::now();
-        let log_path = r"C:\Nu_Scaler\NU_Scaler\upscale_debug.log";
-        let log_file = match OpenOptions::new().create(true).append(true).open(log_path) {
-            Ok(f) => BufWriter::new(f),
-            Err(e) => {
-                println!("[Rust] ERROR: Could not open log file {}: {}", log_path, e);
-                std::io::stdout().flush().unwrap();
-                return Err(anyhow!("Could not open log file: {}", e));
+        let mut log_file = match open_log_file_robust() {
+            Some(f) => f,
+            None => {
+                println!("[Rust] ERROR: Could not open any log file location");
+                let _ = std::io::stdout().flush();
+                return Err(anyhow!("Could not open any log file location"));
             }
         };
-        let mut log_file = log_file;
         writeln!(log_file, "[Rust] Buffer map/download: {:.2} ms", (t_map_end - t_map_start).as_secs_f64() * 1000.0).unwrap();
         log_file.flush().unwrap();
         staging_buffer.unmap();
         let t_poll_start = Instant::now();
         device.poll(wgpu::Maintain::Wait);
         let t_poll_end = Instant::now();
-        let log_path = r"C:\Nu_Scaler\NU_Scaler\upscale_debug.log";
-        let log_file = match OpenOptions::new().create(true).append(true).open(log_path) {
-            Ok(f) => BufWriter::new(f),
-            Err(e) => {
-                println!("[Rust] ERROR: Could not open log file {}: {}", log_path, e);
-                std::io::stdout().flush().unwrap();
-                return Err(anyhow!("Could not open log file: {}", e));
+        let mut log_file = match open_log_file_robust() {
+            Some(f) => f,
+            None => {
+                println!("[Rust] ERROR: Could not open any log file location");
+                let _ = std::io::stdout().flush();
+                return Err(anyhow!("Could not open any log file location"));
             }
         };
-        let mut log_file = log_file;
         writeln!(log_file, "[Rust] Device poll: {:.2} ms", (t_poll_end - t_poll_start).as_secs_f64() * 1000.0).unwrap();
         log_file.flush().unwrap();
         let t_total = Instant::now() - t_start;
-        let log_path = r"C:\Nu_Scaler\NU_Scaler\upscale_debug.log";
-        let log_file = match OpenOptions::new().create(true).append(true).open(log_path) {
-            Ok(f) => BufWriter::new(f),
-            Err(e) => {
-                println!("[Rust] ERROR: Could not open log file {}: {}", log_path, e);
-                std::io::stdout().flush().unwrap();
-                return Err(anyhow!("Could not open log file: {}", e));
+        let mut log_file = match open_log_file_robust() {
+            Some(f) => f,
+            None => {
+                println!("[Rust] ERROR: Could not open any log file location");
+                let _ = std::io::stdout().flush();
+                return Err(anyhow!("Could not open any log file location"));
             }
         };
-        let mut log_file = log_file;
         writeln!(log_file, "[Rust] Total upscale time: {:.2} ms", t_total.as_secs_f64() * 1000.0).unwrap();
         log_file.flush().unwrap();
         if self.adaptive_quality && self.gpu_resources.is_some() {
@@ -1154,6 +1143,26 @@ impl Upscaler for WgpuUpscaler {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
+}
+
+fn open_log_file_robust() -> Option<BufWriter<File>> {
+    let try_paths = [
+        PathBuf::from(r"C:\Nu_Scaler\NU_Scaler\upscale_debug.log"),
+        dirs::desktop_dir().map(|d| d.join("upscale_debug.log")),
+        std::env::temp_dir().join("upscale_debug.log").into(),
+    ];
+    for path_opt in try_paths.iter() {
+        if let Some(path) = path_opt.as_ref() {
+            match OpenOptions::new().create(true).append(true).open(path) {
+                Ok(f) => return Some(BufWriter::new(f)),
+                Err(e) => {
+                    println!("[Rust] ERROR: Could not open log file {:?}: {}", path, e);
+                    let _ = std::io::stdout().flush();
+                }
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
