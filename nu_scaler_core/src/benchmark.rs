@@ -1,4 +1,4 @@
-use crate::upscale::{Upscaler, UpscalingQuality, UpscalingTechnology, UpscalerFactory};
+use crate::upscale::{/*Upscaler,*/ UpscalingQuality, UpscalingTechnology, UpscalerFactory};
 use crate::gpu::detector::GpuDetector;
 use std::time::{Duration, Instant};
 use std::sync::Arc;
