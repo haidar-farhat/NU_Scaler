@@ -481,14 +481,28 @@ impl Drop for DlssUpscaler {
                 "[DLSS Upscaler] Dropping DlssUpscaler, destroying DLSS feature: {:?}",
                 feature_handle
             );
-            let status = unsafe { dlss_sys::slDestroyDlssFeature(feature_handle) };
-            if status != SlStatus::Success {
-                eprintln!(
-                    "[DLSS Upscaler] Error destroying DLSS feature {:?}: {:?}",
-                    feature_handle, status
-                );
+            // Call the wrapper function which returns a Result
+            match unsafe { dlss_sys::slDestroyDlssFeature(feature_handle) } {
+                Ok(SlStatus::Success) => {
+                    info!("DLSS feature handle {} destroyed successfully during drop.", feature_handle);
+                }
+                Ok(other_status) => {
+                    // Log error if destroy succeeded FFI-wise but returned an error status
+                    error!(
+                        "slDestroyDlssFeature succeeded but returned error status {:?} for handle {} during drop.",
+                        other_status, feature_handle
+                    );
+                }
+                Err(load_error) => {
+                    // Log error if symbol loading failed
+                    error!(
+                        "slDestroyDlssFeature symbol loading failed during drop: {:?}",
+                        load_error.0
+                    );
+                }
             }
         }
+        println!("[DLSS Upscaler] DlssUpscaler instance fields dropped.");
     }
 }
 
