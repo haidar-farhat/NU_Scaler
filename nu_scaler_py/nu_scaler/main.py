@@ -583,7 +583,7 @@ class LiveFeedScreen(QWidget):
                 return None
 
             self.upscaler_initialized = True
-            self.log_signal.emit(f"Upscaler '{self.upscaler.name()}' initialized ({in_w}x{in_h} -> {out_w}x{out_h})")
+            self.log_signal.emit(f"Upscaler '{self.upscaler.name}' initialized ({in_w}x{in_h} -> {out_w}x{out_h})")
             self._last_in_w = in_w
             self._last_in_h = in_h
             self._last_scale = scale
