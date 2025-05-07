@@ -65,47 +65,51 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
 
     // Use the required `new` method signature
     fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
-        Ok(Self {
-            frame_sender: Mutex::new(ctx.flags),
-        })
+        Ok(Self { frame_sender: Mutex::new(ctx.flags) })
     }
 
     fn on_frame_arrived(
         &mut self,
         frame: &mut Frame,
-        _capture_control: InternalCaptureControl,
-    ) -> Result<(), Self::Error> {
+        _capture_control: InternalCaptureControl
+    ) -> Result<(), Self::Error>
+    {
         let width = frame.width() as usize;
         let height = frame.height() as usize;
 
-        // --- WORKAROUND: Save to temp file and read back ---
+        // --- WORKAROUND REMOVED: Save to temp file and read back ---
+        println!("[CaptureHandler] Frame arrived ({}x{}). Skipping temp file write.", width, height);
+        // The following lines are commented out to disable file writing:
+        /*
         let temp_dir = std::env::temp_dir();
-        let unique_id = uuid::Uuid::new_v4();
+        let unique_id = uuid::Uuid::new_v4(); // Requires uuid crate dependency
         let mut temp_path = temp_dir;
         temp_path.push(format!("nu_scaler_frame_{}.bmp", unique_id));
 
-        frame
-            .save_as_image(&temp_path, windows_capture::frame::ImageFormat::Bmp)
-            .map_err(|e| Box::new(e) as Self::Error)?;
+        frame.save_as_image(&temp_path, windows_capture::frame::ImageFormat::Bmp)
+             .map_err(|e| Box::new(e) as Self::Error)?;
         let buffer = fs::read(&temp_path).map_err(|e| Box::new(e) as Self::Error)?;
         let _ = fs::remove_file(&temp_path); // Ignore remove error
-                                             // --- End WORKAROUND ---
-
+        
         // Send the frame data (read from BMP file)
         match self.frame_sender.lock() {
             Ok(sender) => {
                 if sender.send(Some((buffer, width, height))).is_err() {
-                    eprintln!(
-                        "[CaptureHandler] Receiver disconnected. Stopping capture implicitly."
-                    );
+                    eprintln!("[CaptureHandler] Receiver disconnected. Stopping capture implicitly.");
                 }
-            }
+            },
             Err(poison_error) => {
                 let msg = format!("Mutex poisoned: {}", poison_error);
                 eprintln!("[CaptureHandler] {}", msg);
                 return Err(Box::new(std::io::Error::new(ErrorKind::Other, msg)) as Self::Error);
             }
         }
+        */
+        // --- End WORKAROUND REMOVED ---
+
+        // Since the file write is skipped, we don't have a buffer to send.
+        // We will simply not send anything for this frame.
+
         Ok(())
     }
 
