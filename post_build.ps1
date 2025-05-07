@@ -1,4 +1,5 @@
-# PowerShell script to copy nu_scaler_core.pyd to venv site-packages
+# build_and_copy.ps1
+cargo build --release
 $source = "C:\Nu_Scaler\NU_Scaler\nu_scaler_core\target\release\nu_scaler_core.pyd"
 $dest = "C:\Nu_Scaler\NU_Scaler\.venv\Lib\site-packages\nu_scaler_core\"
 
