@@ -1,8 +1,11 @@
 [workspace]
 members = [
     "nu_scaler_core/dlss-sys",
+    "nu_scaler_core",
     # Add other crates in nu_scaler_core or directly in NU_Scaler here if they exist
 ]
 
 # Patch section removed as clang-sys is no longer a direct or transitive dependency
 # that needs overriding for dlss-sys.
+
+resolver = "2"
