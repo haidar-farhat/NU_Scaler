@@ -56,7 +56,11 @@ extern "C" {
 
 // --- From sl_consts.h ---
 
-pub const SL_INVALID_FLOAT: f32 = 3.40282346638528859811704183484516925440e+38f32;
+pub const SL_SDK_VERSION_MAJOR: u32 = 0;
+pub const SL_SDK_VERSION_MINOR: u32 = 3;
+pub const SL_SDK_VERSION_PATCH: u32 = 0;
+
+pub const SL_INVALID_FLOAT: f32 = 3.402_823_5e38_f32;
 pub const SL_INVALID_UINT: u32 = 0xffffffff;
 
 #[repr(C)]
@@ -69,8 +73,8 @@ pub struct SlFloat2 {
 impl Default for SlFloat2 {
     fn default() -> Self {
         Self {
-            x: SL_INVALID_FLOAT,
-            y: SL_INVALID_FLOAT,
+            x: 0.0,
+            y: 0.0,
         }
     }
 }
@@ -86,9 +90,9 @@ pub struct SlFloat3 {
 impl Default for SlFloat3 {
     fn default() -> Self {
         Self {
-            x: SL_INVALID_FLOAT,
-            y: SL_INVALID_FLOAT,
-            z: SL_INVALID_FLOAT,
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
         }
     }
 }
@@ -105,10 +109,10 @@ pub struct SlFloat4 {
 impl Default for SlFloat4 {
     fn default() -> Self {
         Self {
-            x: SL_INVALID_FLOAT,
-            y: SL_INVALID_FLOAT,
-            z: SL_INVALID_FLOAT,
-            w: SL_INVALID_FLOAT,
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+            w: 0.0,
         }
     }
 }
