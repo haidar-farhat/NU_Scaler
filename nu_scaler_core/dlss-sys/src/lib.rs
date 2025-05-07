@@ -271,13 +271,13 @@ fn load_streamline_api() -> Result<StreamlineApi, LoadError> {
 
         Ok(StreamlineApi {
             _lib: lib,
-            slInitializeSDK: std::mem::transmute(slInitializeSDK_sym_raw),
-            slShutdownSDK: std::mem::transmute(slShutdownSDK_sym_raw),
-            slIsFeatureSupported: std::mem::transmute(slIsFeatureSupported_sym_raw),
-            slCreateDlssFeature: std::mem::transmute(slCreateDlssFeature_sym_raw),
-            slEvaluateDlssFeature: std::mem::transmute(slEvaluateDlssFeature_sym_raw),
-            slDestroyDlssFeature: std::mem::transmute(slDestroyDlssFeature_sym_raw),
-            slDLSSSetOptions: std::mem::transmute(slDLSSSetOptions_sym_raw),
+            slInitializeSDK: std::mem::transmute::<Symbol<'_, FnSlInitializeSDK>, Symbol<'static, FnSlInitializeSDK>>(slInitializeSDK_sym_raw),
+            slShutdownSDK: std::mem::transmute::<Symbol<'_, FnSlShutdownSDK>, Symbol<'static, FnSlShutdownSDK>>(slShutdownSDK_sym_raw),
+            slIsFeatureSupported: std::mem::transmute::<Symbol<'_, FnSlIsFeatureSupported>, Symbol<'static, FnSlIsFeatureSupported>>(slIsFeatureSupported_sym_raw),
+            slCreateDlssFeature: std::mem::transmute::<Symbol<'_, FnSlCreateDlssFeature>, Symbol<'static, FnSlCreateDlssFeature>>(slCreateDlssFeature_sym_raw),
+            slEvaluateDlssFeature: std::mem::transmute::<Symbol<'_, FnSlEvaluateDlssFeature>, Symbol<'static, FnSlEvaluateDlssFeature>>(slEvaluateDlssFeature_sym_raw),
+            slDestroyDlssFeature: std::mem::transmute::<Symbol<'_, FnSlDestroyDlssFeature>, Symbol<'static, FnSlDestroyDlssFeature>>(slDestroyDlssFeature_sym_raw),
+            slDLSSSetOptions: std::mem::transmute::<Symbol<'_, FnSlDLSSSetOptions>, Symbol<'static, FnSlDLSSSetOptions>>(slDLSSSetOptions_sym_raw),
         })
     }
 }
