@@ -859,7 +859,7 @@ impl Upscaler for WgpuUpscaler {
 }
 
 // Helper function to robustly open a log file (append mode)
-fn open_log_file_robust() -> Option<BufWriter<File>> {
+fn _open_log_file_robust() -> Option<BufWriter<File>> {
     let log_dir = PathBuf::from("logs");
     if !log_dir.exists() {
         if let Err(e) = std::fs::create_dir_all(&log_dir) {
