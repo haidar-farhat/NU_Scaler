@@ -4,7 +4,8 @@ use std::path::PathBuf;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Only proceed if the specific environment variable is set
     if env::var("NU_SCALER_BUILD_FSR3").is_err() {
-        println!("cargo:warning=NU_SCALER_BUILD_FSR3 not set, skipping FSR3 SDK setup.");
+        println!("cargo:warning=NU_SCALER_BUILD_FSR3 not set, skipping FSR3 SDK setup and binding generation.");
+        // To ensure lib.rs compiles, we won't set the cfg flag
         return Ok(()); // Exit early, do nothing
     }
 
@@ -68,6 +69,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     bindings
         .write_to_file(out_path.join("fsr3_bindings.rs"))
         .expect("Couldn't write FSR3 bindings!");
+
+    // Signal that bindings were generated
+    println!("cargo:rustc-cfg=fsr3_bindings_generated");
 
     Ok(())
 }
