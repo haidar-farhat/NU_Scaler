@@ -738,7 +738,7 @@ class SettingsScreen(QWidget):
         self.scale_slider.setRange(10, 40)
         self.scale_slider.setValue(20)
         self.scale_label = QLabel("2.0×")
-        self.scale_slider.valueChanged.connect(lambda: self.scale_label.setText(f"{self.scale_slider.value()/10.0:.1f}×"))
+        self.scale_slider.valueChanged.connect(self.update_scale_label)
         self.scale_slider.setToolTip("Set the upscaling factor (1.0× to 4.0×).")
         self.method_box = QComboBox()
         self.method_box.addItems(["DLSS", "WGPU Nearest", "WGPU Bilinear"])
@@ -835,6 +835,9 @@ class SettingsScreen(QWidget):
     def stop_pipeline(self):
         if self.live_feed_screen:
             self.live_feed_screen.stop_capture()
+
+    def update_scale_label(self):
+        self.scale_label.setText(f"{self.scale_slider.value()/10.0:.1f}×")
 
 class DebugScreen(QWidget):
     def __init__(self):
