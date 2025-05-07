@@ -230,6 +230,19 @@ struct StreamlineApi {
 // Global static variable to hold the initialized API
 static SL_API: OnceLock<Result<StreamlineApi, LoadError>> = OnceLock::new();
 
+// Helper macro for loading symbols with detailed error messages
+macro_rules! load_sl_symbol {
+    ($lib:expr, $fn_type:ty, $name:expr) => {
+        $lib.get::<$fn_type>($name).map_err(|e| {
+            LoadError(format!(
+                "Failed to load symbol '{}': {}",
+                String::from_utf8_lossy($name).trim_end_matches('\0'), // Show clean name
+                e
+            ))
+        })?
+    };
+}
+
 // Function to load the library and symbols
 fn load_streamline_api() -> Result<StreamlineApi, LoadError> {
     unsafe {
@@ -240,34 +253,32 @@ fn load_streamline_api() -> Result<StreamlineApi, LoadError> {
             "libsl.interposer.so" // Example for Linux
         };
 
-        let lib = Library::new(dll_name)?;
+        let lib = Library::new(dll_name).map_err(|e| LoadError(format!("Failed to load library '{}': {}", dll_name, e)))?;
 
-        // Load symbols with their original lifetime first
-        let slInitializeSDK_sym = lib.get::<FnSlInitializeSDK>(b"slInitializeSDK\0")?;
-        let slShutdownSDK_sym = lib.get::<FnSlShutdownSDK>(b"slShutdownSDK\0")?;
-        let slIsFeatureSupported_sym = lib.get::<FnSlIsFeatureSupported>(b"slIsFeatureSupported\0")?;
-        let slCreateDlssFeature_sym = lib.get::<FnSlCreateDlssFeature>(b"slCreateDlssFeature\0")?;
-        let slEvaluateDlssFeature_sym = lib.get::<FnSlEvaluateDlssFeature>(b"slEvaluateDlssFeature\0")?;
-        let slDestroyDlssFeature_sym = lib.get::<FnSlDestroyDlssFeature>(b"slDestroyDlssFeature\0")?;
-        let slDLSSSetOptions_sym = lib.get::<FnSlDLSSSetOptions>(b"slDLSSSetOptions\0")?;
-        // Load other symbols here if needed
+        // Load symbols using the macro
+        let slInitializeSDK_sym_raw = load_sl_symbol!(lib, FnSlInitializeSDK, b"slInitializeSDK\0");
+        let slShutdownSDK_sym_raw = load_sl_symbol!(lib, FnSlShutdownSDK, b"slShutdownSDK\0");
+        let slIsFeatureSupported_sym_raw = load_sl_symbol!(lib, FnSlIsFeatureSupported, b"slIsFeatureSupported\0");
+        let slCreateDlssFeature_sym_raw = load_sl_symbol!(lib, FnSlCreateDlssFeature, b"slCreateDlssFeature\0");
+        let slEvaluateDlssFeature_sym_raw = load_sl_symbol!(lib, FnSlEvaluateDlssFeature, b"slEvaluateDlssFeature\0");
+        let slDestroyDlssFeature_sym_raw = load_sl_symbol!(lib, FnSlDestroyDlssFeature, b"slDestroyDlssFeature\0");
+        let slDLSSSetOptions_sym_raw = load_sl_symbol!(lib, FnSlDLSSSetOptions, b"slDLSSSetOptions\0");
+        
+        // The rest of the function that transmutes these to 'static lifetimes and stores them in StreamlineApi
+        // This part remains the same, but using the *_sym_raw variables.
+        // Example for one, repeat for all:
+        // let slInitializeSDK_sym = std::mem::transmute::<_, Symbol<'static, FnSlInitializeSDK>>(slInitializeSDK_sym_raw);
 
-        // Create the struct, transmuting the lifetime of the symbols to 'static.
-        // This is safe because we store `lib` within the struct, ensuring it lives long enough.
-        let api = StreamlineApi {
-            slInitializeSDK: std::mem::transmute::<Symbol<'_, FnSlInitializeSDK>, Symbol<'static, FnSlInitializeSDK>>(slInitializeSDK_sym),
-            slShutdownSDK: std::mem::transmute::<Symbol<'_, FnSlShutdownSDK>, Symbol<'static, FnSlShutdownSDK>>(slShutdownSDK_sym),
-            slIsFeatureSupported: std::mem::transmute::<Symbol<'_, FnSlIsFeatureSupported>, Symbol<'static, FnSlIsFeatureSupported>>(slIsFeatureSupported_sym),
-            slCreateDlssFeature: std::mem::transmute::<Symbol<'_, FnSlCreateDlssFeature>, Symbol<'static, FnSlCreateDlssFeature>>(slCreateDlssFeature_sym),
-            slEvaluateDlssFeature: std::mem::transmute::<Symbol<'_, FnSlEvaluateDlssFeature>, Symbol<'static, FnSlEvaluateDlssFeature>>(slEvaluateDlssFeature_sym),
-            slDestroyDlssFeature: std::mem::transmute::<Symbol<'_, FnSlDestroyDlssFeature>, Symbol<'static, FnSlDestroyDlssFeature>>(slDestroyDlssFeature_sym),
-            slDLSSSetOptions: std::mem::transmute::<Symbol<'_, FnSlDLSSSetOptions>, Symbol<'static, FnSlDLSSSetOptions>>(slDLSSSetOptions_sym),
-            // Transmute other symbols here
-            _lib: lib, // Keep the library loaded
-        };
-        // No longer need the transmute on the whole struct
-        // Ok(std::mem::transmute::<StreamlineApi, StreamlineApi>(api))
-        Ok(api)
+        Ok(StreamlineApi {
+            _lib: lib,
+            slInitializeSDK: std::mem::transmute(slInitializeSDK_sym_raw),
+            slShutdownSDK: std::mem::transmute(slShutdownSDK_sym_raw),
+            slIsFeatureSupported: std::mem::transmute(slIsFeatureSupported_sym_raw),
+            slCreateDlssFeature: std::mem::transmute(slCreateDlssFeature_sym_raw),
+            slEvaluateDlssFeature: std::mem::transmute(slEvaluateDlssFeature_sym_raw),
+            slDestroyDlssFeature: std::mem::transmute(slDestroyDlssFeature_sym_raw),
+            slDLSSSetOptions: std::mem::transmute(slDLSSSetOptions_sym_raw),
+        })
     }
 }
 
