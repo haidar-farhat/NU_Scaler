@@ -97,15 +97,13 @@ impl GpuResources {
     /// and within the lifetime of the WGPU device.
     /// The underlying WGPU instance and device must remain alive while this handle is in use.
     pub unsafe fn get_native_device_handle(&self) -> Result<*mut std::ffi::c_void, GpuError> {
-        /* // Add comment start
         #[cfg(target_os = "windows")]
         {
             use wgpu::hal::dx12::Api as Dx12Api;
-            use windows::core::Interface;
-            let native_handle_opt: Option<*mut std::ffi::c_void> = 
+            use windows::core::Interface; // Required for as_raw()
+            let native_handle_opt: Option<*mut std::ffi::c_void> =
                 self.device.as_hal::<Dx12Api, _, _>(|hal_device_opt| {
-                    // Clone ComPtr before calling as_raw()
-                    hal_device_opt.map(|d| d.raw_device().clone().as_raw().cast::<c_void>())
+                    hal_device_opt.map(|d| d.raw_device().clone().as_raw() as *mut std::ffi::c_void)
                 });
 
             if let Some(handle) = native_handle_opt {
@@ -113,8 +111,8 @@ impl GpuResources {
                     return Ok(handle);
                 }
             }
+            // If native_handle_opt was None or handle was null, fall through to error or other backends
         }
-        */ // Add comment end
 
         #[cfg(target_os = "linux")]
         {
@@ -140,16 +138,14 @@ impl GpuResources {
     /// and within the lifetime of the WGPU texture and device.
     /// The underlying WGPU instance, device, and texture must remain alive while this handle is in use.
     pub unsafe fn get_native_texture_handle(&self, _texture: &wgpu::Texture) -> Result<*mut std::ffi::c_void, GpuError> {
-        /* // Add comment start
         #[cfg(target_os = "windows")]
         {
             use wgpu::hal::dx12::Api as Dx12Api;
-            use windows::core::Interface;
+            use windows::core::Interface; // Required for as_raw()
             let mut native_handle_opt: Option<*mut std::ffi::c_void> = None;
-            texture.as_hal::<Dx12Api, _>(|hal_texture_opt| {
+            _texture.as_hal::<Dx12Api, _>(|hal_texture_opt| {
                 if let Some(ht) = hal_texture_opt {
-                    // Use raw_resource(), clone ComPtr, then as_raw()
-                    native_handle_opt = Some(ht.raw_resource().clone().as_raw().cast::<c_void>());
+                    native_handle_opt = Some(ht.raw_resource().clone().as_raw() as *mut std::ffi::c_void);
                 }
             });
             if let Some(handle) = native_handle_opt {
@@ -157,8 +153,8 @@ impl GpuResources {
                     return Ok(handle);
                 }
             }
+            // If native_handle_opt was None or handle was null, fall through to error or other backends
         }
-        */ // Add comment end
 
         #[cfg(target_os = "linux")]
         {
