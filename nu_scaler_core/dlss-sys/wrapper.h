@@ -25,4 +25,16 @@
     #include "stub/nvsdk_ngx_params.h"
 #endif
 
+// This wrapper header includes the necessary NVIDIA DLSS SDK headers.
+// Bindgen will process this file.
+
+// Replace with the actual main header file from the DLSS SDK
+// For example, if the main header is nvsdk_ngx.h:
+#include "nvsdk_ngx.h"
+
+// You might need to include other specific headers if the main one doesn't cover everything
+// #include "nvsdk_ngx_defs.h"
+// #include "nvsdk_ngx_params.h"
+// #include "nvsdk_ngx_helpers.h"
+
 #endif // DLSS_WRAPPER_H 
