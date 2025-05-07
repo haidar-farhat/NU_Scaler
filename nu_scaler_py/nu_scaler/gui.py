@@ -72,7 +72,7 @@ class MainWindow(QMainWindow):
         self.quality_box.setCurrentText("quality")
 
         self.algorithm_box = QComboBox()
-        self.algorithm_box.addItems(["nearest", "bilinear"])
+        self.algorithm_box.addItems(["nearest", "bilinear", "DLSS"])
         self.algorithm_box.setCurrentText("nearest")
 
         self.input_w = QSpinBox()
@@ -222,8 +222,28 @@ class MainWindow(QMainWindow):
         algorithm = self.algorithm_box.currentText()
         out_w = self.output_w.value()
         out_h = self.output_h.value()
-        self.game_upscaler = PyWgpuUpscaler(quality, algorithm)
-        # We'll get input size from the first frame
+        
+        try:
+            if algorithm == "DLSS":
+                if not hasattr(nu_scaler_core, 'PyDlssUpscaler'):
+                    QMessageBox.critical(self, "Upscaler Error", "PyDlssUpscaler not found. Ensure DLSS is supported.")
+                    self.stop_game_capture()
+                    return
+                self.game_upscaler = nu_scaler_core.PyDlssUpscaler(quality=quality)
+            else:
+                if not hasattr(nu_scaler_core, 'PyWgpuUpscaler'):
+                    QMessageBox.critical(self, "Upscaler Error", "PyWgpuUpscaler not found.")
+                    self.stop_game_capture()
+                    return
+                self.game_upscaler = nu_scaler_core.PyWgpuUpscaler(quality=quality, algorithm=algorithm)
+            # Note: Initialization of game_upscaler (with input/output sizes) will happen in update_game_frame 
+            # once the first frame is received and its dimensions are known.
+        except Exception as e:
+            QMessageBox.critical(self, "Upscaler Init Error", f"Failed to create upscaler: {str(e)}")
+            self.stop_game_capture()
+            print("[gui.py] start_game_capture END (Upscaler Exception)")
+            return
+
         self.game_status.setText("Status: Running")
         self.game_timer = QTimer()
         self.game_timer.timeout.connect(lambda: self.update_game_frame(out_w, out_h))
@@ -398,9 +418,20 @@ class MainWindow(QMainWindow):
         in_h = self.input_h.value()
         out_w = self.output_w.value()
         out_h = self.output_h.value()
+        
         # Prepare upscaler
         try:
-            self.upscaler = nu_scaler_core.PyWgpuUpscaler(quality, algorithm)
+            if algorithm == "DLSS":
+                if not hasattr(nu_scaler_core, 'PyDlssUpscaler'):
+                    QMessageBox.critical(self, "Upscaler Error", "PyDlssUpscaler not found in nu_scaler_core. Is DLSS supported and enabled in your build?")
+                    return
+                self.upscaler = nu_scaler_core.PyDlssUpscaler(quality=quality)
+            else:
+                if not hasattr(nu_scaler_core, 'PyWgpuUpscaler'):
+                    QMessageBox.critical(self, "Upscaler Error", "PyWgpuUpscaler not found in nu_scaler_core.")
+                    return
+                self.upscaler = nu_scaler_core.PyWgpuUpscaler(quality=quality, algorithm=algorithm)
+            
             self.upscaler.initialize(in_w, in_h, out_w, out_h)
         except Exception as e:
             QMessageBox.critical(self, "Upscaler Error", str(e))
