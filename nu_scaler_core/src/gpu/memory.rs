@@ -1,9 +1,10 @@
 use std::sync::{Arc, Mutex, atomic::{AtomicUsize, Ordering}};
 use anyhow::Result;
-use wgpu::{Device, Queue, Buffer, BufferDescriptor, BufferUsages, CommandEncoderDescriptor, Maintain};
+use wgpu::{Device, Queue, Buffer, BufferDescriptor, BufferUsages, CommandEncoderDescriptor};
 use crate::gpu::detector::{GpuInfo, GpuVendor};
 use std::collections::HashMap;
 use std::time::{Instant, Duration};
+use pyo3::prelude::*;
 
 /// VRAM usage statistics
 #[derive(Debug, Clone)]
@@ -697,7 +698,7 @@ impl Drop for MemoryPool {
 
 /// Python-friendly memory stats
 #[cfg(feature = "python")]
-#[pyo3::pyclass]
+#[pyclass]
 pub struct PyVramStats {
     #[pyo3(get)]
     pub total_mb: f32,

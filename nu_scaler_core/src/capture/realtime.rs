@@ -1,13 +1,13 @@
-use anyhow::{Result, anyhow};
-// use image::ImageFormat; // Keep, used in workaround -> Marked as unused, remove for now
-use scrap::{Capturer, Display, Frame as ScrapFrame};
+use anyhow::{Result/*, anyhow*/};
+// use image::ImageFormat;
+use scrap::{Capturer, Display/*, Frame as ScrapFrame*/};
 use std::io::ErrorKind;
-use std::sync::mpsc; // For sending frames from callback
+use std::sync::mpsc; // Keep
 use std::sync::Mutex;
 use std::thread;
-use std::sync::mpsc::{Receiver, Sender};
-use std::fs; // Added
-use uuid::Uuid; // Added
+// use std::sync::mpsc::{Receiver, Sender}; // Remove unused Receiver, Sender (mpsc itself covers usage)
+use std::fs;
+// use uuid::Uuid; // Remove unused Uuid
 
 // Windows API imports (needed for list_windows)
 // use windows::core::{Error, Result as WindowsResult}; // Unused
@@ -16,19 +16,19 @@ use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowTextW, IsWin
 
 // windows-capture integration (v1.4)
 use windows_capture::capture::{GraphicsCaptureApiHandler, Context};
-use windows_capture::frame::Frame; // Corrected: FrameBuffer removed
+use windows_capture::frame::Frame;
 use windows_capture::graphics_capture_api::InternalCaptureControl;
-use windows_capture::settings::{Settings, ColorFormat, CursorCaptureSettings, DrawBorderSettings}; // Corrected import
+use windows_capture::settings::{Settings, ColorFormat, CursorCaptureSettings, DrawBorderSettings};
 use windows_capture::window::Window;
 
+/* // Remove block of unused windows imports
 use windows::Graphics::Capture::{
     Direct3D11CaptureFramePool, // Marked as unused by cargo check
     GraphicsCaptureItem,        // Marked as unused by cargo check
 };
 use windows::Win32::Graphics::Direct3D11::{ID3D11Texture2D}; // Marked as unused
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM; // Marked as unused
-// use windows_capture::frame::{Frame, FrameBuffer/*, ImageFormat as CaptureImageFormat*/}; // Unused FrameBuffer
-// use windows_capture::settings::{WindowsCaptureSettings}; // Original problematic import
+*/
 
 #[derive(Debug, Clone)]
 pub enum CaptureTarget {
