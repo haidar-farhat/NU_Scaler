@@ -1,11 +1,12 @@
 use anyhow::{anyhow, Result};
 use std::ffi::c_void;
 use std::sync::Arc;
+use log::{debug, error, info};
 
 use crate::dlss_manager::{self /*, DlssManagerError*/}; // Removed unused DlssManagerError
 use crate::gpu::GpuResources; // Removed unused GpuProvider
 use crate::upscale::{Upscaler, UpscalingQuality};
-use dlss_sys::{self, SlBoolean, SlDLSSMode, SlDLSSOptions, SlDlssFeature, SlStatus}; // Changed crate::dlss_sys to dlss_sys
+use dlss_sys::{self, SlBool, SlDLSSMode, SlDLSSOptions, SlDlssFeature, SlStatus}; // Changed crate::dlss_sys to dlss_sys
  // For create_buffer_init
 
 pub struct DlssUpscaler {
