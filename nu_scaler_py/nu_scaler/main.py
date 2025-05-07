@@ -286,7 +286,22 @@ class LiveFeedScreen(QWidget):
         upscale_controls = QGroupBox("Upscaling Settings")
         upscale_form = QFormLayout(upscale_controls)
         self.technology_box = QComboBox()
-        self.technology_box.addItems(["Auto (Best for GPU)", "FSR 3.0", "DLSS", "Basic"])
+        # Ensure options match available Rust implementations
+        available_techs = []
+        if hasattr(nu_scaler_core, 'PyWgpuUpscaler') or hasattr(nu_scaler_core, 'PyAdvancedWgpuUpscaler'):
+            available_techs.append("WGPU")
+        if hasattr(nu_scaler_core, 'PyDlssUpscaler'):
+            available_techs.append("DLSS")
+        # Add other techs like FSR here if/when implemented
+        # available_techs.append("FSR (Not Impl.)") 
+        
+        self.technology_box.addItems(available_techs)
+        if "WGPU" in available_techs:
+             self.technology_box.setCurrentText("WGPU") # Default to WGPU if available
+        elif "DLSS" in available_techs:
+             self.technology_box.setCurrentText("DLSS")
+
+        self.technology_box.currentTextChanged.connect(self.update_technology_ui)
         self.quality_box = QComboBox()
         self.quality_box.addItems(["ultra", "quality", "balanced", "performance"])
         self.algorithm_box = QComboBox()
@@ -543,43 +558,90 @@ class LiveFeedScreen(QWidget):
             print(f"Error updating memory stats: {e}")
     
     def init_upscaler(self, in_w, in_h, scale):
-        """
-        Initialize the upscaler with the given dimensions and scale factor.
-        """
-        print("[GUI] Initializing upscaler...")
+        """Create and initialize the appropriate upscaler based on settings."""
+        if not nu_scaler_core:
+            self.log_signal.emit("Error: nu_scaler_core not loaded.")
+            return None
+
+        self.log_signal.emit(f"Attempting to initialize upscaler for {in_w}x{in_h} -> scale {scale:.1f}x")
+        self.upscaler_initialized = False
         out_w = int(in_w * scale)
         out_h = int(in_h * scale)
-        
-        # First check if Rust core is available
-        if nu_scaler_core is None:
-            print("[GUI] Rust core not available, using dummy upscaler")
-            self.upscaler = DummyUpscaler()
-        else:
-            # Use advanced upscaler if available
-            if hasattr(nu_scaler_core, 'create_advanced_upscaler'):
-                quality = self.quality_box.currentText().lower()
-                self.upscaler = nu_scaler_core.create_advanced_upscaler(quality)
-                print(f"[GUI] Created advanced upscaler with quality: {quality}")
-            else:
-                # Fall back to regular upscaler
-                print(f"[GUI] Created regular upscaler")
-                self.upscaler = nu_scaler_core.PyWgpuUpscaler("quality", "bilinear")
-                
-        # Force GPU activation to maximize performance
-        if hasattr(nu_scaler_core, 'PyAdvancedWgpuUpscaler') and isinstance(self.upscaler, nu_scaler_core.PyAdvancedWgpuUpscaler):
-            print("[GUI] Forcing GPU activation for better performance...")
-            force_gpu_activation(self.upscaler)
-                
-        # Initialize the upscaler
-        self.upscaler.initialize(in_w, in_h, out_w, out_h)
-        # Don't try to call set_upscale_scale which doesn't exist
-        # Instead, just note that the upscaler scale is set during initialization
-        # based on the dimensions
-        print(f"Upscaler scale factor: {self.upscaler.upscale_scale}")
+
+        # Get selected quality and technology
+        quality = self.quality_box.currentText()
+        technology = self.technology_box.currentText() # Use the technology dropdown
+
+        try:
+            # --- Select Upscaler based on technology ---
+            if technology == "DLSS":
+                if hasattr(nu_scaler_core, 'PyDlssUpscaler'):
+                    print(f"[PYTHON INFO] Creating PyDlssUpscaler (Quality: {quality})")
+                    self.log_signal.emit(f"Creating DLSS Upscaler (Quality: {quality})")
+                    self.upscaler = nu_scaler_core.PyDlssUpscaler(quality)
+                    # DLSS uses specific render resolutions based on quality, initialize handles that
+                    # Note: PyDlssUpscaler's initialize should handle the input/output mapping
+                    print(f"[PYTHON INFO] Initializing DLSS Upscaler ({in_w}x{in_h} -> {out_w}x{out_h})")
+                    self.upscaler.initialize(in_w, in_h, out_w, out_h) 
+                    print("[PYTHON INFO] DLSS Upscaler Initialized.")
+                    self.advanced_upscaling = False # DLSS implies specific handling
+                else:
+                    self.log_signal.emit("Error: PyDlssUpscaler not found in nu_scaler_core.")
+                    return None
+
+            elif technology == "WGPU":
+                if self.advanced_upscaling:
+                    if hasattr(nu_scaler_core, 'PyAdvancedWgpuUpscaler'):
+                        self.log_signal.emit(f"[PYTHON INFO] Creating Advanced WGPU Upscaler (Quality: {quality})")
+                        # Assuming 'bilinear' is a reasonable default algo for advanced
+                        self.upscaler = nu_scaler_core.PyAdvancedWgpuUpscaler(quality, "bilinear", True)
+                        # optimize_upscaler(self.upscaler) # Potentially optimize advanced upscaler
+                        force_gpu_activation(self.upscaler) # Force activation for advanced
+                    else:
+                         self.log_signal.emit("[PYTHON INFO] Error: PyAdvancedWgpuUpscaler not found, falling back.")
+                         self.upscaler = nu_scaler_core.PyWgpuUpscaler(quality, "bilinear") # Fallback
+                         self.advanced_upscaling = False
+                else:
+                    if hasattr(nu_scaler_core, 'PyWgpuUpscaler'):
+                        self.log_signal.emit(f"[PYTHON INFO] Creating Basic WGPU Upscaler (Quality: {quality})")
+                        # Assuming 'bilinear' is a reasonable default algo for basic
+                        self.upscaler = nu_scaler_core.PyWgpuUpscaler(quality, "bilinear")
+                    else:
+                         self.log_signal.emit("Error: PyWgpuUpscaler not found in nu_scaler_core.")
+                         return None
+
+                # Initialize WGPU upscaler
+                print(f"[PYTHON INFO] Initializing WGPU Upscaler ({in_w}x{in_h} -> {out_w}x{out_h})")
+                self.upscaler.initialize(in_w, in_h, out_w, out_h)
+                print("[PYTHON INFO] WGPU Upscaler Initialized.")
             
-        self.upscaler_initialized = True
-        self.upscale_scale = scale
-        return True
+            # elif technology == "FSR (Not Impl.)":
+            #     self.log_signal.emit("FSR Upscaler not implemented yet.")
+            #     return None # Or create a placeholder/fallback?
+            
+            else:
+                self.log_signal.emit(f"Error: Unknown upscaling technology selected: {technology}")
+                return None
+            # --- End Upscaler Selection ---
+
+            self.upscaler_initialized = True
+            self.log_signal.emit(f"Upscaler '{self.upscaler.name()}' initialized ({in_w}x{in_h} -> {out_w}x{out_h})")
+            # Store current settings to avoid re-initialization if unchanged
+            self._last_in_w = in_w
+            self._last_in_h = in_h
+            self._last_scale = scale
+            self._last_quality = quality
+            self._last_technology = technology
+            return self.upscaler
+
+        except Exception as e:
+            error_msg = f"Error initializing upscaler ({technology}, {quality}): {e}"
+            print(error_msg)
+            traceback.print_exc()
+            self.log_signal.emit(error_msg)
+            self.upscaler = None
+            self.upscaler_initialized = False
+            return None
 
     def update_frame(self):
         try:
