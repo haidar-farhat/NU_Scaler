@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
+name = "nu_scaler"
 crate-type = ["cdylib", "rlib"]
 
 [features]
