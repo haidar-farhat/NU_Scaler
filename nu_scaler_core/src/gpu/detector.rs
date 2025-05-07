@@ -1,5 +1,5 @@
 use anyhow::Result;
-use wgpu::{Adapter, AdapterInfo, Backends, Instance, DeviceType, Backend};
+use wgpu::{Adapter, AdapterInfo, Backends, Instance, DeviceType};
 use std::sync::Arc;
 use pyo3::prelude::*;
 

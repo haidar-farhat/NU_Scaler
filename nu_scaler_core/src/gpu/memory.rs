@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex, atomic::{AtomicUsize, Ordering}};
-use anyhow::{Result, anyhow};
-use wgpu::{Device, Queue, Buffer, BufferDescriptor, BufferUsages, CommandEncoderDescriptor};
+use anyhow::Result;
+use wgpu::{Device, Queue, Buffer, BufferDescriptor, BufferUsages, CommandEncoderDescriptor, Maintain};
 use crate::gpu::detector::{GpuInfo, GpuVendor};
 use std::collections::HashMap;
 use std::time::{Instant, Duration};
