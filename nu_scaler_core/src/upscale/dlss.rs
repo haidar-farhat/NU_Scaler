@@ -54,10 +54,12 @@ impl DlssUpscaler {
         target_output_height: u32,
     ) -> (SlDLSSMode, u32, u32) {
         let mode = match quality {
-            UpscalingQuality::Ultra => SlDLSSMode::UltraQuality, // Assuming UltraQuality is preferred over DLAA for upscaling
+            UpscalingQuality::UltraPerformance => SlDLSSMode::UltraPerformance,
+            UpscalingQuality::Ultra => SlDLSSMode::UltraQuality,
             UpscalingQuality::Quality => SlDLSSMode::MaxQuality,
             UpscalingQuality::Balanced => SlDLSSMode::Balanced,
             UpscalingQuality::Performance => SlDLSSMode::MaxPerformance,
+            UpscalingQuality::Native => SlDLSSMode::DLAA,
         };
 
         // These are example ratios, refer to NVIDIA's guidelines for precise values per mode
@@ -68,7 +70,7 @@ impl DlssUpscaler {
             SlDLSSMode::MaxPerformance => (0.50, 0.50),    // e.g., 50%
             SlDLSSMode::UltraPerformance => (1.0/3.0, 1.0/3.0), // e.g., 33.3%
             SlDLSSMode::DLAA => (1.0, 1.0), // DLAA renders at native resolution
-            _ => (1.0, 1.0), // Default or Off, render at native
+            SlDLSSMode::Off => (1.0, 1.0), // Off, render at native
         };
 
         let render_width = (target_output_width as f32 * render_width_ratio).round() as u32;
