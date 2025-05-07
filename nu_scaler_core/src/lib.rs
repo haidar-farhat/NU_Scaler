@@ -772,6 +772,9 @@ fn nu_scaler_core(_py: Python, m: &PyModule) -> PyResult<()> {
     // Register advanced upscaler
     m.add_class::<PyAdvancedWgpuUpscaler>()?;
 
+    // Register DLSS upscaler class so it is visible to Python
+    m.add_class::<PyDlssUpscaler>()?;
+
     // Add memory-managed upscaler factory function
     m.add_function(wrap_pyfunction!(create_advanced_upscaler, m)?)?;
 
