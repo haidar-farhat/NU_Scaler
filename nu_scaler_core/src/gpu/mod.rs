@@ -101,19 +101,17 @@ impl GpuResources {
         // if you only want to compile support for specific backends.
         // use wgpu::hal::Device as HalDevice; // Removed unused import
         // Assuming Dx12 and Vulkan are the primary targets. Add others as needed.
-        #[cfg(feature = "dx12")]
+        #[cfg(target_os = "windows")]
         {
+            use wgpu::hal::dx12::Api as Dx12Api; // Import specific API
             if let Some(raw_device_handle) = self.device.as_hal::<Dx12Api>().raw_device() {
-                // For ID3D12Device, this should directly be the pointer.
-                // Ensure the type conversion is correct for your specific HAL version/needs.
                 return Ok(raw_device_handle as *mut std::ffi::c_void);
             }
         }
 
-        #[cfg(feature = "vulkan")]
+        #[cfg(target_os = "linux")]
         {
-             // For Vulkan, `raw_device()` returns `ash::vk::Device` which is a newtype around `vk::VkDevice_T*`
-             // We need to get the actual pointer.
+            use wgpu::hal::vulkan::Api as VulkanApi; // Import specific API
             if let Some(vk_device) = self.device.as_hal::<VulkanApi>().raw_device() {
                  return Ok(vk_device.handle() as *mut std::ffi::c_void);
             }
@@ -131,20 +129,18 @@ impl GpuResources {
     /// The underlying WGPU instance, device, and texture must remain alive while this handle is in use.
     pub unsafe fn get_native_texture_handle(&self, texture: &wgpu::Texture) -> Result<*mut std::ffi::c_void, GpuError> {
         // Use as_hal directly on the texture object, no separate HAL Texture trait import needed.
-        #[cfg(feature = "dx12")] // WARNING: This cfg flag might not work as intended
-        use wgpu::hal::dx12::Api as Dx12Api;
-        #[cfg(feature = "vulkan")] // WARNING: This cfg flag might not work as intended
-        use wgpu::hal::vulkan::Api as VulkanApi;
-
-        #[cfg(feature = "dx12")] // WARNING: This cfg flag might not work as intended
+        
+        #[cfg(target_os = "windows")]
         {
+            use wgpu::hal::dx12::Api as Dx12Api;
             if let Some(raw_texture_handle) = texture.as_hal::<Dx12Api>().raw_texture() {
                  return Ok(raw_texture_handle as *mut std::ffi::c_void);
             }
         }
 
-        #[cfg(feature = "vulkan")] // WARNING: This cfg flag might not work as intended
+        #[cfg(target_os = "linux")]
         {
+            use wgpu::hal::vulkan::Api as VulkanApi;
             if let Some(vk_image) = texture.as_hal::<VulkanApi>().raw_texture() {
                 return Ok(vk_image as *mut std::ffi::c_void); 
             }
