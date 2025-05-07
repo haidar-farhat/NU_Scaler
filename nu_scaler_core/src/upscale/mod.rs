@@ -536,8 +536,10 @@ impl WgpuUpscaler {
     
     // Initialize buffers, pipeline, etc.
     fn initialize_with_resources(&mut self, input_width: u32, input_height: u32, output_width: u32, output_height: u32) -> Result<()> {
+        // Get the device reference *before* modifying self fields
         let device = self.device().ok_or_else(|| anyhow!("WGPU device not available for initialization"))?;
         
+        // Now update self fields
         self.input_width = input_width;
         self.input_height = input_height;
         self.output_width = output_width;
@@ -547,12 +549,14 @@ impl WgpuUpscaler {
         let output_buffer_size = (output_width * output_height * 4) as u64;
         
         // Create or re-create shader module if not already done or if algorithm changed
+        // Use the previously obtained `device` reference here
         if self.shader.is_none() { // Also consider if algorithm changed
             self.shader = Some(self.load_shader_module(device));
         }
         let shader = self.shader.as_ref().unwrap();
         
         // Create bind group layout if not already done or if it needs to change
+        // Use the previously obtained `device` reference here
         if self.bind_group_layout.is_none() {
             self.bind_group_layout = Some(device.create_bind_group_layout(&BindGroupLayoutDescriptor {
                 label: Some("Upscale Bind Group Layout"),
