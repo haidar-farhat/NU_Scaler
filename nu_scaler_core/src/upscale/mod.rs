@@ -15,7 +15,7 @@ use std::path::PathBuf;
 // Add new module declarations
 #[cfg(feature = "fsr3")]
 mod fsr;
-mod dlss;
+pub mod dlss;
 
 // Re-export the new implementations
 #[cfg(feature = "fsr3")]
