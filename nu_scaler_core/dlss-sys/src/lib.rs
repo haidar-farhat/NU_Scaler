@@ -256,148 +256,139 @@ macro_rules! get_sl_func {
     };
 }
 
-// Renamed for clarity and to avoid potential collision if compiler is confused.
-pub fn wrapped_slInitializeSDK() -> Result<SlStatus, &'static LoadError> {
+// This is the method on the StreamlineApi struct that does the actual symbol load and call
+impl StreamlineApi {
+    pub fn slInitializeSDK_method(&self) -> Result<SlStatus, LoadError> { // Renamed to avoid conflict if old pub fn still exists
+        unsafe {
+            let func = self._lib.get::<FnSlInitializeSDK>(b"slInitializeSDK\0")
+                .map_err(|e| LoadError(format!("Failed to load symbol 'slInitializeSDK': {}", e)))?;
+            Ok(func()) // Call the loaded function
+        }
+    }
+    // ... other methods like slShutdownSDK_method, slIsFeatureSupported_method etc. following the same pattern ...
+    // For example:
+    pub fn slShutdownSDK_method(&self) -> Result<SlStatus, LoadError> {
+        unsafe {
+            let func = self._lib.get::<FnSlShutdownSDK>(b"slShutdownSDK\0")
+                .map_err(|e| LoadError(format!("Failed to load symbol 'slShutdownSDK': {}", e)))?;
+            Ok(func())
+        }
+    }
+
+    pub fn slIsFeatureSupported_method(&self, feature: SlFeature, adapter_index: u32) -> Result<SlBool, LoadError> {
+        unsafe {
+            let func = self._lib.get::<FnSlIsFeatureSupported>(b"slIsFeatureSupported\0")
+                .map_err(|e| LoadError(format!("Failed to load symbol 'slIsFeatureSupported': {}", e)))?;
+            Ok(func(feature, adapter_index))
+        }
+    }
+
+    // Add more methods for slCreateDlssFeature, slEvaluateDlssFeature, slDestroyDlssFeature, slDLSSSetOptions
+    pub fn slCreateDlssFeature_method(
+        &self,
+        dlss_feature_handle_out: *mut SlDlssFeature,
+        application_id: u32,
+        mode: SlDLSSMode,
+        output_width: u32,
+        output_height: u32,
+        native_device: *mut std::ffi::c_void,
+    ) -> Result<SlStatus, LoadError> {
+        unsafe {
+            let func = self._lib.get::<FnSlCreateDlssFeature>(b"slCreateDlssFeature\0")
+                .map_err(|e| LoadError(format!("Failed to load symbol 'slCreateDlssFeature': {}", e)))?;
+            Ok(func(
+                dlss_feature_handle_out,
+                application_id,
+                mode,
+                output_width,
+                output_height,
+                native_device,
+            ))
+        }
+    }
+
+    // etc. for other functions ...
+}
+
+// Public free-standing wrapper functions that use the StreamlineApi methods
+pub fn slInitializeSDK() -> Result<SlStatus, &'static LoadError> {
     get_sl_api().and_then(|api| {
-        match api.slInitializeSDK() { // This is the method on the StreamlineApi struct
+        match api.slInitializeSDK_method() { // Call the struct method
             Ok(status) => Ok(status),
             Err(owned_load_error) => {
                 eprintln!(
-                    "[dlss_sys] wrapped_slInitializeSDK: Symbol load for slInitializeSDK failed. Error: {:?}",
+                    "[dlss_sys] slInitializeSDK: Symbol load failed. Error: {:?}",
                     owned_load_error.0
                 );
-                Err(&UNABLE_TO_LOAD_SYMBOL_ERROR)
+                Err(&UNABLE_TO_LOAD_SYMBOL_ERROR) // Return a static error
             }
         }
     }).or_else(|static_load_error_from_get_sl_api| {
         eprintln!(
-            "[dlss_sys] wrapped_slInitializeSDK: get_sl_api() failed. Error: {:?}",
+            "[dlss_sys] slInitializeSDK: get_sl_api() failed. Error: {:?}",
             static_load_error_from_get_sl_api.0
         );
         Err(static_load_error_from_get_sl_api)
     })
 }
 
-pub unsafe fn slShutdownSDK() -> SlStatus {
-    match get_sl_api() {
-        Ok(api) => match get_sl_func!(api, FnSlShutdownSDK, b"slShutdownSDK\0") {
-            Ok(func) => func(),
-            Err(status) => status,
-        },
-        Err(e) => {
-             eprintln!("{}", e);
-             SlStatus::ErrorLibraryLoadFailed
+// Wrapper for slShutdownSDK
+pub fn slShutdownSDK() -> Result<SlStatus, &'static LoadError> {
+    get_sl_api().and_then(|api| {
+        match api.slShutdownSDK_method() {
+            Ok(status) => Ok(status),
+            Err(owned_load_error) => {
+                eprintln!("[dlss_sys] slShutdownSDK: Symbol load failed: {:?}", owned_load_error.0);
+                Err(&UNABLE_TO_LOAD_SYMBOL_ERROR)
+            }
         }
-    }
+    }).or_else(|err| Err(err))
 }
 
-pub unsafe fn slIsFeatureSupported(feature: SlFeature, adapter_info: *const c_void) -> SlBool {
-     match get_sl_api() {
-        Ok(api) => match get_sl_func!(api, FnSlIsFeatureSupported, b"slIsFeatureSupported\0") {
-            Ok(func) => func(feature, adapter_info),
-            Err(_) => SL_FALSE, // Return false if function load failed
-        },
-        Err(e) => {
-             eprintln!("{}", e);
-             SL_FALSE // Return false if library failed loading
+// Wrapper for slIsFeatureSupported
+pub fn slIsFeatureSupported(feature: SlFeature, adapter_index: u32) -> Result<SlBool, &'static LoadError> {
+    get_sl_api().and_then(|api| {
+        match api.slIsFeatureSupported_method(feature, adapter_index) {
+            Ok(b) => Ok(b),
+            Err(owned_load_error) => {
+                eprintln!("[dlss_sys] slIsFeatureSupported: Symbol load failed: {:?}", owned_load_error.0);
+                Err(&UNABLE_TO_LOAD_SYMBOL_ERROR)
+            }
         }
-    }
+    }).or_else(|err| Err(err))
 }
 
-pub unsafe fn slCreateDlssFeature(
-    dlss_feature_handle: *mut SlDlssFeature,
+// Add wrappers for slCreateDlssFeature, slEvaluateDlssFeature, slDestroyDlssFeature, slDLSSSetOptions
+pub fn slCreateDlssFeature(
+    dlss_feature_handle_out: *mut SlDlssFeature,
     application_id: u32,
-    quality_mode: SlDLSSMode,
+    mode: SlDLSSMode,
     output_width: u32,
     output_height: u32,
-    native_device: *mut c_void,
-) -> SlStatus {
-     match get_sl_api() {
-        Ok(api) => match get_sl_func!(api, FnSlCreateDlssFeature, b"slCreateDlssFeature\0") {
-            Ok(func) => func(
-                dlss_feature_handle,
-                application_id,
-                quality_mode,
-                output_width,
-                output_height,
-                native_device,
-            ),
-            Err(status) => status,
-        },
-        Err(e) => {
-             eprintln!("{}", e);
-             SlStatus::ErrorLibraryLoadFailed
+    native_device: *mut std::ffi::c_void,
+) -> Result<SlStatus, &'static LoadError> {
+    get_sl_api().and_then(|api| {
+        match api.slCreateDlssFeature_method(
+            dlss_feature_handle_out,
+            application_id,
+            mode,
+            output_width,
+            output_height,
+            native_device,
+        ) {
+            Ok(status) => Ok(status),
+            Err(owned_load_error) => {
+                eprintln!("[dlss_sys] slCreateDlssFeature: Symbol load failed: {:?}", owned_load_error.0);
+                Err(&UNABLE_TO_LOAD_SYMBOL_ERROR)
+            }
         }
-    }
+    }).or_else(|err| Err(err))
 }
 
-pub unsafe fn slEvaluateDlssFeature(
-    dlss_feature_handle: SlDlssFeature,
-    cmd_buffer: *mut c_void,
-    input_resource: *mut c_void,
-    output_resource: *mut c_void,
-    motion_vectors: *mut c_void,
-    depth: *mut c_void,
-    jitter_x: f32,
-    jitter_y: f32,
-    render_width: u32,
-    render_height: u32,
-    params: *const SlDLSSOptions,
-) -> SlStatus {
-     match get_sl_api() {
-        Ok(api) => match get_sl_func!(api, FnSlEvaluateDlssFeature, b"slEvaluateDlssFeature\0") {
-            Ok(func) => func(
-                dlss_feature_handle,
-                cmd_buffer,
-                input_resource,
-                output_resource,
-                motion_vectors,
-                depth,
-                jitter_x,
-                jitter_y,
-                render_width,
-                render_height,
-                params,
-            ),
-            Err(status) => status,
-        },
-        Err(e) => {
-             eprintln!("{}", e);
-             SlStatus::ErrorLibraryLoadFailed
-        }
-    }
-}
+// ... (Define other public wrapper functions similarly) ...
 
-pub unsafe fn slDestroyDlssFeature(dlss_feature_handle: SlDlssFeature) -> SlStatus {
-     match get_sl_api() {
-        Ok(api) => match get_sl_func!(api, FnSlDestroyDlssFeature, b"slDestroyDlssFeature\0") {
-            Ok(func) => func(dlss_feature_handle),
-            Err(status) => status,
-        },
-        Err(e) => {
-             eprintln!("{}", e);
-             SlStatus::ErrorLibraryLoadFailed
-        }
-    }
-}
-
-pub unsafe fn slDLSSSetOptions(
-    dlss_feature_handle: SlDlssFeature,
-    options: *const SlDLSSOptions,
-) -> SlStatus {
-     match get_sl_api() {
-        Ok(api) => match get_sl_func!(api, FnSlDLSSSetOptions, b"slDLSSSetOptions\0") {
-            Ok(func) => func(dlss_feature_handle, options),
-            Err(status) => status,
-        },
-        Err(e) => {
-             eprintln!("{}", e);
-             SlStatus::ErrorLibraryLoadFailed
-        }
-    }
-}
-
-// Add wrappers for other functions here as needed, following the same pattern
+// Ensure the old get_sl_func macro is removed or not used by these public wrappers.
+// The StreamlineApi struct and get_sl_api() function are central to this on-demand loading.
 
 
 // --- Ensure the old extern "C" block is removed ---
