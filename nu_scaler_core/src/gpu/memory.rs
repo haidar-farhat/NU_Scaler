@@ -421,14 +421,14 @@ impl MemoryPool {
                         let used_mb = usage_vram as f32 / (1024.0 * 1024.0);
                         let free_mb = total_mb - used_mb;
 
-                        let mut stats = self.stats.lock().unwrap();
-                        return Some(VramStats {
-                            total_mb,
-                            used_mb,
-                            free_mb,
-                            app_allocated_mb: stats.app_allocated_mb,
-                            timestamp: Instant::now(),
-                        });
+                        let stats = self.stats.lock().unwrap();
+                        stats.total_mb = total_mb;
+                        stats.used_mb = used_mb;
+                        stats.free_mb = free_mb;
+                        stats.app_allocated_mb = self.allocated_bytes.load(Ordering::Relaxed) as f32 / (1024.0 * 1024.0);
+                        stats.timestamp = Instant::now();
+
+                        return Some(stats.clone());
                     }
                 }
             }
@@ -464,26 +464,24 @@ impl MemoryPool {
                                             if used_file.read_to_string(&mut used_content).is_ok() {
                                                 if let Ok(used_mb) = used_content.trim().parse::<f32>() {
                                                     let mut stats = self.stats.lock().unwrap();
-                                                    return Some(VramStats {
-                                                        total_mb,
-                                                        used_mb,
-                                                        free_mb: total_mb - used_mb,
-                                                        app_allocated_mb: stats.app_allocated_mb,
-                                                        timestamp: Instant::now(),
-                                                    });
+                                                    stats.total_mb = total_mb;
+                                                    stats.used_mb = used_mb;
+                                                    stats.free_mb = total_mb - used_mb;
+                                                    stats.app_allocated_mb = self.allocated_bytes.load(Ordering::Relaxed) as f32 / (1024.0 * 1024.0);
+                                                    stats.timestamp = Instant::now();
+                                                    return Some(stats.clone());
                                                 }
                                             }
                                         }
                                         
                                         // Fallback to just total
                                         let mut stats = self.stats.lock().unwrap();
-                                        return Some(VramStats {
-                                            total_mb,
-                                            used_mb: stats.used_mb,
-                                            free_mb: total_mb - stats.used_mb,
-                                            app_allocated_mb: stats.app_allocated_mb,
-                                            timestamp: Instant::now(),
-                                        });
+                                        stats.total_mb = total_mb;
+                                        stats.used_mb = self.stats.lock().unwrap().used_mb;
+                                        stats.free_mb = total_mb - self.stats.lock().unwrap().used_mb;
+                                        stats.app_allocated_mb = self.allocated_bytes.load(Ordering::Relaxed) as f32 / (1024.0 * 1024.0);
+                                        stats.timestamp = Instant::now();
+                                        return Some(stats.clone());
                                     }
                                 }
                             }
@@ -507,26 +505,24 @@ impl MemoryPool {
                                         if let Ok(used_bytes) = used_content.trim().parse::<u64>() {
                                             let used_mb = used_bytes as f32 / (1024.0 * 1024.0);
                                             let mut stats = self.stats.lock().unwrap();
-                                            return Some(VramStats {
-                                                total_mb,
-                                                used_mb,
-                                                free_mb: total_mb - used_mb,
-                                                app_allocated_mb: stats.app_allocated_mb,
-                                                timestamp: Instant::now(),
-                                            });
+                                            stats.total_mb = total_mb;
+                                            stats.used_mb = used_mb;
+                                            stats.free_mb = total_mb - used_mb;
+                                            stats.app_allocated_mb = self.allocated_bytes.load(Ordering::Relaxed) as f32 / (1024.0 * 1024.0);
+                                            stats.timestamp = Instant::now();
+                                            return Some(stats.clone());
                                         }
                                     }
                                 }
                                 
                                 // Fallback to just total
                                 let mut stats = self.stats.lock().unwrap();
-                                return Some(VramStats {
-                                    total_mb,
-                                    used_mb: stats.used_mb,
-                                    free_mb: total_mb - stats.used_mb,
-                                    app_allocated_mb: stats.app_allocated_mb,
-                                    timestamp: Instant::now(),
-                                });
+                                stats.total_mb = total_mb;
+                                stats.used_mb = self.stats.lock().unwrap().used_mb;
+                                stats.free_mb = total_mb - self.stats.lock().unwrap().used_mb;
+                                stats.app_allocated_mb = self.allocated_bytes.load(Ordering::Relaxed) as f32 / (1024.0 * 1024.0);
+                                stats.timestamp = Instant::now();
+                                return Some(stats.clone());
                             }
                         }
                     }
