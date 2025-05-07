@@ -12,23 +12,27 @@ mod bindings {
 }
 
 // Publicly re-export items from the bindings module if they were generated.
-// If not, these will be empty or minimal stubs.
 #[cfg(fsr3_bindings_generated)]
 pub use bindings::*;
 
-// If bindings are NOT generated, provide placeholder types/functions 
-// if other parts of the codebase try to use them when the fsr3 feature is on 
-// but bindings failed (e.g. SDK not found).
-// This helps avoid further compilation errors in nu_scaler_core if it tries to use fsr3_sys types.
+// If bindings are NOT generated, provide placeholder types/functions.
 #[cfg(not(fsr3_bindings_generated))]
 pub mod ffi {
-    // Example placeholder, expand as needed based on what nu_scaler_core might try to use.
-    // pub type FfxFsr3Context = *mut std::ffi::c_void;
+    // This block will be compiled if fsr3_bindings_generated is not set.
+    // Add minimal stubs or type aliases that nu_scaler_core might expect to exist
+    // when the `fsr3` feature is enabled but bindings couldn't be generated.
+    // This prevents compile errors in nu_scaler_core itself.
+    // For example:
+    // pub type FfxFsr3Context = *mut ::std::os::raw::c_void;
     // pub const FFX_FSR3_STATUS_SUCCESS: u32 = 0;
-    // pub unsafe fn ffxFsr3ContextCreate(_context: *mut FfxFsr3Context, _params: *const std::ffi::c_void) -> u32 {
-    //     FFX_FSR3_STATUS_SUCCESS 
+    // pub unsafe fn ffxFsr3ContextCreate(_context: *mut FfxFsr3Context, _params: *const ::std::os::raw::c_void) -> u32 {
+    //     unimplemented!("FSR3 bindings not generated"); 
     // }
-    println!("Warning: FSR3 bindings were not generated. FSR3 functionality will be unavailable.");
 }
+
+// Optionally, you can add a function that nu_scaler_core can call to check if bindings are available.
+// pub fn are_bindings_available() -> bool {
+//     cfg!(fsr3_bindings_generated)
+// }
 
 // You can add helper functions or safer wrappers around the raw FFI bindings here if needed. 
