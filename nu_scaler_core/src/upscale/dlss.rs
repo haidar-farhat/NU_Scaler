@@ -166,45 +166,30 @@ impl Upscaler for DlssUpscaler {
             self.output_width, self.output_height, dlss_feature_handle
         );
 
-        // Set DLSS options using slDLSSSetOptions (if available and needed after feature creation)
-        // The `dlss-sys` crate has `slDLSSSetOptions` which takes a viewport handle.
-        // This seems to imply that options are set per viewport AFTER a generic feature might be created,
-        // or the SlDlssFeature handle implicitly is the viewport for these calls.
-        // For now, we assume the feature handle is sufficient if slDLSSSetOptions is not used or integrated differently.
-        // However, the SlDLSSOptions struct is available and should be used.
-        // The NVIDIA Streamline examples often show slSetFeatureSpecifics or equivalent
-        // to pass DLSS options *after* creating the generic Streamline feature.
-        // The current `dlss-sys` seems to have `slDLSSSetOptions` which takes `SlViewportHandle`.
-        // Let's assume `slDLSSSetOptions` should be called. What is the viewport handle?
-        // The provided `dlss-sys` also defines `slDLSSOptions`.
-        // The feature handle we got IS the SlDlssFeature, not a generic viewport.
-        // Let's check if there's an `slDLSSSetFeatureOptions` or similar, or if `slDLSSSetOptions` uses the feature handle.
-
-        // The `dlss-sys` has `pub fn slDLSSSetOptions(viewport: SlViewportHandle, options: *const SlDLSSOptions) -> SlStatus;`
-        // This is problematic as `SlDlssFeature` is not `SlViewportHandle`.
-        // This part of `dlss-sys` might be mismatched with how DLSS is actually configured.
-        // For now, we will prepare options but cannot directly call a `set_options` on the feature handle with current `dlss-sys`.
-        // This is a limitation of the current `dlss-sys` FFI bindings if they don't align with feature-specific option setting.
-
-        let options = SlDLSSOptions {
-            mode: actual_dlss_mode, // Use the mode determined by quality
+        // Set DLSS options (example, customize as needed)
+        let dlss_options = SlDLSSOptions {
+            mode: self.quality.to_sl_dlss_mode(),
             output_width: self.output_width,
             output_height: self.output_height,
-            // input_width: self.input_width, // SlDLSSOptions doesn't have input_width/height fields in typical SDKs
-            // input_height: self.input_height, // these are usually implicit or part of constants
-            color_buffers_hdr: SlBoolean::False, // Default, assuming LDR for now
-            // sharpness: 0.0, // Default or configurable
-            // ... other fields like pre_exposure, exposure_scale, presets from SlDLSSOptions::default()
-            ..SlDLSSOptions::default() // Use defaults for other fields for now
+            color_input_format: 0, // Placeholder - map to correct SL_FORMAT_ enum e.g. R8G8B8A8_UNORM
+            motion_vector_format: 0, // Placeholder - map to correct SL_FORMAT_ enum or 0 if not used
+            depth_input_format: 0, // Placeholder - map to correct SL_FORMAT_ enum or 0 if not used
+            is_hdr: dlss_sys::SL_FALSE, // Corrected field name, assuming LDR for now
+            pre_exposure: 0.0, // Default pre-exposure
+            enable_auto_exposure: dlss_sys::SL_FALSE, // Default auto-exposure
         };
-        println!(
-            "[DLSS Upscaler] DLSS Options prepared: mode={:?}, output={}x{}, (render_input_for_app: {}x{})",
-            options.mode, options.output_width, options.output_height, self.input_width, self.input_height
-        );
-        // TODO: If `slDLSSSetOptions` or a similar function is to be called,
-        // it needs to be identified how to do this with the feature handle or if `dlss-sys` needs updates.
-        // For now, proceeding without explicitly setting options after creation, 
-        // assuming `slCreateDlssFeature` and parameters to `slEvaluateDlssFeature` are primary drivers.
+
+        let status_set_options = unsafe {
+            dlss_sys::slDLSSSetOptions(dlss_feature_handle, &dlss_options as *const SlDLSSOptions)
+        };
+
+        if status_set_options != SlStatus::Success {
+            self.dlss_feature = None;
+            return Err(anyhow!(
+                "slDLSSSetOptions failed with status: {:?}",
+                status_set_options
+            ));
+        }
 
         self.initialized = true;
         Ok(())
