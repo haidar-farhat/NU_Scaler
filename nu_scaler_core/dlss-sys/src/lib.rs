@@ -227,6 +227,19 @@ struct StreamlineApi {
     // Add fields for other functions as needed
 }
 
+// Temporary struct to hold library and symbols with original lifetime
+struct TempApiHolder<'lib> {
+    lib: Library, // Library instance
+    // Symbols borrowing the library instance's lifetime
+    slInitializeSDK: Symbol<'lib, FnSlInitializeSDK>,
+    slShutdownSDK: Symbol<'lib, FnSlShutdownSDK>,
+    slIsFeatureSupported: Symbol<'lib, FnSlIsFeatureSupported>,
+    slCreateDlssFeature: Symbol<'lib, FnSlCreateDlssFeature>,
+    slEvaluateDlssFeature: Symbol<'lib, FnSlEvaluateDlssFeature>,
+    slDestroyDlssFeature: Symbol<'lib, FnSlDestroyDlssFeature>,
+    slDLSSSetOptions: Symbol<'lib, FnSlDLSSSetOptions>,
+}
+
 // Global static variable to hold the initialized API
 static SL_API: OnceLock<Result<StreamlineApi, LoadError>> = OnceLock::new();
 
@@ -243,31 +256,31 @@ macro_rules! load_sl_symbol {
     };
 }
 
-// Function to load the library symbols
-// This function now takes the loaded Library as an argument
-impl StreamlineApi {
-    fn load_symbols(lib: Library) -> Result<Self, LoadError> {
-        unsafe {
-            // Load symbols using the macro. Note: lib is moved into _lib field at the end.
-            let slInitializeSDK_sym_raw = load_sl_symbol!(lib, FnSlInitializeSDK, b"slInitializeSDK\0");
-            let slShutdownSDK_sym_raw = load_sl_symbol!(lib, FnSlShutdownSDK, b"slShutdownSDK\0");
-            let slIsFeatureSupported_sym_raw = load_sl_symbol!(lib, FnSlIsFeatureSupported, b"slIsFeatureSupported\0");
-            let slCreateDlssFeature_sym_raw = load_sl_symbol!(lib, FnSlCreateDlssFeature, b"slCreateDlssFeature\0");
-            let slEvaluateDlssFeature_sym_raw = load_sl_symbol!(lib, FnSlEvaluateDlssFeature, b"slEvaluateDlssFeature\0");
-            let slDestroyDlssFeature_sym_raw = load_sl_symbol!(lib, FnSlDestroyDlssFeature, b"slDestroyDlssFeature\0");
-            let slDLSSSetOptions_sym_raw = load_sl_symbol!(lib, FnSlDLSSSetOptions, b"slDLSSSetOptions\0");
+// Function to load library and symbols into the temporary holder
+fn load_symbols_temp(lib: Library) -> Result<TempApiHolder<'_>, LoadError> {
+    // Note: The lifetime parameter <'_> will be inferred from `lib`
+    unsafe {
+        // Load symbols using the macro
+        let slInitializeSDK_sym_raw = load_sl_symbol!(lib, FnSlInitializeSDK, b"slInitializeSDK\0");
+        let slShutdownSDK_sym_raw = load_sl_symbol!(lib, FnSlShutdownSDK, b"slShutdownSDK\0");
+        let slIsFeatureSupported_sym_raw = load_sl_symbol!(lib, FnSlIsFeatureSupported, b"slIsFeatureSupported\0");
+        let slCreateDlssFeature_sym_raw = load_sl_symbol!(lib, FnSlCreateDlssFeature, b"slCreateDlssFeature\0");
+        let slEvaluateDlssFeature_sym_raw = load_sl_symbol!(lib, FnSlEvaluateDlssFeature, b"slEvaluateDlssFeature\0");
+        let slDestroyDlssFeature_sym_raw = load_sl_symbol!(lib, FnSlDestroyDlssFeature, b"slDestroyDlssFeature\0");
+        let slDLSSSetOptions_sym_raw = load_sl_symbol!(lib, FnSlDLSSSetOptions, b"slDLSSSetOptions\0");
 
-            Ok(StreamlineApi {
-                _lib: lib, // Ownership of lib is taken here
-                slInitializeSDK: std::mem::transmute(slInitializeSDK_sym_raw),
-                slShutdownSDK: std::mem::transmute(slShutdownSDK_sym_raw),
-                slIsFeatureSupported: std::mem::transmute(slIsFeatureSupported_sym_raw),
-                slCreateDlssFeature: std::mem::transmute(slCreateDlssFeature_sym_raw),
-                slEvaluateDlssFeature: std::mem::transmute(slEvaluateDlssFeature_sym_raw),
-                slDestroyDlssFeature: std::mem::transmute(slDestroyDlssFeature_sym_raw),
-                slDLSSSetOptions: std::mem::transmute(slDLSSSetOptions_sym_raw),
-            })
-        }
+        // Construct the temporary holder, moving `lib` and the symbols
+        // The symbols correctly borrow the `lib` being moved here.
+        Ok(TempApiHolder {
+            lib: lib, // Move lib here
+            slInitializeSDK: slInitializeSDK_sym_raw,
+            slShutdownSDK: slShutdownSDK_sym_raw,
+            slIsFeatureSupported: slIsFeatureSupported_sym_raw,
+            slCreateDlssFeature: slCreateDlssFeature_sym_raw,
+            slEvaluateDlssFeature: slEvaluateDlssFeature_sym_raw,
+            slDestroyDlssFeature: slDestroyDlssFeature_sym_raw,
+            slDLSSSetOptions: slDLSSSetOptions_sym_raw,
+        })
     }
 }
 
@@ -286,8 +299,15 @@ fn load_library_only() -> Result<Library, LoadError> {
 // Function to get or initialize the API - updated logic
 fn get_sl_api() -> Result<&'static StreamlineApi, &'static LoadError> {
     SL_API.get_or_init(|| {
+        // Load library first
         let library = load_library_only()?;
-        StreamlineApi::load_symbols(library) // Call the new method
+        // Load symbols into temporary holder with correct lifetimes
+        let temp_holder = load_symbols_temp(library)?;
+        // Transmute the entire holder to the final StreamlineApi with 'static lifetimes
+        // This is safe because the holder (including the Library) is being placed
+        // into the OnceLock, extending its lifetime to 'static.
+        let static_api = unsafe { std::mem::transmute::<TempApiHolder<'_>, StreamlineApi>(temp_holder) };
+        Ok(static_api)
     }).as_ref()
 }
 
