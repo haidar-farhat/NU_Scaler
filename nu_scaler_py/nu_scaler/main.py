@@ -61,22 +61,25 @@ class UpscaleWorker(QObject):
         self.out_w = out_w
         self.out_h = out_h
         self.scale = scale
+        print(f'[DEBUG] UpscaleWorker created: {id(self)}')
 
     @Slot()
     def run(self):
         import time
-        print("[DEBUG] UpscaleWorker: Starting run (no initialize)")
+        print(f"[DEBUG] UpscaleWorker.run: {id(self)} starting")
         t0 = time.perf_counter()
         try:
-            # Do NOT call self.upscaler.initialize here!
-            print("[DEBUG] UpscaleWorker: Before upscale")
-            out_bytes = self.upscaler.upscale(self.frame)
-            print("[DEBUG] UpscaleWorker: After upscale")
+            print(f"[DEBUG] UpscaleWorker.run: {id(self)} before upscale")
+            out = self.upscaler.upscale(self.frame)
             t1 = time.perf_counter()
-            self.finished.emit(out_bytes, self.out_w, self.out_h, t1 - t0)
+            print(f"[DEBUG] UpscaleWorker.run: {id(self)} finished upscale in {t1-t0:.2f}s")
+            self.finished.emit(out, self.out_w, self.out_h, (t1-t0)*1000)
         except Exception as e:
-            print(f"[DEBUG] UpscaleWorker: Exception: {e}")
+            print(f"[DEBUG] UpscaleWorker.run: {id(self)} error: {e}")
             self.error.emit(str(e))
+
+    def __del__(self):
+        print(f'[DEBUG] UpscaleWorker __del__: {id(self)}')
 
 class LiveFeedScreen(QWidget):
     log_signal = Signal(str)
@@ -374,6 +377,8 @@ class LiveFeedScreen(QWidget):
 
     def stop_capture(self):
         import threading as _threading
+        import gc
+        import psutil
         print('[DEBUG] stop_capture: called')
         print(f'[DEBUG] stop_capture: active threads before: {_threading.active_count()}')
         if self.capture:
@@ -389,34 +394,26 @@ class LiveFeedScreen(QWidget):
         self.stop_btn.setEnabled(False)
         self.status_bar.setText("Capture stopped")
         # Clean up worker and thread
-        if self._upscale_thread is not None:
-            print(f'[DEBUG] stop_capture: thread id={id(self._upscale_thread)}, worker id={id(self._upscale_worker)}')
-            print(f'[DEBUG] stop_capture: thread isRunning={self._upscale_thread.isRunning()}, isFinished={self._upscale_thread.isFinished()}')
-            try:
-                # Only disconnect signals if thread and worker are still alive
-                pass  # No manual disconnect or deleteLater
-            except Exception as e:
-                print(f'[DEBUG] stop_capture: error disconnecting signals: {e}')
+        if hasattr(self, '_upscale_thread') and self._upscale_thread is not None:
+            print(f'[DEBUG] stop_capture: upscale thread state: {self._upscale_thread.isRunning()}')
             self._upscale_thread.quit()
             self._upscale_thread.wait(2000)
-            print(f'[DEBUG] stop_capture: after wait, isRunning={self._upscale_thread.isRunning()}, isFinished={self._upscale_thread.isFinished()}')
-            # Do not call setParent or deleteLater on worker or thread here
+            print('[DEBUG] stop_capture: upscale thread quit and waited')
             self._upscale_thread = None
+        if hasattr(self, '_upscale_worker') and self._upscale_worker is not None:
+            print('[DEBUG] stop_capture: deleting upscale worker')
             self._upscale_worker = None
-            print('[DEBUG] stop_capture: worker thread cleaned up')
         print(f'[DEBUG] stop_capture: active threads after: {_threading.active_count()}')
-        # Delay re-enabling controls to allow Qt to finish cleanup
-        from PySide6.QtCore import QTimer
-        def _reenable_controls():
-            self.technology_box.setEnabled(True)
-            self.quality_box.setEnabled(True)
-            self.algorithm_box.setEnabled(True)
-            self.scale_slider.setEnabled(True)
-            self.advanced_check.setEnabled(True)
-            self.memory_strategy_box.setEnabled(True)
-            self.adaptive_quality_check.setEnabled(True)
-            print('[DEBUG] stop_capture: controls re-enabled')
-        QTimer.singleShot(200, _reenable_controls)
+        gc.collect()
+        print(f'[DEBUG] stop_capture: gc collected, objects: {len(gc.get_objects())}')
+        print(f'[DEBUG] stop_capture: OS handle count: {psutil.Process().num_handles()}')
+        # Delayed watchdogs
+        import threading
+        def watchdog(msg):
+            print(f'[WATCHDOG] {msg}')
+        threading.Timer(2, watchdog, args=("2s after stop_capture",)).start()
+        threading.Timer(5, watchdog, args=("5s after stop_capture",)).start()
+        threading.Timer(10, watchdog, args=("10s after stop_capture",)).start()
 
     def update_technology_ui(self, technology):
         try:
@@ -597,6 +594,7 @@ class LiveFeedScreen(QWidget):
         self._upscale_worker = None
 
     def on_upscale_finished(self, out_bytes, out_w, out_h, elapsed):
+        print(f'[DEBUG] on_upscale_finished: {id(self)}')
         print(f"[DEBUG] Upscale finished in {elapsed*1000:.2f} ms at {time.strftime('%H:%M:%S')}")
         # Update the GUI with the upscaled image
         if out_bytes:
@@ -617,6 +615,7 @@ class LiveFeedScreen(QWidget):
         # The timer will continue to fire at the set interval
 
     def on_upscale_error(self, error_msg):
+        print(f'[DEBUG] on_upscale_error: {id(self)}')
         import traceback
         print(f"[GUI] Error in upscaling: {error_msg}")
         self.status_bar.setText(f"Error: {str(error_msg)}")
