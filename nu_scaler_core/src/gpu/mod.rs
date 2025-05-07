@@ -101,11 +101,11 @@ impl GpuResources {
         #[cfg(target_os = "windows")]
         {
             use wgpu::hal::dx12::Api as Dx12Api;
-            use windows::core::Interface; // Needed for .as_raw()
+            use windows::core::Interface;
             let native_handle_opt: Option<*mut std::ffi::c_void> = 
                 self.device.as_hal::<Dx12Api, _, _>(|hal_device_opt| {
-                    // Try d.raw_device() -> as_raw() -> cast()
-                    hal_device_opt.map(|d| d.raw_device().as_raw().cast::<c_void>())
+                    // Clone ComPtr before calling as_raw()
+                    hal_device_opt.map(|d| d.raw_device().clone().as_raw().cast::<c_void>())
                 });
 
             if let Some(handle) = native_handle_opt {
@@ -142,12 +142,12 @@ impl GpuResources {
         #[cfg(target_os = "windows")]
         {
             use wgpu::hal::dx12::Api as Dx12Api;
-            use windows::core::Interface; // Ensure Interface trait is in scope for .as_raw()
+            use windows::core::Interface;
             let mut native_handle_opt: Option<*mut std::ffi::c_void> = None;
             texture.as_hal::<Dx12Api, _>(|hal_texture_opt| {
                 if let Some(ht) = hal_texture_opt {
-                    // Access public `resource` field -> as_raw() -> cast()
-                    native_handle_opt = Some(ht.resource.as_raw().cast::<c_void>());
+                    // Use raw_resource(), clone ComPtr, then as_raw()
+                    native_handle_opt = Some(ht.raw_resource().clone().as_raw().cast::<c_void>());
                 }
             });
             if let Some(handle) = native_handle_opt {
