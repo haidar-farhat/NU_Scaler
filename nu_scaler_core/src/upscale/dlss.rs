@@ -156,18 +156,39 @@ impl Upscaler for DlssUpscaler {
             )
         };
 
-        if status_create != SlStatus::Success || dlss_feature_handle == 0 { // Check against 0
-            self.dlss_feature = None;
-            return Err(anyhow!(
-                "slCreateDlssFeature failed with status {:?} or returned null handle. Target output: {}x{}",
-                status_create, self.output_width, self.output_height
-            ));
+        match status_create {
+            Ok(SlStatus::Success) => {
+                // Success path
+                if dlss_feature_handle == 0 {
+                    self.dlss_feature = None;
+                    return Err(anyhow!(
+                        "slCreateDlssFeature reported Success but returned null handle. Target output: {}x{}",
+                        self.output_width, self.output_height
+                    ));
+                }
+                self.dlss_feature = Some(dlss_feature_handle);
+                 println!(
+                    "[DLSS Upscaler] slCreateDlssFeature successful for output {}x{}. Handle: {:?}",
+                    self.output_width, self.output_height, dlss_feature_handle
+                );
+            }
+            Ok(other_status) => {
+                // FFI call succeeded, but DLSS reported an error status
+                 self.dlss_feature = None;
+                 return Err(anyhow!(
+                    "slCreateDlssFeature failed with status {:?}. Target output: {}x{}",
+                    other_status, self.output_width, self.output_height
+                ));
+            }
+            Err(load_error) => {
+                // FFI symbol loading failed
+                 self.dlss_feature = None;
+                 return Err(anyhow!(
+                    "slCreateDlssFeature symbol loading failed: {:?}. Target output: {}x{}",
+                    load_error.0, self.output_width, self.output_height
+                ));
+            }
         }
-        self.dlss_feature = Some(dlss_feature_handle);
-        println!(
-            "[DLSS Upscaler] slCreateDlssFeature successful for output {}x{}. Handle: {:?}",
-            self.output_width, self.output_height, dlss_feature_handle
-        );
 
         // Set DLSS options (example, customize as needed)
         let dlss_options = SlDLSSOptions {
@@ -182,20 +203,28 @@ impl Upscaler for DlssUpscaler {
             enable_auto_exposure: dlss_sys::SL_FALSE, // Default auto-exposure
         };
 
-        let status_set_options =
-            unsafe { dlss_sys::slDLSSSetOptions(dlss_feature_handle, &dlss_options) };
-
-        if status_set_options != SlStatus::Success {
-            error!(
-                "Failed to set DLSS options. Status: {:?}",
-                status_set_options
-            );
-            // Decide if this is a fatal error for initialization
-            // For now, we'll log and continue, as some platforms might have issues with options.
-        } else {
-            debug!("DLSS options set successfully.");
+        // Also check result for slDLSSSetOptions
+        match unsafe { dlss_sys::slDLSSSetOptions(dlss_feature_handle, &dlss_options) } {
+            Ok(SlStatus::Success) => {
+                debug!("DLSS options set successfully.");
+            }
+            Ok(other_status) => {
+                 error!(
+                    "slDLSSSetOptions call succeeded but returned error status: {:?}",
+                    other_status
+                );
+                 // Decide if this is a fatal error for initialization
+            }
+            Err(load_error) => {
+                 error!(
+                    "slDLSSSetOptions symbol loading failed: {:?}",
+                    load_error.0
+                );
+                 // Decide if this is a fatal error for initialization
+            }
         }
 
+        self.initialized = true; // Set initialized flag only after all checks pass
         info!("DLSS Upscaler initialized successfully with feature handle: {}", dlss_feature_handle);
         Ok(())
     }
@@ -324,11 +353,16 @@ impl Upscaler for DlssUpscaler {
             )
         };
 
-        if status != SlStatus::Success {
-            return Err(anyhow!(
-                "slEvaluateDlssFeature failed with status: {:?}",
-                status
-            ));
+        match status {
+            Ok(SlStatus::Success) => {
+                debug!("slEvaluateDlssFeature successful.");
+            }
+            Ok(other_status) => {
+                return Err(anyhow!("slEvaluateDlssFeature failed with status: {:?}", other_status));
+            }
+            Err(load_error) => {
+                 return Err(anyhow!("slEvaluateDlssFeature symbol loading failed: {:?}", load_error.0));
+            }
         }
 
         // 6. Retrieve result from Output Texture
