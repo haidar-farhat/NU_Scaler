@@ -762,6 +762,12 @@ impl WgpuUpscaler {
     }
 }
 
+impl Drop for WgpuUpscaler {
+    fn drop(&mut self) {
+        println!("[Rust] Dropping WgpuUpscaler at {:p}", self);
+    }
+}
+
 impl Upscaler for WgpuUpscaler {
     fn initialize(&mut self, input_width: u32, input_height: u32, output_width: u32, output_height: u32) -> Result<()> {
         // Check if we have shared GPU resources
