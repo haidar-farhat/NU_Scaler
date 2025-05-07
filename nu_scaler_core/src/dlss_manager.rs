@@ -10,7 +10,7 @@ static SL_INIT_RESULT: OnceLock<Result<(), DlssManagerError>> = OnceLock::new();
 #[derive(Debug, Clone)] // Added Clone
 pub enum DlssManagerError {
     SdkInitializationFailed(SlStatus),
-    SymbolLoadingFailed(String), // New variant for symbol loading issues
+    SymbolLoadingFailed(&'static str), // Changed String to &'static str
 }
 
 // This function performs the actual SDK initialization.
@@ -29,9 +29,9 @@ fn perform_initialization() -> Result<(), DlssManagerError> {
         }
         std::result::Result::Err(load_error) => { // Fully qualified Err
             // load_error is &'static dlss_sys::LoadError
-            let error_message = load_error.0.clone(); // Assuming LoadError(String)
+            let error_message = load_error.0; // error_message is &'static str
             error!("[DLSS Manager] Failed to load slInitializeSDK symbol: {}", error_message);
-            Err(DlssManagerError::SymbolLoadingFailed(error_message))
+            Err(DlssManagerError::SymbolLoadingFailed(error_message)) // Pass the &'static str
         }
     }
 }
