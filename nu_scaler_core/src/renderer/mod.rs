@@ -57,4 +57,4 @@ mod tests {
         let mut r = MockRenderer;
         let _ = r.resize(1024, 768).unwrap();
     }
-} 
+}

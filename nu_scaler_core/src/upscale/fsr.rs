@@ -1,9 +1,14 @@
 #![cfg(feature = "fsr3")]
 use anyhow::Result;
-use wgpu::{Device, Queue, ShaderModule, ComputePipeline, Buffer, BindGroup, BindGroupLayout, BufferUsages, ShaderModuleDescriptor, ShaderSource, ComputePipelineDescriptor, PipelineLayoutDescriptor, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, BufferBindingType, BindGroupDescriptor, BindGroupEntry, CommandEncoderDescriptor, BufferDescriptor, MapMode};
-use wgpu::util::DeviceExt;
-use std::sync::Arc;
 use std::any::Any;
+use std::sync::Arc;
+use wgpu::util::DeviceExt;
+use wgpu::{
+    BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
+    BindGroupLayoutEntry, BindingType, Buffer, BufferBindingType, BufferDescriptor, BufferUsages,
+    CommandEncoderDescriptor, ComputePipeline, ComputePipelineDescriptor, Device, MapMode,
+    PipelineLayoutDescriptor, Queue, ShaderModule, ShaderModuleDescriptor, ShaderSource,
+};
 
 use super::{Upscaler, UpscalingQuality, UpscalingTechnology};
 
@@ -263,7 +268,7 @@ impl FsrUpscaler {
             queue: None,
         }
     }
-    
+
     /// Set device and queue for GPU operations
     pub fn set_device_queue(&mut self, device: Arc<Device>, queue: Arc<Queue>) {
         self.device = Some(device);
@@ -272,42 +277,48 @@ impl FsrUpscaler {
 }
 
 impl Upscaler for FsrUpscaler {
-    fn initialize(&mut self, _input_width: u32, _input_height: u32, _output_width: u32, _output_height: u32) -> Result<()> {
+    fn initialize(
+        &mut self,
+        _input_width: u32,
+        _input_height: u32,
+        _output_width: u32,
+        _output_height: u32,
+    ) -> Result<()> {
         // Placeholder: In a real implementation, this would set up the FSR pipeline
         Ok(())
     }
-    
+
     fn upscale(&self, input: &[u8]) -> Result<Vec<u8>> {
         // Placeholder: In a real implementation, this would use FSR to upscale
         // For now, just make a copy and add quality marker for testing
         let mut output = input.to_vec();
-        
+
         // Mark first few bytes with the FSR signature for debugging
         let sig = b"FSR";
         let sig_len = std::cmp::min(sig.len(), output.len());
         output[..sig_len].copy_from_slice(&sig[..sig_len]);
-        
+
         Ok(output)
     }
-    
+
     fn name(&self) -> &'static str {
         "FsrUpscaler"
     }
-    
+
     fn quality(&self) -> UpscalingQuality {
         self.quality
     }
-    
+
     fn set_quality(&mut self, quality: UpscalingQuality) -> Result<()> {
         self.quality = quality;
         Ok(())
     }
-    
+
     fn as_any(&self) -> &dyn Any {
         self
     }
-    
+
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
-} 
+}

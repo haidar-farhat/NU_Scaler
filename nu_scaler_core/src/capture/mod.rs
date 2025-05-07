@@ -1,12 +1,17 @@
 use anyhow::Result;
-use image::{RgbaImage, Rgba};
+use image::{Rgba, RgbaImage};
 
 /// Target for screen capture
 #[derive(Debug, Clone)]
 pub enum CaptureTarget {
     FullScreen,
     WindowByTitle(String),
-    Region { x: i32, y: i32, width: u32, height: u32 },
+    Region {
+        x: i32,
+        y: i32,
+        width: u32,
+        height: u32,
+    },
 }
 
 /// Trait for screen/window/region capture
@@ -47,7 +52,10 @@ impl ScreenCapture for BasicCapture {
         Ok(img.into_raw())
     }
     fn list_windows(&self) -> Result<Vec<String>> {
-        Ok(vec!["Dummy Window 1".to_string(), "Dummy Window 2".to_string()])
+        Ok(vec![
+            "Dummy Window 1".to_string(),
+            "Dummy Window 2".to_string(),
+        ])
     }
     fn get_primary_screen_dimensions(&self) -> Result<(u32, u32)> {
         Ok((640, 480))
@@ -101,4 +109,4 @@ mod tests {
         let (w, h) = cap.get_primary_screen_dimensions().unwrap();
         assert_eq!((w, h), (640, 480));
     }
-} 
+}

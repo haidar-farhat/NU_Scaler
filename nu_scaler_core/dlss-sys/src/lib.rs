@@ -1,7 +1,7 @@
 //! Minimal DLSS FFI layer for SL 2.7.30
 //! Links against sl.interposer.dll/.lib
 
-use std::os::raw::{c_void, c_uint};
+use std::os::raw::{c_uint, c_void};
 
 /// Status codes returned by SL functions.
 #[repr(C)]
@@ -68,7 +68,10 @@ pub struct SlFloat2 {
 
 impl Default for SlFloat2 {
     fn default() -> Self {
-        Self { x: SL_INVALID_FLOAT, y: SL_INVALID_FLOAT }
+        Self {
+            x: SL_INVALID_FLOAT,
+            y: SL_INVALID_FLOAT,
+        }
     }
 }
 
@@ -82,7 +85,11 @@ pub struct SlFloat3 {
 
 impl Default for SlFloat3 {
     fn default() -> Self {
-        Self { x: SL_INVALID_FLOAT, y: SL_INVALID_FLOAT, z: SL_INVALID_FLOAT }
+        Self {
+            x: SL_INVALID_FLOAT,
+            y: SL_INVALID_FLOAT,
+            z: SL_INVALID_FLOAT,
+        }
     }
 }
 
@@ -97,7 +104,12 @@ pub struct SlFloat4 {
 
 impl Default for SlFloat4 {
     fn default() -> Self {
-        Self { x: SL_INVALID_FLOAT, y: SL_INVALID_FLOAT, z: SL_INVALID_FLOAT, w: SL_INVALID_FLOAT }
+        Self {
+            x: SL_INVALID_FLOAT,
+            y: SL_INVALID_FLOAT,
+            z: SL_INVALID_FLOAT,
+            w: SL_INVALID_FLOAT,
+        }
     }
 }
 
@@ -109,7 +121,9 @@ pub struct SlFloat4x4 {
 
 impl Default for SlFloat4x4 {
     fn default() -> Self {
-        Self { row: [SlFloat4::default(); 4] }
+        Self {
+            row: [SlFloat4::default(); 4],
+        }
     }
 }
 
@@ -192,13 +206,12 @@ impl Default for SlConstants {
             motion_vectors_3d: SlBoolean::default(),
             reset: SlBoolean::default(),
             orthographic_projection: SlBoolean::False, // Default as per C++ header
-            motion_vectors_dilated: SlBoolean::False, // Default as per C++ header
+            motion_vectors_dilated: SlBoolean::False,  // Default as per C++ header
             motion_vectors_jittered: SlBoolean::False, // Default as per C++ header
             min_relative_linear_depth_object_separation: 40.0, // Default as per C++ header
         }
     }
 }
-
 
 // --- From sl_dlss.h ---
 
@@ -317,7 +330,6 @@ pub struct SlDLSSState {
 // This should be confirmed from sl_common.h or sl.h if possible.
 pub type SlViewportHandle = u32;
 
-
 // Add new function signatures to the extern "C" block
 // Need to re-declare the block or ensure these are added to the existing one.
 // For now, creating a new block for clarity, assuming the linker can handle it.
@@ -335,15 +347,9 @@ extern "C" {
         settings: *mut SlDLSSOptimalSettings,
     ) -> SlStatus;
 
-    pub fn slDLSSGetState(
-        viewport: SlViewportHandle,
-        state: *mut SlDLSSState,
-    ) -> SlStatus;
+    pub fn slDLSSGetState(viewport: SlViewportHandle, state: *mut SlDLSSState) -> SlStatus;
 
-    pub fn slDLSSSetOptions(
-        viewport: SlViewportHandle,
-        options: *const SlDLSSOptions,
-    ) -> SlStatus;
+    pub fn slDLSSSetOptions(viewport: SlViewportHandle, options: *const SlDLSSOptions) -> SlStatus;
 
     // Placeholder for slCreateFeature if it's different from slCreateDlssFeature
     // For now, we assume slCreateDlssFeature is the specific function we need from earlier.

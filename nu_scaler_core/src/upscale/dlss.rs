@@ -1,11 +1,11 @@
-use anyhow::{Result, anyhow};
-use std::sync::Arc;
+use anyhow::{anyhow, Result};
 use std::ffi::c_void;
+use std::sync::Arc;
 
-use crate::dlss_manager::{self/*, DlssManagerError*/}; // Removed unused DlssManagerError
-use dlss_sys::{self, SlDlssFeature, SlStatus, SlDLSSOptions, SlDLSSMode, SlBoolean}; // Changed crate::dlss_sys to dlss_sys
-use crate::gpu::{GpuResources, GpuError/*, GpuProvider*/}; // Removed unused GpuProvider
+use crate::dlss_manager::{self /*, DlssManagerError*/}; // Removed unused DlssManagerError
+use crate::gpu::{GpuError /*, GpuProvider*/, GpuResources}; // Removed unused GpuProvider
 use crate::upscale::{Upscaler, UpscalingQuality};
+use dlss_sys::{self, SlBoolean, SlDLSSMode, SlDLSSOptions, SlDlssFeature, SlStatus}; // Changed crate::dlss_sys to dlss_sys
 
 pub struct DlssUpscaler {
     quality: UpscalingQuality,
@@ -46,7 +46,11 @@ impl DlssUpscaler {
         self.gpu_resources = Some(Arc::new(GpuResources::new(device, queue, gpu_info)));
     }
 
-    fn map_quality_to_dlss_mode(quality: UpscalingQuality, output_width: u32, output_height: u32) -> (SlDLSSMode, u32, u32) {
+    fn map_quality_to_dlss_mode(
+        quality: UpscalingQuality,
+        output_width: u32,
+        output_height: u32,
+    ) -> (SlDLSSMode, u32, u32) {
         let mode = match quality {
             UpscalingQuality::Ultra => SlDLSSMode::UltraQuality,
             UpscalingQuality::Quality => SlDLSSMode::MaxQuality,
@@ -54,11 +58,11 @@ impl DlssUpscaler {
             UpscalingQuality::Performance => SlDLSSMode::MaxPerformance,
         };
         let render_width = match mode {
-            SlDLSSMode::UltraQuality | SlDLSSMode::DLAA => output_width * 2 / 3, 
-            SlDLSSMode::MaxQuality => output_width * 2 / 3, 
-            SlDLSSMode::Balanced => output_width * 58 / 100, 
-            SlDLSSMode::MaxPerformance => output_width / 2, 
-            SlDLSSMode::UltraPerformance => output_width / 3, 
+            SlDLSSMode::UltraQuality | SlDLSSMode::DLAA => output_width * 2 / 3,
+            SlDLSSMode::MaxQuality => output_width * 2 / 3,
+            SlDLSSMode::Balanced => output_width * 58 / 100,
+            SlDLSSMode::MaxPerformance => output_width / 2,
+            SlDLSSMode::UltraPerformance => output_width / 3,
             _ => output_width,
         };
         let render_height = match mode {
@@ -74,30 +78,47 @@ impl DlssUpscaler {
 }
 
 impl Upscaler for DlssUpscaler {
-    fn initialize(&mut self, input_width: u32, input_height: u32, output_width: u32, output_height: u32) -> Result<()> {
+    fn initialize(
+        &mut self,
+        input_width: u32,
+        input_height: u32,
+        output_width: u32,
+        output_height: u32,
+    ) -> Result<()> {
         if self.initialized {
-            if self.input_width == input_width && self.input_height == input_height && 
-               self.output_width == output_width && self.output_height == output_height {
+            if self.input_width == input_width
+                && self.input_height == input_height
+                && self.output_width == output_width
+                && self.output_height == output_height
+            {
                 return Ok(());
             }
             if let Some(feature) = self.dlss_feature.take() {
                 unsafe { dlss_sys::slDestroyDlssFeature(feature) };
-                println!("[DLSS Upscaler] Destroyed existing DLSS feature due to dimension change.");
+                println!(
+                    "[DLSS Upscaler] Destroyed existing DLSS feature due to dimension change."
+                );
             }
             self.initialized = false;
         }
 
-        let gpu_res = self.gpu_resources.as_ref().ok_or_else(|| anyhow!("GpuResources not set before initialize"))?;
+        let gpu_res = self
+            .gpu_resources
+            .as_ref()
+            .ok_or_else(|| anyhow!("GpuResources not set before initialize"))?;
 
         self.input_width = input_width;
         self.input_height = input_height;
         self.output_width = output_width;
         self.output_height = output_height;
-        
-        println!("[DLSS Upscaler] Initializing with Input: {}x{}, Output: {}x{}", 
-            input_width, input_height, output_width, output_height);
 
-        dlss_manager::ensure_sdk_initialized().map_err(|e| anyhow!("DLSS SDK init failed: {:?}", e))?;
+        println!(
+            "[DLSS Upscaler] Initializing with Input: {}x{}, Output: {}x{}",
+            input_width, input_height, output_width, output_height
+        );
+
+        dlss_manager::ensure_sdk_initialized()
+            .map_err(|e| anyhow!("DLSS SDK init failed: {:?}", e))?;
         println!("[DLSS Upscaler] DLSS SDK ensured to be initialized.");
 
         // Get native device handle dynamically
@@ -105,36 +126,49 @@ impl Upscaler for DlssUpscaler {
         if native_device_handle.is_null() {
             return Err(anyhow!("Failed to get native GPU device handle or handle is null. Potential GpuError: {:?}", GpuError::NullHandle));
         }
-        println!("[DLSS Upscaler] Got native device handle: {:?}", native_device_handle);
-        
+        println!(
+            "[DLSS Upscaler] Got native device handle: {:?}",
+            native_device_handle
+        );
+
         let mut dlss_feature_handle: SlDlssFeature = std::ptr::null_mut();
         let status = unsafe {
             dlss_sys::slCreateDlssFeature(
                 native_device_handle,
-                input_width, 
-                input_height, 
-                0, 
+                input_width,
+                input_height,
+                0,
                 &mut dlss_feature_handle,
             )
         };
 
         if status != SlStatus::Success || dlss_feature_handle.is_null() {
-            return Err(anyhow!("slCreateDlssFeature failed with status {:?} or returned null handle.", status));
+            return Err(anyhow!(
+                "slCreateDlssFeature failed with status {:?} or returned null handle.",
+                status
+            ));
         }
         self.dlss_feature = Some(dlss_feature_handle);
-        println!("[DLSS Upscaler] slCreateDlssFeature successful. Handle: {:?}", dlss_feature_handle);
+        println!(
+            "[DLSS Upscaler] slCreateDlssFeature successful. Handle: {:?}",
+            dlss_feature_handle
+        );
 
-        let (dlss_mode, _render_w, _render_h) = Self::map_quality_to_dlss_mode(self.quality, output_width, output_height);
-        
+        let (dlss_mode, _render_w, _render_h) =
+            Self::map_quality_to_dlss_mode(self.quality, output_width, output_height);
+
         let options = SlDLSSOptions {
             mode: dlss_mode,
             output_width: output_width,
             output_height: output_height,
-            color_buffers_hdr: SlBoolean::False, 
+            color_buffers_hdr: SlBoolean::False,
             ..SlDLSSOptions::default()
         };
-        
-        println!("[DLSS Upscaler] DLSS Options prepared: mode={:?}, output={}x{}", options.mode, options.output_width, options.output_height);
+
+        println!(
+            "[DLSS Upscaler] DLSS Options prepared: mode={:?}, output={}x{}",
+            options.mode, options.output_width, options.output_height
+        );
         // Actual setting of options via slDLSSSetOptions or slSetFeatureSpecifics would happen here if API allows/requires.
 
         self.initialized = true;
@@ -145,9 +179,14 @@ impl Upscaler for DlssUpscaler {
         if !self.initialized {
             return Err(anyhow!("DlssUpscaler: Not initialized."));
         }
-        let dlss_feature = self.dlss_feature.ok_or_else(|| anyhow!("DlssUpscaler: DLSS feature handle is None even after initialization."))?;
-        let gpu_res = self.gpu_resources.as_ref().ok_or_else(|| anyhow!("DlssUpscaler: GpuResources not set."))?;
-        
+        let dlss_feature = self.dlss_feature.ok_or_else(|| {
+            anyhow!("DlssUpscaler: DLSS feature handle is None even after initialization.")
+        })?;
+        let gpu_res = self
+            .gpu_resources
+            .as_ref()
+            .ok_or_else(|| anyhow!("DlssUpscaler: GpuResources not set."))?;
+
         let device = &gpu_res.device;
         let queue = &gpu_res.queue;
 
@@ -175,8 +214,12 @@ impl Upscaler for DlssUpscaler {
         let source_input_bytes_per_row = bytes_per_pixel * self.input_width;
         if (source_input_bytes_per_row * self.input_height) as usize != input_bytes.len() {
             return Err(anyhow!(
-                "Input byte length {} does not match expected {}x{}x{} = {}", 
-                input_bytes.len(), self.input_width, self.input_height, bytes_per_pixel, (source_input_bytes_per_row * self.input_height)
+                "Input byte length {} does not match expected {}x{}x{} = {}",
+                input_bytes.len(),
+                self.input_width,
+                self.input_height,
+                bytes_per_pixel,
+                (source_input_bytes_per_row * self.input_height)
             ));
         }
 
@@ -195,10 +238,11 @@ impl Upscaler for DlssUpscaler {
             },
             input_texture_desc.size,
         );
-        let native_input_color_handle = unsafe { gpu_res.get_native_texture_handle(&input_texture)? };
+        let native_input_color_handle =
+            unsafe { gpu_res.get_native_texture_handle(&input_texture)? };
 
         // 2. Output Texture
-        let output_texture_format = wgpu::TextureFormat::Rgba8Unorm; 
+        let output_texture_format = wgpu::TextureFormat::Rgba8Unorm;
         let output_texture_desc = wgpu::TextureDescriptor {
             label: Some("dlss_output_texture"),
             size: wgpu::Extent3d {
@@ -210,11 +254,12 @@ impl Upscaler for DlssUpscaler {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: output_texture_format,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC, 
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         };
         let output_texture = device.create_texture(&output_texture_desc);
-        let native_output_color_handle = unsafe { gpu_res.get_native_texture_handle(&output_texture)? };
+        let native_output_color_handle =
+            unsafe { gpu_res.get_native_texture_handle(&output_texture)? };
 
         // 3. Depth Texture (passing null for now)
         let native_input_depth_handle: *const c_void = std::ptr::null();
@@ -231,12 +276,15 @@ impl Upscaler for DlssUpscaler {
                 native_input_depth_handle,
                 jitter_x,
                 jitter_y,
-                native_output_color_handle, 
+                native_output_color_handle,
             )
         };
 
         if eval_status != SlStatus::Success {
-            return Err(anyhow!("slEvaluateDlssFeature failed with status: {:?}", eval_status));
+            return Err(anyhow!(
+                "slEvaluateDlssFeature failed with status: {:?}",
+                eval_status
+            ));
         }
 
         // 6. Retrieve result from Output Texture
@@ -245,7 +293,8 @@ impl Upscaler for DlssUpscaler {
             let alignment = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
             (tightly_packed_output_bytes_per_row + alignment - 1) / alignment * alignment
         };
-        let output_buffer_size = (aligned_output_bytes_per_row * self.output_height) as wgpu::BufferAddress;
+        let output_buffer_size =
+            (aligned_output_bytes_per_row * self.output_height) as wgpu::BufferAddress;
 
         let output_staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("dlss_output_staging_buffer"),
@@ -280,31 +329,42 @@ impl Upscaler for DlssUpscaler {
 
         // Map buffer and get data
         let (sender, receiver) = std::sync::mpsc::channel();
-        output_staging_buffer.slice(..).map_async(wgpu::MapMode::Read, move |result| {
-            // It's good practice to check if send fails, though in this single-threaded map_async context, it rarely does.
-            if sender.send(result).is_err() {
-                 // eprintln! or log an error if the receiver was dropped, though unlikely here.
-            }
-        });
+        output_staging_buffer
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                // It's good practice to check if send fails, though in this single-threaded map_async context, it rarely does.
+                if sender.send(result).is_err() {
+                    // eprintln! or log an error if the receiver was dropped, though unlikely here.
+                }
+            });
 
-        device.poll(wgpu::Maintain::Wait); 
+        device.poll(wgpu::Maintain::Wait);
 
         match receiver.recv() {
-            Ok(Ok(())) => { // Mapping successful
+            Ok(Ok(())) => {
+                // Mapping successful
                 let mapped_data_range = output_staging_buffer.slice(..).get_mapped_range();
-                let mut final_output_bytes = Vec::with_capacity((bytes_per_pixel * self.output_width * self.output_height) as usize);
-                
+                let mut final_output_bytes = Vec::with_capacity(
+                    (bytes_per_pixel * self.output_width * self.output_height) as usize,
+                );
+
                 for r in 0..self.output_height {
                     let row_start_in_padded_buffer = (r * aligned_output_bytes_per_row) as usize;
-                    let row_end_in_padded_buffer = row_start_in_padded_buffer + tightly_packed_output_bytes_per_row as usize;
-                    final_output_bytes.extend_from_slice(&mapped_data_range[row_start_in_padded_buffer..row_end_in_padded_buffer]);
+                    let row_end_in_padded_buffer =
+                        row_start_in_padded_buffer + tightly_packed_output_bytes_per_row as usize;
+                    final_output_bytes.extend_from_slice(
+                        &mapped_data_range[row_start_in_padded_buffer..row_end_in_padded_buffer],
+                    );
                 }
                 drop(mapped_data_range); // Explicitly drop before unmap, as per wgpu best practices
                 output_staging_buffer.unmap();
                 Ok(final_output_bytes)
             }
             Ok(Err(e)) => Err(anyhow!("Failed to map DLSS output buffer: {:?}", e)),
-            Err(e) => Err(anyhow!("Failed to receive DLSS output buffer map result: {:?}", e)),
+            Err(e) => Err(anyhow!(
+                "Failed to receive DLSS output buffer map result: {:?}",
+                e
+            )),
         }
     }
 
@@ -328,18 +388,28 @@ impl Upscaler for DlssUpscaler {
         Ok(())
     }
 
-    fn as_any(&self) -> &dyn std::any::Any { self }
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }
 
 impl Drop for DlssUpscaler {
     fn drop(&mut self) {
         if let Some(feature_handle) = self.dlss_feature.take() {
-            println!("[DLSS Upscaler] Dropping DlssUpscaler, destroying DLSS feature: {:?}", feature_handle);
+            println!(
+                "[DLSS Upscaler] Dropping DlssUpscaler, destroying DLSS feature: {:?}",
+                feature_handle
+            );
             let status = unsafe { dlss_sys::slDestroyDlssFeature(feature_handle) };
             if status != SlStatus::Success {
-                eprintln!("[DLSS Upscaler] Error destroying DLSS feature {:?}: {:?}", feature_handle, status);
+                eprintln!(
+                    "[DLSS Upscaler] Error destroying DLSS feature {:?}: {:?}",
+                    feature_handle, status
+                );
             }
         }
     }
-} 
+}

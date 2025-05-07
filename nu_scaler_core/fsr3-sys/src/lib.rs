@@ -26,7 +26,7 @@ pub mod ffi {
     // pub type FfxFsr3Context = *mut ::std::os::raw::c_void;
     // pub const FFX_FSR3_STATUS_SUCCESS: u32 = 0;
     // pub unsafe fn ffxFsr3ContextCreate(_context: *mut FfxFsr3Context, _params: *const ::std::os::raw::c_void) -> u32 {
-    //     unimplemented!("FSR3 bindings not generated"); 
+    //     unimplemented!("FSR3 bindings not generated");
     // }
 }
 
@@ -35,4 +35,4 @@ pub mod ffi {
 //     cfg!(fsr3_bindings_generated)
 // }
 
-// You can add helper functions or safer wrappers around the raw FFI bindings here if needed. 
+// You can add helper functions or safer wrappers around the raw FFI bindings here if needed.

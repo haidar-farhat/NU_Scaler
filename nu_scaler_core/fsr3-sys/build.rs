@@ -14,7 +14,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("cargo:rerun-if-changed=wrapper.h");
 
-    // --- FSR3 SDK Path --- 
+    // --- FSR3 SDK Path ---
     // Option 1: Set an environment variable FSR3_SDK_PATH
     let sdk_path_env = env::var("FSR3_SDK_PATH").ok();
     // Option 2: Hardcode the path (replace with your actual path)
@@ -26,18 +26,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     if !fsr3_sdk_path.exists() {
-        panic!("FSR3 SDK path does not exist: {}. Please set FSR3_SDK_PATH or update build.rs.", fsr3_sdk_path.display());
+        panic!(
+            "FSR3 SDK path does not exist: {}. Please set FSR3_SDK_PATH or update build.rs.",
+            fsr3_sdk_path.display()
+        );
     }
 
     // Adjust these paths based on the FSR3 SDK structure
-    let fsr3_include_path = fsr3_sdk_path.join("include"); 
+    let fsr3_include_path = fsr3_sdk_path.join("include");
     let fsr3_lib_path = fsr3_sdk_path.join("lib/ffx_fsr3_x64"); // EXAMPLE! Verify this path
 
     if !fsr3_include_path.exists() {
-        panic!("FSR3 SDK include path does not exist: {}", fsr3_include_path.display());
+        panic!(
+            "FSR3 SDK include path does not exist: {}",
+            fsr3_include_path.display()
+        );
     }
     if !fsr3_lib_path.exists() {
-        panic!("FSR3 SDK library path does not exist: {}", fsr3_lib_path.display());
+        panic!(
+            "FSR3 SDK library path does not exist: {}",
+            fsr3_lib_path.display()
+        );
     }
 
     println!("cargo:rustc-link-search=native={}", fsr3_lib_path.display());
@@ -46,7 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // depending on the graphics API you are using (DX12, Vulkan) with WGPU.
     // For now, assuming a generic name, PLEASE VERIFY.
     println!("cargo:rustc-link-lib=ffx_fsr3_api_x64"); // EXAMPLE! Verify library name.
-    
+
     // WGPU typically uses DX12 on Windows by default. If Vulkan is used, this might need adjustment.
     // The FSR3 SDK has different libraries for DX12 and Vulkan.
 

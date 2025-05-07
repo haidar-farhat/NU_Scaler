@@ -1,6 +1,6 @@
-use anyhow::{Result/*, anyhow*/};
+use anyhow::{Result /*, anyhow*/};
 // use image::ImageFormat;
-use scrap::{Capturer, Display/*, Frame as ScrapFrame*/};
+use scrap::{Capturer, Display /*, Frame as ScrapFrame*/};
 use std::io::ErrorKind;
 use std::sync::mpsc; // Keep
 use std::sync::Mutex;
@@ -12,13 +12,15 @@ use std::fs;
 // Windows API imports (needed for list_windows)
 // use windows::core::{Error, Result as WindowsResult}; // Unused
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM};
-use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowTextW, IsWindowVisible/*, FindWindowW*/}; // FindWindowW unused
+use windows::Win32::UI::WindowsAndMessaging::{
+    EnumWindows, GetWindowTextW, IsWindowVisible, /*, FindWindowW*/
+}; // FindWindowW unused
 
 // windows-capture integration (v1.4)
-use windows_capture::capture::{GraphicsCaptureApiHandler, Context};
+use windows_capture::capture::{Context, GraphicsCaptureApiHandler};
 use windows_capture::frame::Frame;
 use windows_capture::graphics_capture_api::InternalCaptureControl;
-use windows_capture::settings::{Settings, ColorFormat, CursorCaptureSettings, DrawBorderSettings};
+use windows_capture::settings::{ColorFormat, CursorCaptureSettings, DrawBorderSettings, Settings};
 use windows_capture::window::Window;
 
 /* // Remove block of unused windows imports
@@ -34,14 +36,21 @@ use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM; // Marke
 pub enum CaptureTarget {
     FullScreen,
     WindowByTitle(String),
-    Region { x: i32, y: i32, width: u32, height: u32 }, // Region not yet handled by this refactor
+    Region {
+        x: i32,
+        y: i32,
+        width: u32,
+        height: u32,
+    }, // Region not yet handled by this refactor
 }
 
 pub trait RealTimeCapture {
     fn start(&mut self, target: CaptureTarget) -> std::result::Result<(), String>;
     fn stop(&mut self);
-    fn get_frame(&mut self) -> Option<(Vec<u8>, usize, usize)>; 
-    fn list_windows() -> Vec<String> where Self: Sized;
+    fn get_frame(&mut self) -> Option<(Vec<u8>, usize, usize)>;
+    fn list_windows() -> Vec<String>
+    where
+        Self: Sized;
 }
 
 // --- windows-capture Handler Implementation ---
@@ -56,37 +65,41 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
 
     // Use the required `new` method signature
     fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
-        Ok(Self { frame_sender: Mutex::new(ctx.flags) })
+        Ok(Self {
+            frame_sender: Mutex::new(ctx.flags),
+        })
     }
 
     fn on_frame_arrived(
         &mut self,
         frame: &mut Frame,
-        _capture_control: InternalCaptureControl
-    ) -> Result<(), Self::Error>
-    {
+        _capture_control: InternalCaptureControl,
+    ) -> Result<(), Self::Error> {
         let width = frame.width() as usize;
         let height = frame.height() as usize;
 
-        // --- WORKAROUND: Save to temp file and read back --- 
+        // --- WORKAROUND: Save to temp file and read back ---
         let temp_dir = std::env::temp_dir();
         let unique_id = uuid::Uuid::new_v4();
         let mut temp_path = temp_dir;
         temp_path.push(format!("nu_scaler_frame_{}.bmp", unique_id));
 
-        frame.save_as_image(&temp_path, windows_capture::frame::ImageFormat::Bmp)
-             .map_err(|e| Box::new(e) as Self::Error)?;
+        frame
+            .save_as_image(&temp_path, windows_capture::frame::ImageFormat::Bmp)
+            .map_err(|e| Box::new(e) as Self::Error)?;
         let buffer = fs::read(&temp_path).map_err(|e| Box::new(e) as Self::Error)?;
         let _ = fs::remove_file(&temp_path); // Ignore remove error
-        // --- End WORKAROUND ---
+                                             // --- End WORKAROUND ---
 
         // Send the frame data (read from BMP file)
         match self.frame_sender.lock() {
             Ok(sender) => {
                 if sender.send(Some((buffer, width, height))).is_err() {
-                    eprintln!("[CaptureHandler] Receiver disconnected. Stopping capture implicitly.");
+                    eprintln!(
+                        "[CaptureHandler] Receiver disconnected. Stopping capture implicitly."
+                    );
                 }
-            },
+            }
             Err(poison_error) => {
                 let msg = format!("Mutex poisoned: {}", poison_error);
                 eprintln!("[CaptureHandler] {}", msg);
@@ -99,12 +112,14 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
     fn on_closed(&mut self) -> Result<(), Self::Error> {
         println!("[CaptureHandler] Capture session closed (on_closed called).");
         match self.frame_sender.lock() {
-            Ok(sender) => { let _ = sender.send(None); },
-            Err(poison_error) => { 
+            Ok(sender) => {
+                let _ = sender.send(None);
+            }
+            Err(poison_error) => {
                 let msg = format!("Mutex poisoned on close: {}", poison_error);
                 eprintln!("[CaptureHandler] {}", msg);
                 return Err(Box::new(std::io::Error::new(ErrorKind::Other, msg)) as Self::Error);
-             }
+            }
         }
         Ok(())
     }
@@ -147,21 +162,26 @@ impl ScreenCapture {
             if title_len > 0 && IsWindowVisible(hwnd).as_bool() {
                 let title = OsString::from_wide(&title_buffer[..title_len as usize]);
                 if let Some(title_str) = title.to_str() {
-                    if !title_str.is_empty() { 
-                         let vec_ptr = lparam.0 as *mut Vec<String>;
-                         (*vec_ptr).push(title_str.to_string());
+                    if !title_str.is_empty() {
+                        let vec_ptr = lparam.0 as *mut Vec<String>;
+                        (*vec_ptr).push(title_str.to_string());
                     }
                 }
             }
-            BOOL(1) 
+            BOOL(1)
         }
         unsafe {
-            let _ = EnumWindows(Some(enum_windows_proc), LPARAM(&mut titles as *mut _ as isize));
+            let _ = EnumWindows(
+                Some(enum_windows_proc),
+                LPARAM(&mut titles as *mut _ as isize),
+            );
         }
         titles
     }
-     #[cfg(not(target_os = "windows"))]
-     fn enum_windows_internal() -> Vec<String> { vec![] }
+    #[cfg(not(target_os = "windows"))]
+    fn enum_windows_internal() -> Vec<String> {
+        vec![]
+    }
 
     pub fn list_windows() -> Vec<String> {
         ScreenCapture::enum_windows_internal()
@@ -172,17 +192,17 @@ impl ScreenCapture {
     }
 
     fn stop_wgc(&mut self) {
-         // Dropping the receiver is the primary way to signal the handler to stop
-         if let Some(receiver) = self.wgc_frame_receiver.take() {
-             drop(receiver);
-             self.debug_print("WGC receiver dropped.");
+        // Dropping the receiver is the primary way to signal the handler to stop
+        if let Some(receiver) = self.wgc_frame_receiver.take() {
+            drop(receiver);
+            self.debug_print("WGC receiver dropped.");
         }
-         // Join the thread to ensure it cleans up
-         if let Some(handle) = self.wgc_capture_thread.take() {
+        // Join the thread to ensure it cleans up
+        if let Some(handle) = self.wgc_capture_thread.take() {
             if let Err(e) = handle.join() {
-                 eprintln!("[ScreenCapture] WGC capture thread panicked: {:?}", e);
+                eprintln!("[ScreenCapture] WGC capture thread panicked: {:?}", e);
             } else {
-                 self.debug_print("WGC capture thread joined successfully.");
+                self.debug_print("WGC capture thread joined successfully.");
             }
         }
     }
@@ -198,11 +218,11 @@ impl ScreenCapture {
 
         let capture_flags = tx;
         let settings = Settings::new(
-            window, 
-            CursorCaptureSettings::Default, 
-            DrawBorderSettings::Default, 
-            ColorFormat::Bgra8, 
-            capture_flags, 
+            window,
+            CursorCaptureSettings::Default,
+            DrawBorderSettings::Default,
+            ColorFormat::Bgra8,
+            capture_flags,
         );
 
         let capture_thread = thread::spawn(move || {
@@ -212,21 +232,21 @@ impl ScreenCapture {
                 eprintln!("[WGC Thread] Capture failed: {}", e);
                 // The handler's on_error or on_closed should send None via the channel
             } else {
-                 println!("[WGC Thread] Capture finished gracefully.");
+                println!("[WGC Thread] Capture finished gracefully.");
             }
         });
 
         self.wgc_capture_thread = Some(capture_thread);
         self.running = true;
         Ok(())
-     }
+    }
 }
 
 impl RealTimeCapture for ScreenCapture {
     fn start(&mut self, target: CaptureTarget) -> std::result::Result<(), String> {
         self.debug_print(&format!("Starting capture: {:?}", target));
         self.target = Some(target.clone());
-        self.stop(); 
+        self.stop();
 
         match target {
             CaptureTarget::FullScreen => {
@@ -252,22 +272,20 @@ impl RealTimeCapture for ScreenCapture {
                     Err("Window capture not implemented for this OS".to_string())
                 }
             }
-            CaptureTarget::Region { .. } => {
-                Err("Region capture not implemented yet".to_string())
-            }
+            CaptureTarget::Region { .. } => Err("Region capture not implemented yet".to_string()),
         }
     }
 
     fn stop(&mut self) {
         if self.running {
-             self.debug_print("Stopping capture");
-             self.running = false;
-             self.scrap_capturer = None;
-             self.stop_wgc();
+            self.debug_print("Stopping capture");
+            self.running = false;
+            self.scrap_capturer = None;
+            self.stop_wgc();
         }
     }
 
-    fn get_frame(&mut self) -> Option<(Vec<u8>, usize, usize)> { 
+    fn get_frame(&mut self) -> Option<(Vec<u8>, usize, usize)> {
         if !self.running {
             return None;
         }
@@ -277,10 +295,10 @@ impl RealTimeCapture for ScreenCapture {
                 if let Some(capturer) = self.scrap_capturer.as_mut() {
                     match capturer.frame() {
                         Ok(frame) => {
-                            if self.width == 0 || self.height == 0 { 
-                                eprintln!("[ScreenCapture] Fullscreen dimensions not set!"); 
-                                return None; 
-                            } 
+                            if self.width == 0 || self.height == 0 {
+                                eprintln!("[ScreenCapture] Fullscreen dimensions not set!");
+                                return None;
+                            }
                             let expected_len = self.width * self.height * 4;
                             if frame.len() != expected_len {
                                 eprintln!("[ScreenCapture] Frame size mismatch (FullScreen)! Expected: {}, Got: {}", expected_len, frame.len());
@@ -288,7 +306,10 @@ impl RealTimeCapture for ScreenCapture {
                             }
                             let mut rgba = Vec::with_capacity(expected_len);
                             for chunk in frame.chunks_exact(4) {
-                                rgba.push(chunk[2]); rgba.push(chunk[1]); rgba.push(chunk[0]); rgba.push(chunk[3]);
+                                rgba.push(chunk[2]);
+                                rgba.push(chunk[1]);
+                                rgba.push(chunk[0]);
+                                rgba.push(chunk[3]);
                             }
                             Some((rgba, self.width, self.height))
                         }
@@ -304,44 +325,49 @@ impl RealTimeCapture for ScreenCapture {
                 }
             }
             Some(CaptureTarget::WindowByTitle(_)) => {
-                 #[cfg(target_os = "windows")]
-                 {
+                #[cfg(target_os = "windows")]
+                {
                     if let Some(rx) = self.wgc_frame_receiver.as_ref() {
-                        match rx.try_recv() { 
-                             Ok(Some((bgra_buffer, width, height))) => {
-                                 // Update dimensions based on received frame
-                                 self.width = width;
-                                 self.height = height;
-                                 // Convert BGRA from windows-capture to RGBA
-                                 let mut rgba = Vec::with_capacity(bgra_buffer.len());
-                                  for chunk in bgra_buffer.chunks_exact(4) {
-                                    rgba.push(chunk[2]); rgba.push(chunk[1]); rgba.push(chunk[0]); rgba.push(chunk[3]);
+                        match rx.try_recv() {
+                            Ok(Some((bgra_buffer, width, height))) => {
+                                // Update dimensions based on received frame
+                                self.width = width;
+                                self.height = height;
+                                // Convert BGRA from windows-capture to RGBA
+                                let mut rgba = Vec::with_capacity(bgra_buffer.len());
+                                for chunk in bgra_buffer.chunks_exact(4) {
+                                    rgba.push(chunk[2]);
+                                    rgba.push(chunk[1]);
+                                    rgba.push(chunk[0]);
+                                    rgba.push(chunk[3]);
                                 }
                                 Some((rgba, width, height))
-                             },
-                             Ok(None) => { 
-                                 self.debug_print("Received stop signal from WGC handler.");
-                                 self.stop(); 
-                                 None
-                             },
-                             Err(mpsc::TryRecvError::Empty) => None, 
-                             Err(mpsc::TryRecvError::Disconnected) => {
-                                 self.debug_print("WGC channel disconnected.");
-                                 self.stop();
-                                 None
-                             }
+                            }
+                            Ok(None) => {
+                                self.debug_print("Received stop signal from WGC handler.");
+                                self.stop();
+                                None
+                            }
+                            Err(mpsc::TryRecvError::Empty) => None,
+                            Err(mpsc::TryRecvError::Disconnected) => {
+                                self.debug_print("WGC channel disconnected.");
+                                self.stop();
+                                None
+                            }
                         }
                     } else {
-                        None 
+                        None
                     }
-                 }
-                 #[cfg(not(target_os = "windows"))]
-                 { None }
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    None
+                }
             }
-             Some(CaptureTarget::Region { .. })=> {
-                 eprintln!("[ScreenCapture] Region capture not implemented yet");
-                 None
-             }
+            Some(CaptureTarget::Region { .. }) => {
+                eprintln!("[ScreenCapture] Region capture not implemented yet");
+                None
+            }
             None => None, // No target set
         }
     }
@@ -356,4 +382,4 @@ impl RealTimeCapture for ScreenCapture {
 mod x11_capture {
     // use x11::xlib::*;
     // TODO: Implement X11 window capture
-} 
+}

@@ -1,11 +1,11 @@
 pub mod detector;
 pub mod memory;
 
+use crate::gpu::memory::{AllocationStrategy, MemoryPool, MemoryPressure, VramStats};
 use anyhow::Result;
+use detector::GpuInfo;
 use std::sync::Arc;
 use wgpu::{Device, Queue};
-use crate::gpu::memory::{MemoryPool, AllocationStrategy, MemoryPressure, VramStats};
-use detector::GpuInfo;
 // use thiserror::Error; // Unused
 
 /// Supported GPU providers
@@ -55,8 +55,12 @@ pub struct GpuResources {
 impl GpuResources {
     /// Create new GPU resources with device and queue
     pub fn new(device: Arc<Device>, queue: Arc<Queue>, gpu_info: Option<GpuInfo>) -> Self {
-        let memory_pool = Arc::new(MemoryPool::new(device.clone(), queue.clone(), gpu_info.clone()));
-        
+        let memory_pool = Arc::new(MemoryPool::new(
+            device.clone(),
+            queue.clone(),
+            gpu_info.clone(),
+        ));
+
         Self {
             device,
             queue,
@@ -64,27 +68,27 @@ impl GpuResources {
             gpu_info,
         }
     }
-    
+
     /// Get VRAM statistics
     pub fn get_vram_stats(&self) -> VramStats {
         self.memory_pool.get_stats()
     }
-    
+
     /// Get current memory pressure level
     pub fn get_memory_pressure(&self) -> MemoryPressure {
         self.memory_pool.get_current_memory_pressure()
     }
-    
+
     /// Set memory allocation strategy
     pub fn set_allocation_strategy(&self, strategy: AllocationStrategy) {
         self.memory_pool.set_allocation_strategy(strategy);
     }
-    
+
     /// Update memory strategy based on current usage
     pub fn update_memory_strategy(&self) {
         self.memory_pool.update_strategy();
     }
-    
+
     /// Clean up memory pools to free resources
     pub fn cleanup_memory(&self) {
         self.memory_pool.cleanup_pools();
@@ -117,7 +121,7 @@ impl GpuResources {
         #[cfg(target_os = "linux")]
         {
             use wgpu::hal::vulkan::Api as VulkanApi;
-            let native_handle_opt: Option<*mut std::ffi::c_void> = 
+            let native_handle_opt: Option<*mut std::ffi::c_void> =
                 self.device.as_hal::<VulkanApi, _, _>(|hal_device_opt| {
                     hal_device_opt.map(|d| d.raw_device().handle() as *mut std::ffi::c_void)
                 });
@@ -127,7 +131,7 @@ impl GpuResources {
                 }
             }
         }
-        
+
         Err(GpuError::UnsupportedBackend)
     }
 
@@ -137,7 +141,10 @@ impl GpuResources {
     /// The caller is responsible for ensuring that the handle is used correctly
     /// and within the lifetime of the WGPU texture and device.
     /// The underlying WGPU instance, device, and texture must remain alive while this handle is in use.
-    pub unsafe fn get_native_texture_handle(&self, _texture: &wgpu::Texture) -> Result<*mut std::ffi::c_void, GpuError> {
+    pub unsafe fn get_native_texture_handle(
+        &self,
+        _texture: &wgpu::Texture,
+    ) -> Result<*mut std::ffi::c_void, GpuError> {
         #[cfg(target_os = "windows")]
         {
             use wgpu::hal::dx12::Api as Dx12Api;
@@ -145,7 +152,8 @@ impl GpuResources {
             let mut native_handle_opt: Option<*mut std::ffi::c_void> = None;
             _texture.as_hal::<Dx12Api, _>(|hal_texture_opt| {
                 if let Some(ht) = hal_texture_opt {
-                    native_handle_opt = Some(ht.raw_resource().clone().as_raw() as *mut std::ffi::c_void);
+                    native_handle_opt =
+                        Some(ht.raw_resource().clone().as_raw() as *mut std::ffi::c_void);
                 }
             });
             if let Some(handle) = native_handle_opt {
@@ -162,16 +170,17 @@ impl GpuResources {
             let mut native_handle_opt: Option<*mut std::ffi::c_void> = None;
             _texture.as_hal::<VulkanApi, _>(|hal_texture_opt| {
                 if let Some(ht) = hal_texture_opt {
-                    native_handle_opt = Some(ht.raw_texture() as *mut std::ffi::c_void); // vk::Image is u64
+                    native_handle_opt = Some(ht.raw_texture() as *mut std::ffi::c_void);
+                    // vk::Image is u64
                 }
             });
             if let Some(handle) = native_handle_opt {
-                if !handle.is_null() { 
+                if !handle.is_null() {
                     return Ok(handle);
                 }
             }
         }
-        
+
         Err(GpuError::UnsupportedBackend)
     }
 }
@@ -182,10 +191,12 @@ mod tests {
 
     struct DummyGpuManager;
     impl GpuManager for DummyGpuManager {
-        fn initialize(&mut self, _provider: GpuProvider) -> Result<GpuContext> { // Prefix unused param
+        fn initialize(&mut self, _provider: GpuProvider) -> Result<GpuContext> {
+            // Prefix unused param
             unimplemented!()
         }
-        fn is_supported(&self, _provider: GpuProvider) -> bool { // Prefix unused param
+        fn is_supported(&self, _provider: GpuProvider) -> bool {
+            // Prefix unused param
             unimplemented!()
         }
     }
@@ -203,4 +214,4 @@ mod tests {
         let mgr = DummyGpuManager;
         let _ = mgr.is_supported(GpuProvider::Wgpu);
     }
-} 
+}
