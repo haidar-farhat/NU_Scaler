@@ -1,0 +1,21 @@
+[package]
+name = "dlss-sys"
+version = "0.1.0"
+edition = "2021"
+links = "nvsdk_ngx"
+build = "build.rs"
+authors = ["NuScaler Team"]
+description = "Low-level FFI bindings to the NVIDIA DLSS SDK"
+
+[lib]
+name = "dlss_sys"
+path = "src/lib.rs"
+
+[dependencies]
+libc = "0.2"
+thiserror = "1.0"
+
+[build-dependencies]
+bindgen = "0.68"
+cc = "1.0"
+anyhow = "1.0" 
