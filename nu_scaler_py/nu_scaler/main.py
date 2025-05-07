@@ -1,5 +1,5 @@
 import sys
-sys.path.insert(0, r"C:\Nu_Scaler\NU_Scaler\pyd_test")
+# Remove sys.path.insert for pyd_test
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QListWidget, QStackedWidget, QFrame,
     QPushButton, QComboBox, QSpinBox, QCheckBox, QSlider, QGroupBox, QFormLayout, QProgressBar, QFileDialog, QSizePolicy
@@ -13,23 +13,22 @@ import threading
 import psutil
 import os
 
-# First, try to import the Rust core module
-print("[main.py] About to import nu_scaler_core...")
+# Import the Rust extension as 'nu_scaler'
 try:
-    import nu_scaler_core
-    print(f"[main.py] Successfully imported nu_scaler_core from {nu_scaler_core.__file__}")
-    print(f"[main.py] Available classes in nu_scaler_core: {dir(nu_scaler_core)}")
+    import nu_scaler
+    print(f"[main.py] Successfully imported nu_scaler from {nu_scaler.__file__}")
+    print(f"[main.py] Available classes in nu_scaler: {dir(nu_scaler)}")
 except ImportError as e:
-    print(f"[main.py] ImportError when importing nu_scaler_core: {e}")
-    nu_scaler_core = None
+    print(f"[main.py] ImportError when importing nu_scaler: {e}")
+    nu_scaler = None
 except Exception as e:
-    print(f"[main.py] Error during nu_scaler_core import: {e}")
+    print(f"[main.py] Error during nu_scaler import: {e}")
     traceback.print_exc()
-    nu_scaler_core = None
+    nu_scaler = None
 
-# Then, separately try to import the benchmark module
+# Import Python helper modules from nu_scaler_py
 try:
-    from nu_scaler.benchmark import run_benchmark, run_comparison_benchmark, BenchmarkResult, plot_benchmark_results
+    from nu_scaler_py.benchmark import run_benchmark, run_comparison_benchmark, BenchmarkResult, plot_benchmark_results
 except ImportError as e:
     print(f"[main.py] ImportError when importing benchmark module: {e}")
     run_benchmark = None
@@ -44,11 +43,21 @@ except Exception as e:
     BenchmarkResult = None
     plot_benchmark_results = None
 
-print(f"[main.py] nu_scaler_core available: {nu_scaler_core is not None}")
-print(f"[main.py] DLSS available: {hasattr(nu_scaler_core, 'PyDlssUpscaler')}")
+print(f"[main.py] nu_scaler available: {nu_scaler is not None}")
+print(f"[main.py] DLSS available: {hasattr(nu_scaler, 'PyDlssUpscaler')}")
 
 # Add import for GPU optimization
-from nu_scaler.gpu_optimizer import optimize_upscaler, force_gpu_activation
+try:
+    from nu_scaler_py.gpu_optimizer import optimize_upscaler, force_gpu_activation
+except ImportError as e:
+    print(f"[main.py] ImportError when importing gpu_optimizer: {e}")
+    optimize_upscaler = None
+    force_gpu_activation = None
+except Exception as e:
+    print(f"[main.py] Error when importing gpu_optimizer: {e}")
+    traceback.print_exc()
+    optimize_upscaler = None
+    force_gpu_activation = None
 
 class AspectRatioPreview(QLabel):
     """
@@ -289,9 +298,9 @@ class LiveFeedScreen(QWidget):
         upscale_form = QFormLayout(upscale_controls)
         self.method_box = QComboBox()
         methods = []
-        if hasattr(nu_scaler_core, 'PyDlssUpscaler'):
+        if hasattr(nu_scaler, 'PyDlssUpscaler'):
             methods.append("DLSS")
-        if hasattr(nu_scaler_core, 'PyWgpuUpscaler'):
+        if hasattr(nu_scaler, 'PyWgpuUpscaler'):
             methods.append("WGPU Nearest")
             methods.append("WGPU Bilinear")
         # Add FSR, etc. as needed
@@ -346,11 +355,11 @@ class LiveFeedScreen(QWidget):
     def refresh_windows(self):
         print("[GUI] Refreshing windows list...")
         self.window_box.clear()
-        if nu_scaler_core is not None:
+        if nu_scaler is not None:
             try:
                 # Make sure we have a PyScreenCapture class
-                if hasattr(nu_scaler_core, 'PyScreenCapture') and hasattr(nu_scaler_core.PyScreenCapture, 'list_windows'):
-                    windows = nu_scaler_core.PyScreenCapture.list_windows()
+                if hasattr(nu_scaler, 'PyScreenCapture') and hasattr(nu_scaler.PyScreenCapture, 'list_windows'):
+                    windows = nu_scaler.PyScreenCapture.list_windows()
                     print(f"[GUI] Received windows: {windows}")
                     if windows:
                         self.window_box.addItems(windows)
@@ -373,7 +382,7 @@ class LiveFeedScreen(QWidget):
 
     def start_capture(self):
         print("[GUI] Start capture requested.")
-        if nu_scaler_core is None:
+        if nu_scaler is None:
             print("[GUI] Rust core not available for capture.")
             self.status_bar.setText("Rust core missing")
             return
@@ -389,19 +398,19 @@ class LiveFeedScreen(QWidget):
             # --- End Remove Forced FullScreen ---
 
             if source == "Screen":
-                target = nu_scaler_core.PyCaptureTarget.FullScreen
+                target = nu_scaler.PyCaptureTarget.FullScreen
                 window = None
                 region = None
                 print("[GUI] Using FullScreen target.")
             elif source == "Window" and window_title and window_title != "No windows found" and window_title != "Error listing windows":
-                target = nu_scaler_core.PyCaptureTarget.WindowByTitle
-                window = nu_scaler_core.PyWindowByTitle(title=window_title)
+                target = nu_scaler.PyCaptureTarget.WindowByTitle
+                window = nu_scaler.PyWindowByTitle(title=window_title)
                 region = None
                 print(f"[GUI] Using WindowByTitle target: {window_title}")
             elif source == "Region": # Fixed region for demo
-                target = nu_scaler_core.PyCaptureTarget.Region
+                target = nu_scaler.PyCaptureTarget.Region
                 window = None
-                region = nu_scaler_core.PyRegion(x=100, y=100, width=640, height=480)
+                region = nu_scaler.PyRegion(x=100, y=100, width=640, height=480)
                 print(f"[GUI] Using Region target: {region.x},{region.y} {region.width}x{region.height}")
             else:
                 print("[GUI] Invalid capture configuration.")
@@ -409,7 +418,7 @@ class LiveFeedScreen(QWidget):
                 return
 
             print("[GUI] Calling capture.start()...")
-            self.capture = nu_scaler_core.PyScreenCapture()
+            self.capture = nu_scaler.PyScreenCapture()
             self.capture.start(target, window, region)
             print("[GUI] capture.start() returned.")
 
@@ -530,8 +539,8 @@ class LiveFeedScreen(QWidget):
     
     def init_upscaler(self, in_w, in_h, scale):
         """Create and initialize the appropriate upscaler based on settings."""
-        if not nu_scaler_core:
-            self.log_signal.emit("Error: nu_scaler_core not loaded.")
+        if not nu_scaler:
+            self.log_signal.emit("Error: nu_scaler not loaded.")
             return None
 
         self.log_signal.emit(f"Attempting to initialize upscaler for {in_w}x{in_h} -> scale {scale:.1f}x")
@@ -545,29 +554,29 @@ class LiveFeedScreen(QWidget):
 
         try:
             if method == "DLSS":
-                if hasattr(nu_scaler_core, 'PyDlssUpscaler'):
+                if hasattr(nu_scaler, 'PyDlssUpscaler'):
                     self.log_signal.emit(f"Creating DLSS Upscaler (Quality: {quality})")
-                    self.upscaler = nu_scaler_core.PyDlssUpscaler(quality)
+                    self.upscaler = nu_scaler.PyDlssUpscaler(quality)
                     self.upscaler.initialize(in_w, in_h, out_w, out_h)
                     self.advanced_upscaling = False
                 else:
-                    self.log_signal.emit("Error: PyDlssUpscaler not found in nu_scaler_core.")
+                    self.log_signal.emit("Error: PyDlssUpscaler not found in nu_scaler.")
                     return None
             elif method == "WGPU Nearest":
-                if hasattr(nu_scaler_core, 'PyWgpuUpscaler'):
+                if hasattr(nu_scaler, 'PyWgpuUpscaler'):
                     self.log_signal.emit(f"Creating WGPU Upscaler (nearest) (Quality: {quality})")
-                    self.upscaler = nu_scaler_core.PyWgpuUpscaler(quality, "nearest")
+                    self.upscaler = nu_scaler.PyWgpuUpscaler(quality, "nearest")
                     self.upscaler.initialize(in_w, in_h, out_w, out_h)
                 else:
-                    self.log_signal.emit("Error: PyWgpuUpscaler not found in nu_scaler_core.")
+                    self.log_signal.emit("Error: PyWgpuUpscaler not found in nu_scaler.")
                     return None
             elif method == "WGPU Bilinear":
-                if hasattr(nu_scaler_core, 'PyWgpuUpscaler'):
+                if hasattr(nu_scaler, 'PyWgpuUpscaler'):
                     self.log_signal.emit(f"Creating WGPU Upscaler (bilinear) (Quality: {quality})")
-                    self.upscaler = nu_scaler_core.PyWgpuUpscaler(quality, "bilinear")
+                    self.upscaler = nu_scaler.PyWgpuUpscaler(quality, "bilinear")
                     self.upscaler.initialize(in_w, in_h, out_w, out_h)
                 else:
-                    self.log_signal.emit("Error: PyWgpuUpscaler not found in nu_scaler_core.")
+                    self.log_signal.emit("Error: PyWgpuUpscaler not found in nu_scaler.")
                     return None
             else:
                 self.log_signal.emit(f"Error: Unknown upscaling method selected: {method}")
@@ -1152,7 +1161,7 @@ class BenchmarkScreen(QWidget):
         if run_benchmark is None:
             self.run_btn.setEnabled(False)
             self.compare_btn.setEnabled(False)
-            self.results_text.setText("ERROR: Benchmarking not available. nu_scaler_core module is missing.")
+            self.results_text.setText("ERROR: Benchmarking not available. nu_scaler module is missing.")
     
     def apply_resolution_preset(self, preset):
         """Apply a resolution preset."""
@@ -1412,10 +1421,10 @@ class MainWindow(QMainWindow):
         print('[DEBUG] MainWindow: Before upscaler optimization')
         # Heavy call: optimize_upscaler(self.upscaler)
         # Heavy call: force_gpu_activation(self.upscaler)
-        # if nu_scaler_core is not None:
+        # if nu_scaler is not None:
         #     try:
-        #         if hasattr(nu_scaler_core, 'create_advanced_upscaler'):
-        #             self.upscaler = nu_scaler_core.create_advanced_upscaler('quality')
+        #         if hasattr(nu_scaler, 'create_advanced_upscaler'):
+        #             self.upscaler = nu_scaler.create_advanced_upscaler('quality')
         #             optimize_upscaler(self.upscaler)
         #             print("[GUI] Application startup: GPU optimizations applied")
         #     except Exception as e:
