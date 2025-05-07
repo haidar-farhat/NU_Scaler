@@ -9,5 +9,4 @@ edition = "2021"
 
 [build-dependencies]
 cc = "1.0" # For compiling C/C++ code if needed for shims or helpers
-bindgen = "0.69.4" # To generate Rust bindings from C headers
-clang-sys = "1.7.0" # Patch will override this to use the git version 
+# bindgen and clang-sys are no longer needed for manual FFI bindings 
