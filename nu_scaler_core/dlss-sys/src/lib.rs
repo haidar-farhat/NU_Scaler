@@ -73,8 +73,8 @@ pub struct SlFloat2 {
 impl Default for SlFloat2 {
     fn default() -> Self {
         Self {
-            x: 0.0,
-            y: 0.0,
+            x: SL_INVALID_FLOAT,
+            y: SL_INVALID_FLOAT,
         }
     }
 }
@@ -90,9 +90,9 @@ pub struct SlFloat3 {
 impl Default for SlFloat3 {
     fn default() -> Self {
         Self {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
+            x: SL_INVALID_FLOAT,
+            y: SL_INVALID_FLOAT,
+            z: SL_INVALID_FLOAT,
         }
     }
 }
@@ -109,10 +109,10 @@ pub struct SlFloat4 {
 impl Default for SlFloat4 {
     fn default() -> Self {
         Self {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
-            w: 0.0,
+            x: SL_INVALID_FLOAT,
+            y: SL_INVALID_FLOAT,
+            z: SL_INVALID_FLOAT,
+            w: SL_INVALID_FLOAT,
         }
     }
 }
@@ -121,14 +121,6 @@ impl Default for SlFloat4 {
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct SlFloat4x4 {
     pub row: [SlFloat4; 4],
-}
-
-impl Default for SlFloat4x4 {
-    fn default() -> Self {
-        Self {
-            row: [SlFloat4::default(); 4],
-        }
-    }
 }
 
 #[repr(C)]
