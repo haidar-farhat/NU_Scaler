@@ -1,5 +1,5 @@
 use anyhow::Result;
-use wgpu::{Adapter, AdapterInfo, Backends, Instance, DeviceType};
+use wgpu::{Adapter, AdapterInfo, Backends, Instance, DeviceType, Backend};
 use std::sync::Arc;
 use pyo3::prelude::*;
 
@@ -258,27 +258,26 @@ impl GpuDetector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+    use wgpu::{AdapterInfo, DeviceType, Backend};
+
+    // Helper to create a basic AdapterInfo for testing
+    fn mock_adapter_info(vendor_id: u32) -> AdapterInfo {
+        AdapterInfo {
+            name: String::new(),
+            vendor: vendor_id,
+            device: 0,
+            device_type: DeviceType::Other,
+            driver: String::new(),
+            driver_info: String::new(),
+            backend: Backend::Empty,
+        }
+    }
+
     #[test]
     fn test_gpu_vendor_from_id() {
-        assert_eq!(GpuVendor::Nvidia, GpuInfo::from(AdapterInfo {
-            vendor: 0x10DE,
-            ..Default::default()
-        }).vendor);
-        
-        assert_eq!(GpuVendor::Amd, GpuInfo::from(AdapterInfo {
-            vendor: 0x1002,
-            ..Default::default()
-        }).vendor);
-        
-        assert_eq!(GpuVendor::Intel, GpuInfo::from(AdapterInfo {
-            vendor: 0x8086,
-            ..Default::default()
-        }).vendor);
-        
-        assert_eq!(GpuVendor::Other, GpuInfo::from(AdapterInfo {
-            vendor: 0xABCD,
-            ..Default::default()
-        }).vendor);
+        assert_eq!(GpuVendor::Nvidia, GpuInfo::from(mock_adapter_info(0x10DE)).vendor);
+        assert_eq!(GpuVendor::Amd, GpuInfo::from(mock_adapter_info(0x1002)).vendor);
+        assert_eq!(GpuVendor::Intel, GpuInfo::from(mock_adapter_info(0x8086)).vendor);
+        assert_eq!(GpuVendor::Other, GpuInfo::from(mock_adapter_info(0xABCD)).vendor);
     }
 } 
