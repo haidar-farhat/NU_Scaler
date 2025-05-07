@@ -118,7 +118,7 @@ impl Default for SlFloat4 {
 }
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Default)]
 pub struct SlFloat4x4 {
     pub row: [SlFloat4; 4],
 }
@@ -133,17 +133,12 @@ pub struct SlExtent {
 }
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub enum SlBoolean {
     False = 0,
     True = 1,
+    #[default]
     Invalid = 2, // Assuming 'eInvalid' maps to 2, check original C++ char value if different
-}
-
-impl Default for SlBoolean {
-    fn default() -> Self {
-        SlBoolean::Invalid
-    }
 }
 
 #[repr(C)]
@@ -212,8 +207,9 @@ impl Default for SlConstants {
 // --- From sl_dlss.h ---
 
 #[repr(u32)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
 pub enum SlDLSSMode {
+    #[default]
     Off = 0,
     MaxPerformance = 1,
     Balanced = 2,
@@ -224,15 +220,10 @@ pub enum SlDLSSMode {
     Count, // Placeholder for the count, actual value might differ if used numerically
 }
 
-impl Default for SlDLSSMode {
-    fn default() -> Self {
-        SlDLSSMode::Off
-    }
-}
-
 #[repr(u32)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default)]
 pub enum SlDLSSPreset {
+    #[default]
     Default = 0,
     A = 1,
     B = 2,
@@ -250,12 +241,6 @@ pub enum SlDLSSPreset {
     N = 14,
     O = 15,
     Count, // Placeholder
-}
-
-impl Default for SlDLSSPreset {
-    fn default() -> Self {
-        SlDLSSPreset::Default
-    }
 }
 
 #[repr(C)]
