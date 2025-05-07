@@ -16,6 +16,6 @@ libc = "0.2"
 thiserror = "1.0"
 
 [build-dependencies]
-bindgen = "0.68"
+bindgen = "0.69.1"
 cc = "1.0"
 anyhow = "1.0" 
