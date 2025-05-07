@@ -536,9 +536,10 @@ impl WgpuUpscaler {
     
     // Initialize buffers, pipeline, etc.
     fn initialize_with_resources(&mut self, input_width: u32, input_height: u32, output_width: u32, output_height: u32) -> Result<()> {
-        // Get the device reference *before* modifying self fields
-        let device = self.device().ok_or_else(|| anyhow!("WGPU device not available for initialization"))?;
-        
+        // Get a *clone* of the Arc<Device> if available, ending the borrow of self immediately.
+        let device_arc = self.get_device_clone().ok_or_else(|| anyhow!("WGPU device not available for initialization"))?;
+        // `self` is no longer borrowed by `device_arc` at this point.
+
         // Now update self fields
         self.input_width = input_width;
         self.input_height = input_height;
@@ -548,54 +549,56 @@ impl WgpuUpscaler {
         let input_buffer_size = (input_width * input_height * 4) as u64; // RGBA8
         let output_buffer_size = (output_width * output_height * 4) as u64;
         
+        // Use the cloned Arc, getting a reference (&Device) when needed for wgpu calls.
+        let device_ref: &Device = &*device_arc; 
+
         // Create or re-create shader module if not already done or if algorithm changed
-        // Use the previously obtained `device` reference here
         if self.shader.is_none() { // Also consider if algorithm changed
-            self.shader = Some(self.load_shader_module(device));
+            self.shader = Some(self.load_shader_module(device_ref));
         }
         let shader = self.shader.as_ref().unwrap();
         
         // Create bind group layout if not already done or if it needs to change
-        // Use the previously obtained `device` reference here
         if self.bind_group_layout.is_none() {
-            self.bind_group_layout = Some(device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-                label: Some("Upscale Bind Group Layout"),
-                entries: &[
+            self.bind_group_layout = Some(device_ref.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("Upscale Bind Group Layout"),
+            entries: &[
                     BindGroupLayoutEntry { // Input image
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::COMPUTE,
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
                         ty: BindingType::Buffer { ty: BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None },
-                        count: None,
-                    },
+                    count: None,
+                },
                     BindGroupLayoutEntry { // Output image
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::COMPUTE,
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
                         ty: BindingType::Buffer { ty: BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None },
-                        count: None,
-                    },
+                    count: None,
+                },
                     BindGroupLayoutEntry { // Dimensions
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::COMPUTE,
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
                         ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
-                        count: None,
-                    },
-                ],
+                    count: None,
+                },
+            ],
             }));
         }
         let bind_group_layout = self.bind_group_layout.as_ref().unwrap();
         
         // Create pipeline if not already done or if it needs to change
         if self.pipeline.is_none() { // Also consider if shader or layout changed
-            let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
-                label: Some("Upscale Pipeline Layout"),
+        let pipeline_layout = device_ref.create_pipeline_layout(&PipelineLayoutDescriptor {
+            label: Some("Upscale Pipeline Layout"),
                 bind_group_layouts: &[bind_group_layout],
-                push_constant_ranges: &[],
-            });
-            self.pipeline = Some(device.create_compute_pipeline(&ComputePipelineDescriptor {
+            push_constant_ranges: &[],
+        });
+            self.pipeline = Some(device_ref.create_compute_pipeline(&ComputePipelineDescriptor {
                 label: Some(if self.algorithm == UpscaleAlgorithm::Bilinear { "Bilinear Upscale Pipeline" } else { "Nearest Neighbor Upscale Pipeline" }),
-                layout: Some(&pipeline_layout),
+            layout: Some(&pipeline_layout),
                 module: shader,
-                entry_point: "main",
+            entry_point: "main",
+                // compilation_options: removed previously
             }));
         }
         
@@ -605,7 +608,7 @@ impl WgpuUpscaler {
             self.output_width, self.output_height, 
             0, 0, 0, 0 // Reserved for sharpness, etc. - needs to match shader struct
         ];
-        self.dimensions_buffer = Some(device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        self.dimensions_buffer = Some(device_ref.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Dimensions Uniform Buffer"),
             contents: bytemuck::cast_slice(&dimensions_data),
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
@@ -621,7 +624,7 @@ impl WgpuUpscaler {
                 let input_buf = pool.get_buffer(input_buffer_size as usize, BufferUsages::STORAGE | BufferUsages::COPY_DST, Some(&format!("Pooled Input {}", i)));
                 let output_buf = pool.get_buffer(output_buffer_size as usize, BufferUsages::STORAGE | BufferUsages::COPY_SRC, Some(&format!("Pooled Output {}", i)));
                 
-                let bind_group = device.create_bind_group(&BindGroupDescriptor {
+                let bind_group = device_ref.create_bind_group(&BindGroupDescriptor {
                     label: Some(&format!("Pooled Upscale Bind Group {}", i)),
                     layout: bind_group_layout,
                     entries: &[
@@ -637,19 +640,19 @@ impl WgpuUpscaler {
             println!("[WgpuUpscaler] Initialized buffer pool with {} sets of buffers using GpuResources pool.", self.buffer_pool_size);
         } else {
             // Fallback to creating individual buffers if not using GpuResources pool or if it's not available
-            self.input_buffer = Some(device.create_buffer(&BufferDescriptor {
+            self.input_buffer = Some(device_ref.create_buffer(&BufferDescriptor {
                 label: Some("Input Buffer"),
                 size: input_buffer_size,
                 usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }));
-            self.output_buffer = Some(device.create_buffer(&BufferDescriptor {
+            self.output_buffer = Some(device_ref.create_buffer(&BufferDescriptor {
                 label: Some("Output Buffer"),
                 size: output_buffer_size,
                 usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC,
                 mapped_at_creation: false,
             }));
-            self.fallback_bind_group = Some(device.create_bind_group(&BindGroupDescriptor {
+            self.fallback_bind_group = Some(device_ref.create_bind_group(&BindGroupDescriptor {
                 label: Some("Fallback Upscale Bind Group"),
                 layout: bind_group_layout,
                 entries: &[
@@ -662,11 +665,11 @@ impl WgpuUpscaler {
         }
         
         // Create staging buffer (always created, size might need adjustment)
-        self.staging_buffer = Some(device.create_buffer(&BufferDescriptor {
-            label: Some("Staging Buffer"),
+        self.staging_buffer = Some(device_ref.create_buffer(&BufferDescriptor {
+                label: Some("Staging Buffer"),
             size: output_buffer_size, // Should be large enough for output
-            usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
+                usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
+                mapped_at_creation: false,
         }));
         
         self.initialized = true;
