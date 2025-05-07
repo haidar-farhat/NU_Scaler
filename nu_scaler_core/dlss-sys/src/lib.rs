@@ -268,7 +268,7 @@ impl StreamlineApi {
         F: FnOnce(libloading::Symbol<T>) -> R,
         T: Copy 
     {
-        unsafe { // Added unsafe block here
+        unsafe { 
             match self._lib.get::<T>(symbol_name) {
                 Ok(symbol) => Ok(action(symbol)),
                 Err(e) => Err(format!("Failed to load symbol '{}': {}", String::from_utf8_lossy(symbol_name).trim_end_matches('\0'), e))
@@ -277,15 +277,15 @@ impl StreamlineApi {
     }
 
     pub fn slInitializeSDK_method(&self) -> Result<SlStatus, String> {
-        self.load_symbol_and_call::<FnSlInitializeSDK>(b"slInitializeSDK\0", |func| func()) // Specify type T
+        self.load_symbol_and_call::<FnSlInitializeSDK, _, SlStatus>(b"slInitializeSDK\0", |func| func()) 
     }
 
     pub fn slShutdownSDK_method(&self) -> Result<SlStatus, String> {
-        self.load_symbol_and_call::<FnSlShutdownSDK>(b"slShutdownSDK\0", |func| func()) // Specify type T
+        self.load_symbol_and_call::<FnSlShutdownSDK, _, SlStatus>(b"slShutdownSDK\0", |func| func()) 
     }
 
     pub fn slIsFeatureSupported_method(&self, feature: SlFeature, adapter_info: *const std::ffi::c_void) -> Result<SlBool, String> {
-        self.load_symbol_and_call::<FnSlIsFeatureSupported>(b"slIsFeatureSupported\0", |func| func(feature, adapter_info)) // Specify type T
+        self.load_symbol_and_call::<FnSlIsFeatureSupported, _, SlBool>(b"slIsFeatureSupported\0", |func| func(feature, adapter_info))
     }
     
     pub fn slCreateDlssFeature_method(
@@ -297,7 +297,7 @@ impl StreamlineApi {
         output_height: u32,
         native_device: *mut std::ffi::c_void,
     ) -> Result<SlStatus, String> {
-        self.load_symbol_and_call::<FnSlCreateDlssFeature>(b"slCreateDlssFeature\0", |func| { // Specify type T
+        self.load_symbol_and_call::<FnSlCreateDlssFeature, _, SlStatus>(b"slCreateDlssFeature\0", |func| { 
             func(
                 dlss_feature_handle_out,
                 application_id,
@@ -308,43 +308,7 @@ impl StreamlineApi {
             )
         })
     }
-
-    // ... other methods like slShutdownSDK_method, slIsFeatureSupported_method etc. following the same pattern ...
-    // For example:
-    // pub fn slShutdownSDK_method(&self) -> Result<SlStatus, LoadError> {
-    //     unsafe {
-    //         let func = self._lib.get::<FnSlShutdownSDK>(b"slShutdownSDK\0")
-    //             .map_err(|e| LoadError(format!("Failed to load symbol 'slShutdownSDK': {}", e)))?;
-    //         Ok(func())
-    //     }
-    // }
-
-    // Add more methods for slCreateDlssFeature, slEvaluateDlssFeature, slDestroyDlssFeature, slDLSSSetOptions
-    // pub fn slCreateDlssFeature_method(
-    //     &self,
-    //     dlss_feature_handle_out: *mut SlDlssFeature,
-    //     application_id: u32,
-    //     mode: SlDLSSMode,
-    //     output_width: u32,
-    //     output_height: u32,
-    //     native_device: *mut std::ffi::c_void,
-    // ) -> Result<SlStatus, LoadError> {
-    //     unsafe {
-    //         let func = self._lib.get::<FnSlCreateDlssFeature>(b"slCreateDlssFeature\0")
-    //             .map_err(|e| LoadError(format!("Failed to load symbol 'slCreateDlssFeature': {}", e)))?;
-    //         Ok(func(
-    //             dlss_feature_handle_out,
-    //             application_id,
-    //             mode,
-    //             output_width,
-    //             output_height,
-    //             native_device,
-    //         ))
-    //     }
-    // }
-
-    // etc. for other functions ...
-
+    
     pub fn slEvaluateDlssFeature_method(
         &self, 
         dlss_feature_handle: SlDlssFeature,
@@ -359,17 +323,17 @@ impl StreamlineApi {
         render_height: u32, 
         params: *const SlDLSSOptions
     ) -> Result<SlStatus, String> {
-        self.load_symbol_and_call::<FnSlEvaluateDlssFeature>(b"slEvaluateDlssFeature\0", |func| {
+        self.load_symbol_and_call::<FnSlEvaluateDlssFeature, _, SlStatus>(b"slEvaluateDlssFeature\0", |func| {
             func(dlss_feature_handle, cmd_buffer, input_resource, output_resource, motion_vectors, depth, jitter_x, jitter_y, render_width, render_height, params)
         })
     }
 
     pub fn slDestroyDlssFeature_method(&self, dlss_feature_handle: SlDlssFeature) -> Result<SlStatus, String> {
-        self.load_symbol_and_call::<FnSlDestroyDlssFeature>(b"slDestroyDlssFeature\0", |func| func(dlss_feature_handle))
+        self.load_symbol_and_call::<FnSlDestroyDlssFeature, _, SlStatus>(b"slDestroyDlssFeature\0", |func| func(dlss_feature_handle))
     }
 
     pub fn slDLSSSetOptions_method(&self, dlss_feature_handle: SlDlssFeature, options: *const SlDLSSOptions) -> Result<SlStatus, String> {
-        self.load_symbol_and_call::<FnSlDLSSSetOptions>(b"slDLSSSetOptions\0", |func| func(dlss_feature_handle, options))
+        self.load_symbol_and_call::<FnSlDLSSSetOptions, _, SlStatus>(b"slDLSSSetOptions\0", |func| func(dlss_feature_handle, options))
     }
 }
 
