@@ -7,9 +7,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::any::Any;
 use pyo3::prelude::*;
-use crate::gpu::{detector::GpuDetector, memory::{MemoryPool, AllocationStrategy, MemoryPressure}, GpuResources};
-use std::io::{Write, BufWriter};
-use std::fs::{OpenOptions, File};
+use crate::gpu::{detector::GpuDetector, memory::{/*MemoryPool,*/ AllocationStrategy, /*MemoryPressure*/}, GpuResources};
+use std::io::{/*Write,*/ BufWriter};
+use std::fs::{/*OpenOptions,*/ File};
 use std::path::PathBuf;
 
 // Add new module declarations
@@ -51,7 +51,7 @@ pub enum UpscalingTechnology {
 }
 
 /// Trait for upscaling algorithms
-pub trait Upscaler: Any + Send + Sync {
+pub trait Upscaler: Any {
     /// Initialize the upscaler
     fn initialize(&mut self, input_width: u32, input_height: u32, output_width: u32, output_height: u32) -> Result<()>;
     /// Upscale a single frame (raw bytes or image)
