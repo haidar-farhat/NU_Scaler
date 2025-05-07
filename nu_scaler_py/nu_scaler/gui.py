@@ -336,12 +336,28 @@ class MainWindow(QMainWindow):
         if not self.video_cap.isOpened():
             self.video_status.setText("Error: Cannot open video.")
             return
-        from nu_scaler_core import PyWgpuUpscaler
+
         quality = self.quality_box.currentText()
         algorithm = self.algorithm_box.currentText()
         out_w = self.output_w.value()
         out_h = self.output_h.value()
-        self.video_upscaler = PyWgpuUpscaler(quality, algorithm)
+
+        try:
+            if algorithm == "DLSS":
+                if not hasattr(nu_scaler_core, 'PyDlssUpscaler'):
+                    QMessageBox.critical(self, "Upscaler Error", "PyDlssUpscaler not found in nu_scaler_core. Is DLSS supported?")
+                    return
+                self.video_upscaler = nu_scaler_core.PyDlssUpscaler(quality=quality)
+            else:
+                if not hasattr(nu_scaler_core, 'PyWgpuUpscaler'):
+                    QMessageBox.critical(self, "Upscaler Error", "PyWgpuUpscaler not found in nu_scaler_core.")
+                    return
+                self.video_upscaler = nu_scaler_core.PyWgpuUpscaler(quality=quality, algorithm=algorithm)
+            # Initialization of self.video_upscaler happens in self.update_video_frame_with_audio
+        except Exception as e:
+            QMessageBox.critical(self, "Upscaler Creation Error", f"Error creating upscaler for video: {str(e)}")
+            return
+
         self.video_play_btn.setEnabled(False)
         self.video_stop_btn.setEnabled(True)
         self.video_status.setText("Status: Playing")
