@@ -3,18 +3,20 @@
 
 #pragma once
 
-// Use an absolute path to the new SDK 2.7.30 include directory
+// Main Streamline header from the specified SDK path
 #include "C:/nvideasdk/bckup/Streamline/include/sl.h"
 
-// If these were previously included from the old SDK path, update them too.
-// Assuming they are also in C:/nvideasdk/bckup/Streamline/include/
-// If not, adjust or remove as necessary.
-#if SL_DLSS_G
-#include "C:/nvideasdk/bckup/Streamline/include/sl_dlss_g.h" 
+// Conditionally include DLSS-G header if the main sl.h defines SL_DLSS_G
+// This assumes sl_dlss_g.h is also directly in C:/nvideasdk/bckup/Streamline/include/
+#if SL_DLSS_G && __has_include("C:/nvideasdk/bckup/Streamline/include/sl_dlss_g.h")
+#include "C:/nvideasdk/bckup/Streamline/include/sl_dlss_g.h"
 #endif
 
-// Example for other features if needed, ensure these files exist at the new path
+// Add other specific headers here if sl.h doesn't pull them in and they are needed,
+// for example:
+// #if SL_REFLEX_ENABLED && __has_include("C:/nvideasdk/bckup/Streamline/include/sl_reflex.h")
 // #include "C:/nvideasdk/bckup/Streamline/include/sl_reflex.h"
+// #endif
 
 // Ensure that the build script (build.rs) can find these headers.
 // The current build.rs doesn't explicitly add include paths to bindgen,
