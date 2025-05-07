@@ -98,7 +98,6 @@ impl GpuResources {
     /// and within the lifetime of the WGPU device.
     /// The underlying WGPU instance and device must remain alive while this handle is in use.
     pub unsafe fn get_native_device_handle(&self) -> Result<*mut std::ffi::c_void, GpuError> {
-        /*
         #[cfg(target_os = "windows")]
         {
             use wgpu::hal::dx12::Api as Dx12Api;
@@ -115,7 +114,6 @@ impl GpuResources {
                 }
             }
         }
-        */
 
         #[cfg(target_os = "linux")]
         {
@@ -141,7 +139,6 @@ impl GpuResources {
     /// and within the lifetime of the WGPU texture and device.
     /// The underlying WGPU instance, device, and texture must remain alive while this handle is in use.
     pub unsafe fn get_native_texture_handle(&self, texture: &wgpu::Texture) -> Result<*mut std::ffi::c_void, GpuError> {
-        /*
         #[cfg(target_os = "windows")]
         {
             use wgpu::hal::dx12::Api as Dx12Api;
@@ -159,7 +156,6 @@ impl GpuResources {
                 }
             }
         }
-        */
 
         #[cfg(target_os = "linux")]
         {
