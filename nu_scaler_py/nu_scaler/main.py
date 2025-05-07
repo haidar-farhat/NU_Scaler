@@ -44,7 +44,7 @@ except Exception as e:
     plot_benchmark_results = None
 
 print(f"[main.py] nu_scaler available: {nu_scaler is not None}")
-print(f"[main.py] DLSS available: {hasattr(nu_scaler, 'DlssUpscaler')}")
+print(f"[main.py] DLSS available: {hasattr(nu_scaler, 'PyDlssUpscaler')}")
 
 # Add import for GPU optimization
 try:
@@ -298,7 +298,7 @@ class LiveFeedScreen(QWidget):
         upscale_form = QFormLayout(upscale_controls)
         self.method_box = QComboBox()
         methods = []
-        if hasattr(nu_scaler, 'DlssUpscaler'):
+        if hasattr(nu_scaler, 'PyDlssUpscaler'):
             methods.append("DLSS")
         if hasattr(nu_scaler, 'PyWgpuUpscaler'):
             methods.append("WGPU Nearest")
@@ -554,13 +554,13 @@ class LiveFeedScreen(QWidget):
 
         try:
             if method == "DLSS":
-                if hasattr(nu_scaler, 'DlssUpscaler'):
+                if hasattr(nu_scaler, 'PyDlssUpscaler'):
                     self.log_signal.emit(f"Creating DLSS Upscaler (Quality: {quality})")
-                    self.upscaler = nu_scaler.DlssUpscaler(quality)
+                    self.upscaler = nu_scaler.PyDlssUpscaler(quality)
                     self.upscaler.initialize(in_w, in_h, out_w, out_h)
                     self.advanced_upscaling = False
                 else:
-                    self.log_signal.emit("Error: DlssUpscaler not found in nu_scaler.")
+                    self.log_signal.emit("Error: PyDlssUpscaler not found in nu_scaler.")
                     return None
             elif method == "WGPU Nearest":
                 if hasattr(nu_scaler, 'PyWgpuUpscaler'):
