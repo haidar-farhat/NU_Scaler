@@ -81,37 +81,27 @@ mod tests {
         // In a real scenario, Once ensures it only runs once per process.
         // For repeated test runs in the same process, this is problematic without process isolation.
         // This test is more of an integration check.
-        unsafe { SL_INITIALIZED_SUCCESSFULLY = false; }
-        let _once_resetter = ResetOnceForTest(&SL_INIT);
+        // For multiple test functions, consider a setup/teardown mechanism for SL_INITIALIZED_SUCCESSFULLY if possible,
+        // or ensure tests that depend on successful init run after a basic init test.
+        // However, `Once` itself cannot be reset, so the actual slInitializeSDK call happens once per process life.
+        let initial_state_for_test = unsafe { SL_INITIALIZED_SUCCESSFULLY };
+        let reinitialize_attempt = !initial_state_for_test; // Only really try if not already marked true
 
+        if reinitialize_attempt {
+            println!("Test: Attempting SDK initialization as part of test_sdk_initialization.");
+        }
 
         match DlssManager::new() {
             Ok(_) => {
                 assert!(DlssManager::is_sdk_initialized(), "SDK should be marked as initialized.");
-                println!("SDK Init test: Success");
+                println!("SDK Init test: Success (or was already initialized successfully).");
             }
             Err(e) => {
                 // This might happen if, for example, NVIDIA drivers are not installed,
                 // or if sl.interposer.dll is not found or cannot load its dependencies.
                 eprintln!("SDK Init test: Failed to initialize SDK: {:?}. This might be expected if environment is not set up for DLSS execution.", e);
-                // Depending on CI/test environment, you might not want to panic here.
-                // For local dev, a panic might be okay.
-                // panic!("SDK Initialization failed in test: {:?}", e); 
                 assert!(!DlssManager::is_sdk_initialized(), "SDK should not be marked as initialized on error.");
             }
-        }
-    }
-
-    // Helper to somewhat reset `Once` for tests in the same process.
-    // This is generally not a good practice for `Once` but can help for sequential tests.
-    // Real isolation would require separate processes.
-    struct ResetOnceForTest(&'static Once);
-    impl Drop for ResetOnceForTest {
-        fn drop(&mut self) {
-            // Unfortunately, `Once` cannot be truly reset.
-            // This means the `call_once` closure will not run again in the same process
-            // if it has already run. `SL_INITIALIZED_SUCCESSFULLY` being false allows
-            // `DlssManager::new()` to re-evaluate the init state though.
         }
     }
 }
