@@ -1,0 +1,21 @@
+[package]
+name = "fsr3-sys"
+version = "0.1.0"
+edition = "2021"
+links = "fsr3"
+build = "build.rs"
+authors = ["NuScaler Team"]
+description = "Low-level FFI bindings to the AMD FSR 3.0 SDK"
+
+[lib]
+name = "fsr3_sys"
+path = "src/lib.rs"
+
+[dependencies]
+libc = "0.2"
+thiserror = "1.0"
+
+[build-dependencies]
+bindgen = "0.68"
+cc = "1.0"
+anyhow = "1.0" 
