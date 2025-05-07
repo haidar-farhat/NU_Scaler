@@ -44,3 +44,8 @@ uuid = { version = "1.6", features = ["v4"] }
 
 [build-dependencies]
 # ... existing build dependencies ...
+
+[package.metadata.post-build]
+# After building, run this script to copy the .pyd to your venv site-packages
+# Usage: cargo build --release && pwsh ../post_build.ps1
+script = "../post_build.ps1"
