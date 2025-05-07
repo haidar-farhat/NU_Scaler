@@ -6,7 +6,7 @@ use std::sync::Arc;
 use wgpu::{Device, Queue};
 use crate::gpu::memory::{MemoryPool, AllocationStrategy, MemoryPressure, VramStats};
 use detector::GpuInfo;
-use thiserror::Error;
+// use thiserror::Error; // Unused
 
 /// Supported GPU providers
 #[derive(Debug, Clone, Copy, PartialEq)]
