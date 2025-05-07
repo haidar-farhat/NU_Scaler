@@ -140,18 +140,21 @@ impl GpuResources {
     /// The caller is responsible for ensuring that the handle is used correctly
     /// and within the lifetime of the WGPU texture and device.
     /// The underlying WGPU instance, device, and texture must remain alive while this handle is in use.
-    pub unsafe fn get_native_texture_handle(
-        &self,
-        _texture: &wgpu::Texture,
-    ) -> Result<*mut std::ffi::c_void, GpuError> {
+    pub unsafe fn get_native_texture_handle(&self, _texture: &wgpu::Texture) -> Result<*mut std::ffi::c_void, GpuError> {
         #[cfg(target_os = "windows")]
         {
+            // TODO: Find the correct way to get ID3D12Resource* from wgpu_hal::dx12::Texture in wgpu-hal 0.19
+            // The `resource` field is pub(super) and no obvious public method seems available.
+            // Temporarily returning error.
+            eprintln!("[get_native_texture_handle] DX12: Texture resource access not yet implemented correctly for wgpu-hal 0.19.");
+            return Err(GpuError::UnsupportedBackend); 
+            /*
             use wgpu::hal::dx12::Api as Dx12Api;
-            // use windows::core::Interface; // Not strictly needed for as_ptr() on ComPtr
             let mut native_handle_opt: Option<*mut std::ffi::c_void> = None;
             _texture.as_hal::<Dx12Api, _>(|hal_texture_opt| {
                 if let Some(ht) = hal_texture_opt {
-                    native_handle_opt = Some(ht.resource.as_ptr() as *mut std::ffi::c_void);
+                    // native_handle_opt = Some(ht.resource.as_ptr() as *mut std::ffi::c_void); // ht.resource is private
+                    // native_handle_opt = Some(ht.raw_resource().as_ptr() as *mut std::ffi::c_void); // ht.raw_resource() not found
                 }
             });
             if let Some(handle) = native_handle_opt {
@@ -159,7 +162,7 @@ impl GpuResources {
                     return Ok(handle);
                 }
             }
-            // If native_handle_opt was None or handle was null, fall through to error or other backends
+            */
         }
 
         #[cfg(target_os = "linux")]
