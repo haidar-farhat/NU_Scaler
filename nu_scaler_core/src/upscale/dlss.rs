@@ -139,7 +139,9 @@ impl Upscaler for DlssUpscaler {
             native_device_handle
         );
 
-        let mut dlss_feature_handle: SlDlssFeature = std::ptr::null_mut();
+        let mut dlss_feature_handle: SlDlssFeature = 0; // Initialize with 0 (invalid handle)
+        let app_id: u32 = 0; // Placeholder - Get a real App ID from NVIDIA if necessary
+
         // Create DLSS feature with TARGET OUTPUT dimensions
         let status_create = unsafe {
             dlss_sys::slCreateDlssFeature(
@@ -151,7 +153,8 @@ impl Upscaler for DlssUpscaler {
             )
         };
 
-        if status_create != SlStatus::Success || dlss_feature_handle.is_null() {
+        if status_create != SlStatus::Success || dlss_feature_handle == 0 { // Check against 0
+            self.dlss_feature = None;
             return Err(anyhow!(
                 "slCreateDlssFeature failed with status {:?} or returned null handle. Target output: {}x{}",
                 status_create, self.output_width, self.output_height
