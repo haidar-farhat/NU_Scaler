@@ -98,14 +98,13 @@ impl GpuResources {
     /// and within the lifetime of the WGPU device.
     /// The underlying WGPU instance and device must remain alive while this handle is in use.
     pub unsafe fn get_native_device_handle(&self) -> Result<*mut std::ffi::c_void, GpuError> {
-        /* // Add comment start
         #[cfg(target_os = "windows")]
         {
             use wgpu::hal::dx12::Api as Dx12Api;
-            use windows::core::Interface; // Ensure Interface trait is in scope for .as_raw()
+            use windows::core::Interface; // Needed for .as_raw()
             let native_handle_opt: Option<*mut std::ffi::c_void> = 
                 self.device.as_hal::<Dx12Api, _, _>(|hal_device_opt| {
-                    // Call raw_device() -> as_raw() -> cast()
+                    // Try d.raw_device() -> as_raw() -> cast()
                     hal_device_opt.map(|d| d.raw_device().as_raw().cast::<c_void>())
                 });
 
@@ -115,7 +114,6 @@ impl GpuResources {
                 }
             }
         }
-        */ // Add comment end
 
         #[cfg(target_os = "linux")]
         {
@@ -141,7 +139,6 @@ impl GpuResources {
     /// and within the lifetime of the WGPU texture and device.
     /// The underlying WGPU instance, device, and texture must remain alive while this handle is in use.
     pub unsafe fn get_native_texture_handle(&self, texture: &wgpu::Texture) -> Result<*mut std::ffi::c_void, GpuError> {
-        /* // Add comment start
         #[cfg(target_os = "windows")]
         {
             use wgpu::hal::dx12::Api as Dx12Api;
@@ -159,7 +156,6 @@ impl GpuResources {
                 }
             }
         }
-        */ // Add comment end
 
         #[cfg(target_os = "linux")]
         {
