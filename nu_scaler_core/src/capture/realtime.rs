@@ -69,8 +69,8 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         let height = frame.height() as usize;
 
         // --- WORKAROUND: Save to temp file and read back --- 
-        let temp_dir = env::temp_dir();
-        let unique_id = Uuid::new_v4();
+        let temp_dir = std::env::temp_dir();
+        let unique_id = uuid::Uuid::new_v4();
         let mut temp_path = temp_dir;
         temp_path.push(format!("nu_scaler_frame_{}.bmp", unique_id));
 
