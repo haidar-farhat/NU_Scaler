@@ -6,6 +6,7 @@ use std::sync::Arc;
 use wgpu::{Device, Queue};
 use crate::gpu::memory::{MemoryPool, AllocationStrategy, MemoryPressure, VramStats};
 use detector::GpuInfo;
+use std::ffi::c_void;
 // use thiserror::Error; // Unused
 
 /// Supported GPU providers
@@ -100,9 +101,10 @@ impl GpuResources {
         #[cfg(target_os = "windows")]
         {
             use wgpu::hal::dx12::Api as Dx12Api;
+            use windows::core::Interface;
             let native_handle_opt: Option<*mut std::ffi::c_void> = 
                 self.device.as_hal::<Dx12Api, _, _>(|hal_device_opt| {
-                    hal_device_opt.map(|d| (*d.raw_device()).as_raw() as *mut std::ffi::c_void)
+                    hal_device_opt.map(|d| d.raw_device().as_raw().cast::<c_void>())
                 });
 
             if let Some(handle) = native_handle_opt {
@@ -139,10 +141,11 @@ impl GpuResources {
         #[cfg(target_os = "windows")]
         {
             use wgpu::hal::dx12::Api as Dx12Api;
+            use windows::core::Interface;
             let mut native_handle_opt: Option<*mut std::ffi::c_void> = None;
             texture.as_hal::<Dx12Api, _>(|hal_texture_opt| {
                 if let Some(ht) = hal_texture_opt {
-                    native_handle_opt = Some(ht.resource().as_raw() as *mut std::ffi::c_void);
+                    native_handle_opt = Some(ht.raw_resource_ptr().cast::<c_void>());
                 }
             });
             if let Some(handle) = native_handle_opt {
