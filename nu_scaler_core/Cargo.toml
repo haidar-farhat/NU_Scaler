@@ -14,7 +14,7 @@ fsr3 = ["dep:fsr3-sys"]
 [dependencies]
 anyhow = "1.0"
 pyo3 = { version = "0.20", features = ["extension-module"] }
-wgpu = "0.19"
+wgpu = { version = "0.19", features = ["dx12", "vulkan"] }
 scrap = "0.5"
 windows = { version = "0.56", features = [
     "Foundation",
@@ -46,6 +46,7 @@ uuid = { version = "1.6", features = ["v4"] }
 dlss-sys = { version = "0.1.0", path = "./dlss-sys" }
 # Official FSR3 integration
 fsr3-sys = { version = "0.1.0", path = "./fsr3-sys", optional = true }
+thiserror = "1.0"
 
 [build-dependencies]
 # ... existing build dependencies ...
