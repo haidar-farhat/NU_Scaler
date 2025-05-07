@@ -212,24 +212,31 @@ struct StreamlineApi {
 }
 
 // Global static variable to hold the initialized API
-static SL_API: OnceLock<Result<StreamlineApi, LoadError>> = OnceLock::new();
+static SL_API: OnceLock<Result<StreamlineApi, &'static LoadError>> = OnceLock::new();
 
 // Renamed back: Loads library and creates the simple StreamlineApi
-fn load_streamline_api() -> Result<StreamlineApi, LoadError> {
+fn init_sl_api() -> Result<StreamlineApi, &'static LoadError> {
     unsafe {
         let dll_name = if cfg!(target_os = "windows") {
             "sl.interposer.dll"
         } else {
             "libsl.interposer.so"
         };
-        let lib = Library::new(dll_name).map_err(|e| LoadError(format!("Failed to load library '{}': {}", dll_name, e)))?;
-        Ok(StreamlineApi { _lib: lib })
+        match Library::new(dll_name) {
+            Ok(lib) => Ok(StreamlineApi { _lib: lib }),
+            Err(e) => {
+                // Log the specific error from Library::new
+                eprintln!("[dlss_sys] Failed to load library '{}': {}", dll_name, e);
+                // Return one of our predefined static errors
+                Err(&UNABLE_TO_LOAD_LIBRARY_ERROR)
+            }
+        }
     }
 }
 
 // get_sl_api remains mostly the same, but calls the simpler load_streamline_api
 fn get_sl_api() -> Result<&'static StreamlineApi, &'static LoadError> {
-    SL_API.get_or_init(load_streamline_api).as_ref()
+    SL_API.get_or_init(init_sl_api).as_ref().map_err(|e| *e) // convert Result<&_, &&_> to Result<&_, &_
 }
 
 // --- Public wrapper functions --- 
@@ -259,24 +266,26 @@ impl StreamlineApi {
     ) -> Result<R, String> 
     where 
         F: FnOnce(libloading::Symbol<T>) -> R,
-        T: Copy // Function pointer types are Copy
+        T: Copy 
     {
-        match self._lib.get::<T>(symbol_name) {
-            Ok(symbol) => Ok(action(symbol)),
-            Err(e) => Err(format!("Failed to load symbol '{}': {}", String::from_utf8_lossy(symbol_name).trim_end_matches('\0'), e))
+        unsafe { // Added unsafe block here
+            match self._lib.get::<T>(symbol_name) {
+                Ok(symbol) => Ok(action(symbol)),
+                Err(e) => Err(format!("Failed to load symbol '{}': {}", String::from_utf8_lossy(symbol_name).trim_end_matches('\0'), e))
+            }
         }
     }
 
     pub fn slInitializeSDK_method(&self) -> Result<SlStatus, String> {
-        self.load_symbol_and_call(b"slInitializeSDK\0", |func| func())
+        self.load_symbol_and_call::<FnSlInitializeSDK>(b"slInitializeSDK\0", |func| func()) // Specify type T
     }
 
     pub fn slShutdownSDK_method(&self) -> Result<SlStatus, String> {
-        self.load_symbol_and_call(b"slShutdownSDK\0", |func| func())
+        self.load_symbol_and_call::<FnSlShutdownSDK>(b"slShutdownSDK\0", |func| func()) // Specify type T
     }
 
     pub fn slIsFeatureSupported_method(&self, feature: SlFeature, adapter_info: *const std::ffi::c_void) -> Result<SlBool, String> {
-        self.load_symbol_and_call(b"slIsFeatureSupported\0", |func| func(feature, adapter_info))
+        self.load_symbol_and_call::<FnSlIsFeatureSupported>(b"slIsFeatureSupported\0", |func| func(feature, adapter_info)) // Specify type T
     }
     
     pub fn slCreateDlssFeature_method(
@@ -288,7 +297,7 @@ impl StreamlineApi {
         output_height: u32,
         native_device: *mut std::ffi::c_void,
     ) -> Result<SlStatus, String> {
-        self.load_symbol_and_call(b"slCreateDlssFeature\0", |func| {
+        self.load_symbol_and_call::<FnSlCreateDlssFeature>(b"slCreateDlssFeature\0", |func| { // Specify type T
             func(
                 dlss_feature_handle_out,
                 application_id,
@@ -335,6 +344,33 @@ impl StreamlineApi {
     // }
 
     // etc. for other functions ...
+
+    pub fn slEvaluateDlssFeature_method(
+        &self, 
+        dlss_feature_handle: SlDlssFeature,
+        cmd_buffer: *mut std::ffi::c_void, 
+        input_resource: *mut std::ffi::c_void, 
+        output_resource: *mut std::ffi::c_void, 
+        motion_vectors: *mut std::ffi::c_void, 
+        depth: *mut std::ffi::c_void, 
+        jitter_x: f32, 
+        jitter_y: f32, 
+        render_width: u32, 
+        render_height: u32, 
+        params: *const SlDLSSOptions
+    ) -> Result<SlStatus, String> {
+        self.load_symbol_and_call::<FnSlEvaluateDlssFeature>(b"slEvaluateDlssFeature\0", |func| {
+            func(dlss_feature_handle, cmd_buffer, input_resource, output_resource, motion_vectors, depth, jitter_x, jitter_y, render_width, render_height, params)
+        })
+    }
+
+    pub fn slDestroyDlssFeature_method(&self, dlss_feature_handle: SlDlssFeature) -> Result<SlStatus, String> {
+        self.load_symbol_and_call::<FnSlDestroyDlssFeature>(b"slDestroyDlssFeature\0", |func| func(dlss_feature_handle))
+    }
+
+    pub fn slDLSSSetOptions_method(&self, dlss_feature_handle: SlDlssFeature, options: *const SlDLSSOptions) -> Result<SlStatus, String> {
+        self.load_symbol_and_call::<FnSlDLSSSetOptions>(b"slDLSSSetOptions\0", |func| func(dlss_feature_handle, options))
+    }
 }
 
 // Public free-standing wrapper functions that use the StreamlineApi methods
