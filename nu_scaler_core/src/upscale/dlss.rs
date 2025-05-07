@@ -142,14 +142,14 @@ impl Upscaler for DlssUpscaler {
         let mut dlss_feature_handle: SlDlssFeature = 0; // Initialize with 0 (invalid handle)
         let app_id: u32 = 0; // Placeholder - Get a real App ID from NVIDIA if necessary
 
-        // Create DLSS feature with TARGET OUTPUT dimensions
         let status_create = unsafe {
             dlss_sys::slCreateDlssFeature(
-                native_device_handle,
-                self.output_width,  // Use target output width
-                self.output_height, // Use target output height
-                0, // flags (dlss_sys::SL_DLSS_FLAG_NONE or similar if defined, else 0)
-                &mut dlss_feature_handle,
+                &mut dlss_feature_handle, // Correct: Output parameter for the handle
+                app_id,                   // Correct: Application ID
+                self.quality.to_sl_dlss_mode(), // Correct: Quality mode
+                self.output_width,        // Correct: Target output width
+                self.output_height,       // Correct: Target output height
+                native_device_handle,     // Correct: Native device pointer
             )
         };
 
