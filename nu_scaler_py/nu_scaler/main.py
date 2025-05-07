@@ -392,14 +392,15 @@ class LiveFeedScreen(QWidget):
         if self._upscale_thread is not None:
             print(f'[DEBUG] stop_capture: thread id={id(self._upscale_thread)}, worker id={id(self._upscale_worker)}')
             print(f'[DEBUG] stop_capture: thread isRunning={self._upscale_thread.isRunning()}, isFinished={self._upscale_thread.isFinished()}')
+            try:
+                # Only disconnect signals if thread and worker are still alive
+                pass  # No manual disconnect or deleteLater
+            except Exception as e:
+                print(f'[DEBUG] stop_capture: error disconnecting signals: {e}')
             self._upscale_thread.quit()
             self._upscale_thread.wait(2000)
             print(f'[DEBUG] stop_capture: after wait, isRunning={self._upscale_thread.isRunning()}, isFinished={self._upscale_thread.isFinished()}')
-            if self._upscale_worker is not None:
-                self._upscale_worker.deleteLater()
-                print('[DEBUG] stop_capture: worker deleteLater called')
-            self._upscale_thread.deleteLater()
-            print('[DEBUG] stop_capture: thread deleteLater called')
+            # Do not call setParent or deleteLater on worker or thread here
             self._upscale_thread = None
             self._upscale_worker = None
             print('[DEBUG] stop_capture: worker thread cleaned up')
@@ -418,52 +419,55 @@ class LiveFeedScreen(QWidget):
         QTimer.singleShot(200, _reenable_controls)
 
     def update_technology_ui(self, technology):
-        """Update UI based on selected upscaling technology"""
-        if technology == "FSR 3.0":
-            # FSR works with all quality settings, but algorithm is fixed
-            self.quality_box.setEnabled(True)
-            self.algorithm_box.setEnabled(False)
-            self.algorithm_box.setCurrentText("bilinear")  # FSR uses its own internal algorithm
-        elif technology == "DLSS":
-            # DLSS uses quality settings but algorithm is fixed
-            self.quality_box.setEnabled(True)
-            self.algorithm_box.setEnabled(False)
-            self.algorithm_box.setCurrentText("bilinear")  # DLSS uses its own internal algorithm
-        elif technology == "Basic":
-            # Basic allows choosing the algorithm
-            self.quality_box.setEnabled(True)
-            self.algorithm_box.setEnabled(True)
-        else:  # Auto (Best for GPU)
-            # Auto mode - quality enabled, algorithm disabled
-            self.quality_box.setEnabled(True)
-            self.algorithm_box.setEnabled(False)
-            
+        try:
+            if technology == "FSR 3.0":
+                self.quality_box.setEnabled(True)
+                self.algorithm_box.setEnabled(False)
+                self.algorithm_box.setCurrentText("bilinear")
+            elif technology == "DLSS":
+                self.quality_box.setEnabled(True)
+                self.algorithm_box.setEnabled(False)
+                self.algorithm_box.setCurrentText("bilinear")
+            elif technology == "Basic":
+                self.quality_box.setEnabled(True)
+                self.algorithm_box.setEnabled(True)
+            else:
+                self.quality_box.setEnabled(True)
+                self.algorithm_box.setEnabled(False)
+        except Exception as e:
+            print(f'[DEBUG] update_technology_ui: {e}')
+
     def toggle_advanced_upscaling(self, state):
-        """Toggle between standard and advanced upscaling"""
-        self.advanced_upscaling = bool(state)
-        self.upscaler = None  # Force re-initialization
-        self.upscaler_initialized = False
-        self.memory_strategy_box.setEnabled(self.advanced_upscaling)
-        self.adaptive_quality_check.setEnabled(self.advanced_upscaling)
-    
+        try:
+            self.advanced_upscaling = bool(state)
+            self.upscaler = None
+            self.upscaler_initialized = False
+            self.memory_strategy_box.setEnabled(self.advanced_upscaling)
+            self.adaptive_quality_check.setEnabled(self.advanced_upscaling)
+        except Exception as e:
+            print(f'[DEBUG] toggle_advanced_upscaling: {e}')
+
     def toggle_adaptive_quality(self, state):
-        """Toggle adaptive quality mode"""
-        if self.upscaler and hasattr(self.upscaler, 'set_adaptive_quality'):
-            self.upscaler.set_adaptive_quality(bool(state))
-    
+        try:
+            if self.upscaler and hasattr(self.upscaler, 'set_adaptive_quality'):
+                self.upscaler.set_adaptive_quality(bool(state))
+        except Exception as e:
+            print(f'[DEBUG] toggle_adaptive_quality: {e}')
+
     def set_memory_strategy(self, index):
-        """Set the memory allocation strategy"""
-        if not self.upscaler or not hasattr(self.upscaler, 'set_memory_strategy'):
-            return
-            
-        strategies = ["Auto", "Aggressive", "Balanced", "Conservative", "Minimal"]
-        if index >= 0 and index < len(strategies):
-            strategy = strategies[index].lower()
-            try:
-                self.upscaler.set_memory_strategy(strategy)
-                print(f"Memory strategy set to: {strategy}")
-            except Exception as e:
-                print(f"Failed to set memory strategy: {e}")
+        try:
+            if not self.upscaler or not hasattr(self.upscaler, 'set_memory_strategy'):
+                return
+            strategies = ["Auto", "Aggressive", "Balanced", "Conservative", "Minimal"]
+            if index >= 0 and index < len(strategies):
+                strategy = strategies[index].lower()
+                try:
+                    self.upscaler.set_memory_strategy(strategy)
+                    print(f"Memory strategy set to: {strategy}")
+                except Exception as e:
+                    print(f"Failed to set memory strategy: {e}")
+        except Exception as e:
+            print(f'[DEBUG] set_memory_strategy: {e}')
     
     def update_memory_stats(self):
         """Update GPU memory usage statistics"""
