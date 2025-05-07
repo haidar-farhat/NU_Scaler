@@ -44,6 +44,7 @@ except Exception as e:
     plot_benchmark_results = None
 
 print(f"[main.py] nu_scaler_core available: {nu_scaler_core is not None}")
+print(f"[main.py] DLSS available: {hasattr(nu_scaler_core, 'PyDlssUpscaler')}")
 
 # Add import for GPU optimization
 from nu_scaler.gpu_optimizer import optimize_upscaler, force_gpu_activation
@@ -294,8 +295,8 @@ class LiveFeedScreen(QWidget):
             available_techs.append("DLSS")
         # Add other techs like FSR here if/when implemented
         # available_techs.append("FSR (Not Impl.)") 
-        
         self.technology_box.addItems(available_techs)
+        print(f"[LiveFeedScreen] available_techs: {available_techs}")
         if "WGPU" in available_techs:
              self.technology_box.setCurrentText("WGPU") # Default to WGPU if available
         elif "DLSS" in available_techs:
