@@ -28,7 +28,7 @@ except Exception as e:
 
 # Import Python helper modules from nu_scaler_py
 try:
-    from nu_scaler_py.benchmark import run_benchmark, run_comparison_benchmark, BenchmarkResult, plot_benchmark_results
+    from .benchmark import run_benchmark, run_comparison_benchmark, BenchmarkResult, plot_benchmark_results
 except ImportError as e:
     print(f"[main.py] ImportError when importing benchmark module: {e}")
     run_benchmark = None
@@ -44,11 +44,11 @@ except Exception as e:
     plot_benchmark_results = None
 
 print(f"[main.py] nu_scaler available: {nu_scaler is not None}")
-print(f"[main.py] DLSS available: {hasattr(nu_scaler, 'PyDlssUpscaler')}")
+print(f"[main.py] DLSS available: {hasattr(nu_scaler, 'DlssUpscaler')}")
 
 # Add import for GPU optimization
 try:
-    from nu_scaler_py.gpu_optimizer import optimize_upscaler, force_gpu_activation
+    from .gpu_optimizer import optimize_upscaler, force_gpu_activation
 except ImportError as e:
     print(f"[main.py] ImportError when importing gpu_optimizer: {e}")
     optimize_upscaler = None
