@@ -131,6 +131,12 @@ impl PyWgpuUpscaler {
     }
 }
 
+impl Drop for PyWgpuUpscaler {
+    fn drop(&mut self) {
+        println!("[Rust] Dropping PyWgpuUpscaler at {:p}", self);
+    }
+}
+
 #[pyclass]
 #[derive(Clone)]
 pub struct PyWindowByTitle {
@@ -224,6 +230,12 @@ impl PyScreenCapture {
             },
             None => Ok(None),
         }
+    }
+}
+
+impl Drop for PyScreenCapture {
+    fn drop(&mut self) {
+        println!("[Rust] Dropping PyScreenCapture at {:p}", self);
     }
 }
 
@@ -606,6 +618,12 @@ impl PyAdvancedWgpuUpscaler {
             },
             None => Err(pyo3::exceptions::PyRuntimeError::new_err("No GPU resources available"))
         }
+    }
+}
+
+impl Drop for PyAdvancedWgpuUpscaler {
+    fn drop(&mut self) {
+        println!("[Rust] Dropping PyAdvancedWgpuUpscaler at {:p}", self);
     }
 }
 
