@@ -703,7 +703,7 @@ impl Upscaler for WgpuUpscaler {
         } else {
             // Update dimensions buffer if only dimensions changed but everything else is valid
             // This assumes the buffer sizes are still appropriate. If not, full re-init is needed.
-            if let (Some(device), Some(queue), Some(dims_buffer)) = (self.device(), self.queue(), &self.dimensions_buffer) {
+            if let (Some(_device), Some(queue), Some(dims_buffer)) = (self.device(), self.queue(), &self.dimensions_buffer) {
                 let dimensions_data = [
                     input_width, input_height, 
                     output_width, output_height, 
@@ -814,7 +814,7 @@ impl Upscaler for WgpuUpscaler {
         device.poll(wgpu::Maintain::Wait); // Wait for GPU to finish and map operation
         
         // Receive the result of map_async
-        let map_result = receiver.recv().map_err(|e| anyhow!("Failed to receive map_async result: {}", e))??;
+        let _map_result = receiver.recv().map_err(|e| anyhow!("Failed to receive map_async result: {}", e))??;
         
         let data = buffer_slice.get_mapped_range().to_vec();
         staging_buffer.unmap(); // Unmap the buffer
