@@ -32,6 +32,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rustc-link-search=native={}", lib_path.display());
     println!("cargo:rustc-link-lib=sl.interposer"); // User needs to verify this library name
 
+    // Get the clang version
+    let clang_version = clang_sys::get_clang_version();
+    println!("cargo:warning=bindgen is using libclang version: {}", clang_version);
+
     let mut builder = bindgen::Builder::default()
         .header("wrapper.h")
         .clang_arg(format!("-I{}", include_path.display()))
@@ -41,6 +45,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // --- MSVC Integration Args ---
         .clang_arg("-fms-compatibility") // Enable MSVC compatibility
         .clang_arg("-fms-extensions")    // Allow MSVC-specific extensions
+        // Try to suppress MSVC STL version checks
+        .clang_arg("-D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH=1")
         // Try to force targeting the msvc ABI
         .clang_arg("--target=x86_64-pc-windows-msvc");
         
