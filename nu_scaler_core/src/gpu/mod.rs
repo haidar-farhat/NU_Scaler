@@ -99,18 +99,8 @@ impl GpuResources {
     pub unsafe fn get_native_device_handle(&self) -> Result<*mut std::ffi::c_void, GpuError> {
         // Import HAL APIs. These might need to be gated by cfg attributes
         // if you only want to compile support for specific backends.
-        use wgpu::hal::Device as HalDevice; // Common trait for HAL devices
+        // use wgpu::hal::Device as HalDevice; // Removed unused import
         // Assuming Dx12 and Vulkan are the primary targets. Add others as needed.
-        #[cfg(feature = "dx12")]
-        use wgpu::hal::dx12::Api as Dx12Api;
-        #[cfg(feature = "vulkan")]
-        use wgpu::hal::vulkan::Api as VulkanApi;
-
-        // The actual HAL API used by wgpu::Device is not directly exposed in a platform-agnostic way
-        // after device creation without enabling specific features and checking the adapter's backend.
-        // For this example, we'll try to downcast based on common feature flags.
-        // A more robust solution might involve storing the backend type upon GpuResources creation.
-
         #[cfg(feature = "dx12")]
         {
             if let Some(raw_device_handle) = self.device.as_hal::<Dx12Api>().raw_device() {
@@ -140,13 +130,9 @@ impl GpuResources {
     /// and within the lifetime of the WGPU texture and device.
     /// The underlying WGPU instance, device, and texture must remain alive while this handle is in use.
     pub unsafe fn get_native_texture_handle(&self, texture: &wgpu::Texture) -> Result<*mut std::ffi::c_void, GpuError> {
-        use wgpu::hal::Texture as HalTexture; // Common trait for HAL textures
-        #[cfg(feature = "dx12")]
-        use wgpu::hal::dx12::Api as Dx12Api;
-        #[cfg(feature = "vulkan")]
-        use wgpu::hal::vulkan::Api as VulkanApi;
-
-        #[cfg(feature = "dx12")]
+        // Use as_hal directly on the texture object, no separate HAL Texture trait import needed.
+        // use wgpu::hal::Texture as HalTexture; // Incorrect path, removed
+        #[cfg(feature = "dx12")] // WARNING: This cfg flag might not work as intended
         {
             // For ID3D12Resource
             if let Some(raw_texture_handle) = texture.as_hal::<Dx12Api>().raw_texture() {
@@ -172,10 +158,10 @@ mod tests {
 
     struct DummyGpuManager;
     impl GpuManager for DummyGpuManager {
-        fn initialize(&mut self, _provider: GpuProvider) -> Result<GpuContext> {
+        fn initialize(&mut self, _provider: GpuProvider) -> Result<GpuContext> { // Prefix unused param
             unimplemented!()
         }
-        fn is_supported(&self, _provider: GpuProvider) -> bool {
+        fn is_supported(&self, _provider: GpuProvider) -> bool { // Prefix unused param
             unimplemented!()
         }
     }
