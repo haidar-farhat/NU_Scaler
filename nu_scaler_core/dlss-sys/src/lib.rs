@@ -256,17 +256,26 @@ macro_rules! get_sl_func {
     };
 }
 
-pub unsafe fn slInitializeSDK() -> SlStatus {
-    match get_sl_api() {
-        Ok(api) => match get_sl_func!(api, FnSlInitializeSDK, b"slInitializeSDK\0") {
-            Ok(func) => func(),
-            Err(status) => status,
-        },
-        Err(e) => {
-             eprintln!("{}", e); // Print LoadError if library failed loading
-             SlStatus::ErrorLibraryLoadFailed
+// Renamed for clarity and to avoid potential collision if compiler is confused.
+pub fn wrapped_slInitializeSDK() -> Result<SlStatus, &'static LoadError> {
+    get_sl_api().and_then(|api| {
+        match api.slInitializeSDK() { // This is the method on the StreamlineApi struct
+            Ok(status) => Ok(status),
+            Err(owned_load_error) => {
+                eprintln!(
+                    "[dlss_sys] wrapped_slInitializeSDK: Symbol load for slInitializeSDK failed. Error: {:?}",
+                    owned_load_error.0
+                );
+                Err(&UNABLE_TO_LOAD_SYMBOL_ERROR)
+            }
         }
-    }
+    }).or_else(|static_load_error_from_get_sl_api| {
+        eprintln!(
+            "[dlss_sys] wrapped_slInitializeSDK: get_sl_api() failed. Error: {:?}",
+            static_load_error_from_get_sl_api.0
+        );
+        Err(static_load_error_from_get_sl_api)
+    })
 }
 
 pub unsafe fn slShutdownSDK() -> SlStatus {
