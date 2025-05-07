@@ -195,22 +195,16 @@ type FnSlDLSSSetOptions = unsafe extern "C" fn(
 
 // --- Dynamic Loading Implementation ---
 
-// Use a more descriptive error type if desired
-#[derive(Debug)]
-struct LoadError(String);
+// Top of the file, after imports and before struct/fn definitions
+pub const APP_ID: u32 = 231313132;
 
-impl fmt::Display for LoadError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Streamline API Load Error: {}", self.0)
-    }
-}
+#[derive(Debug, Clone)]
+pub struct LoadError(pub String);
 
-impl From<libloading::Error> for LoadError {
-    fn from(e: libloading::Error) -> Self {
-        LoadError(e.to_string())
-    }
-}
-
+// Define static error instances
+pub static UNABLE_TO_LOAD_LIBRARY_ERROR: LoadError = LoadError("Streamline dynamic library (sl.interposer) could not be loaded".to_string());
+pub static UNABLE_TO_LOAD_SYMBOL_ERROR: LoadError = LoadError("A required symbol could not be loaded from the Streamline library".to_string());
+pub static SL_API_INIT_FAILED: LoadError = LoadError("The global SL_API (StreamlineApi) could not be initialized".to_string());
 
 // StreamlineApi struct now only holds the Library
 struct StreamlineApi {
@@ -275,11 +269,11 @@ impl StreamlineApi {
         }
     }
 
-    pub fn slIsFeatureSupported_method(&self, feature: SlFeature, adapter_index: u32) -> Result<SlBool, LoadError> {
+    pub fn slIsFeatureSupported_method(&self, feature: SlFeature, adapter_info: *const std::ffi::c_void) -> Result<SlBool, LoadError> {
         unsafe {
             let func = self._lib.get::<FnSlIsFeatureSupported>(b"slIsFeatureSupported\0")
                 .map_err(|e| LoadError(format!("Failed to load symbol 'slIsFeatureSupported': {}", e)))?;
-            Ok(func(feature, adapter_index))
+            Ok(func(feature, adapter_info))
         }
     }
 
@@ -345,10 +339,10 @@ pub fn slShutdownSDK() -> Result<SlStatus, &'static LoadError> {
     }).or_else(|err| Err(err))
 }
 
-// Wrapper for slIsFeatureSupported
-pub fn slIsFeatureSupported(feature: SlFeature, adapter_index: u32) -> Result<SlBool, &'static LoadError> {
+// Corrected public wrapper for slIsFeatureSupported
+pub fn slIsFeatureSupported(feature: SlFeature, adapter_info: *const std::ffi::c_void) -> Result<SlBool, &'static LoadError> {
     get_sl_api().and_then(|api| {
-        match api.slIsFeatureSupported_method(feature, adapter_index) {
+        match api.slIsFeatureSupported_method(feature, adapter_info) {
             Ok(b) => Ok(b),
             Err(owned_load_error) => {
                 eprintln!("[dlss_sys] slIsFeatureSupported: Symbol load failed: {:?}", owned_load_error.0);
