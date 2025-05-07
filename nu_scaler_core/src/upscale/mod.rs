@@ -10,6 +10,7 @@ use pyo3::prelude::*;
 use crate::gpu::{detector::GpuDetector, memory::{/*MemoryPool,*/ AllocationStrategy, /*MemoryPressure*/}, GpuResources};
 use std::io::{/*Write,*/ BufWriter};
 use std::fs::{/*OpenOptions,*/ File};
+use std::fs::OpenOptions;
 use std::path::PathBuf;
 
 // Add new module declarations
