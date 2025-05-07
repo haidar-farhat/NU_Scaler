@@ -19,6 +19,7 @@ pub mod gpu;
 pub mod upscale;
 pub mod renderer;
 pub mod benchmark;
+pub mod dlss_manager;
 
 use upscale::{WgpuUpscaler, UpscaleAlgorithm};
 use capture::realtime::{ScreenCapture, CaptureTarget};
