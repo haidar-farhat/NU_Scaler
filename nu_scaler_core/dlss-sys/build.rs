@@ -47,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sdk_include_path = streamline_sdk_root_path.join("include");
     if !sdk_include_path.exists() {
         panic!(
-            "NVIDIA Streamline SDK include path does not exist: {}. Please verify Streamline\include.",
+            r"NVIDIA Streamline SDK include path does not exist: {}. Please verify Streamline\include.",
             sdk_include_path.display()
         );
     }
