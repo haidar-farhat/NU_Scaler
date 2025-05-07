@@ -104,10 +104,12 @@ impl GpuResources {
         #[cfg(target_os = "windows")]
         {
             use wgpu::hal::dx12::Api as Dx12Api;
-            let native_handle_opt: Option<*mut std::ffi::c_void> =
-                self.device.as_hal::<Dx12Api, _, _>(|hal_device_opt| {
+            let native_handle_opt: Option<*mut std::ffi::c_void> = self
+                .device
+                .as_hal::<Dx12Api, _, _>(|hal_device_opt| {
                     hal_device_opt.map(|d| d.raw_device().as_ptr() as *mut std::ffi::c_void)
-                }).flatten();
+                })
+                .flatten();
 
             if let Some(handle) = native_handle_opt {
                 if !handle.is_null() {
@@ -140,14 +142,17 @@ impl GpuResources {
     /// The caller is responsible for ensuring that the handle is used correctly
     /// and within the lifetime of the WGPU texture and device.
     /// The underlying WGPU instance, device, and texture must remain alive while this handle is in use.
-    pub unsafe fn get_native_texture_handle(&self, _texture: &wgpu::Texture) -> Result<*mut std::ffi::c_void, GpuError> {
+    pub unsafe fn get_native_texture_handle(
+        &self,
+        _texture: &wgpu::Texture,
+    ) -> Result<*mut std::ffi::c_void, GpuError> {
         #[cfg(target_os = "windows")]
         {
             // TODO: Find the correct way to get ID3D12Resource* from wgpu_hal::dx12::Texture in wgpu-hal 0.19
             // The `resource` field is pub(super) and no obvious public method seems available.
             // Temporarily returning error.
             eprintln!("[get_native_texture_handle] DX12: Texture resource access not yet implemented correctly for wgpu-hal 0.19.");
-            return Err(GpuError::UnsupportedBackend); 
+            return Err(GpuError::UnsupportedBackend);
             /*
             use wgpu::hal::dx12::Api as Dx12Api;
             let mut native_handle_opt: Option<*mut std::ffi::c_void> = None;
