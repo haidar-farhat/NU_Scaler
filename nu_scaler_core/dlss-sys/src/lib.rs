@@ -212,114 +212,58 @@ impl From<libloading::Error> for LoadError {
 }
 
 
-// Structure to hold the loaded symbols safely
-// We store the Library to keep it loaded as long as the Symbols are used
+// StreamlineApi struct now only holds the Library
 struct StreamlineApi {
-    _lib: Library, // Keep the library loaded
-    // Store symbols directly
-    slInitializeSDK: Symbol<'static, FnSlInitializeSDK>,
-    slShutdownSDK: Symbol<'static, FnSlShutdownSDK>,
-    slIsFeatureSupported: Symbol<'static, FnSlIsFeatureSupported>,
-    slCreateDlssFeature: Symbol<'static, FnSlCreateDlssFeature>,
-    slEvaluateDlssFeature: Symbol<'static, FnSlEvaluateDlssFeature>,
-    slDestroyDlssFeature: Symbol<'static, FnSlDestroyDlssFeature>,
-    slDLSSSetOptions: Symbol<'static, FnSlDLSSSetOptions>,
-    // Add fields for other functions as needed
-}
-
-// Temporary struct to hold library and symbols with original lifetime
-struct TempApiHolder<'lib> {
-    lib: Library, // Library instance
-    // Symbols borrowing the library instance's lifetime
-    slInitializeSDK: Symbol<'lib, FnSlInitializeSDK>,
-    slShutdownSDK: Symbol<'lib, FnSlShutdownSDK>,
-    slIsFeatureSupported: Symbol<'lib, FnSlIsFeatureSupported>,
-    slCreateDlssFeature: Symbol<'lib, FnSlCreateDlssFeature>,
-    slEvaluateDlssFeature: Symbol<'lib, FnSlEvaluateDlssFeature>,
-    slDestroyDlssFeature: Symbol<'lib, FnSlDestroyDlssFeature>,
-    slDLSSSetOptions: Symbol<'lib, FnSlDLSSSetOptions>,
+    _lib: Library,
 }
 
 // Global static variable to hold the initialized API
 static SL_API: OnceLock<Result<StreamlineApi, LoadError>> = OnceLock::new();
 
-// Helper macro for loading symbols with detailed error messages
-macro_rules! load_sl_symbol {
-    ($lib:expr, $fn_type:ty, $name:expr) => {
-        $lib.get::<$fn_type>($name).map_err(|e| {
-            LoadError(format!(
-                "Failed to load symbol '{}': {}",
-                String::from_utf8_lossy($name).trim_end_matches('\0'), // Show clean name
-                e
-            ))
-        })?
-    };
-}
-
-// Function to load library and symbols into the temporary holder
-fn load_symbols_temp(lib: Library) -> Result<TempApiHolder<'_>, LoadError> {
-    // Note: The lifetime parameter <'_> will be inferred from `lib`
-    unsafe {
-        // Load symbols using the macro
-        let slInitializeSDK_sym_raw = load_sl_symbol!(lib, FnSlInitializeSDK, b"slInitializeSDK\0");
-        let slShutdownSDK_sym_raw = load_sl_symbol!(lib, FnSlShutdownSDK, b"slShutdownSDK\0");
-        let slIsFeatureSupported_sym_raw = load_sl_symbol!(lib, FnSlIsFeatureSupported, b"slIsFeatureSupported\0");
-        let slCreateDlssFeature_sym_raw = load_sl_symbol!(lib, FnSlCreateDlssFeature, b"slCreateDlssFeature\0");
-        let slEvaluateDlssFeature_sym_raw = load_sl_symbol!(lib, FnSlEvaluateDlssFeature, b"slEvaluateDlssFeature\0");
-        let slDestroyDlssFeature_sym_raw = load_sl_symbol!(lib, FnSlDestroyDlssFeature, b"slDestroyDlssFeature\0");
-        let slDLSSSetOptions_sym_raw = load_sl_symbol!(lib, FnSlDLSSSetOptions, b"slDLSSSetOptions\0");
-
-        // Construct the temporary holder, moving `lib` and the symbols
-        // The symbols correctly borrow the `lib` being moved here.
-        Ok(TempApiHolder {
-            lib: lib, // Move lib here
-            slInitializeSDK: slInitializeSDK_sym_raw,
-            slShutdownSDK: slShutdownSDK_sym_raw,
-            slIsFeatureSupported: slIsFeatureSupported_sym_raw,
-            slCreateDlssFeature: slCreateDlssFeature_sym_raw,
-            slEvaluateDlssFeature: slEvaluateDlssFeature_sym_raw,
-            slDestroyDlssFeature: slDestroyDlssFeature_sym_raw,
-            slDLSSSetOptions: slDLSSSetOptions_sym_raw,
-        })
-    }
-}
-
-// Renamed: Function to ONLY load the dynamic library
-fn load_library_only() -> Result<Library, LoadError> {
+// Renamed back: Loads library and creates the simple StreamlineApi
+fn load_streamline_api() -> Result<StreamlineApi, LoadError> {
     unsafe {
         let dll_name = if cfg!(target_os = "windows") {
             "sl.interposer.dll"
         } else {
             "libsl.interposer.so"
         };
-        Library::new(dll_name).map_err(|e| LoadError(format!("Failed to load library '{}': {}", dll_name, e)))
+        let lib = Library::new(dll_name).map_err(|e| LoadError(format!("Failed to load library '{}': {}", dll_name, e)))?;
+        Ok(StreamlineApi { _lib: lib })
     }
 }
 
-// Function to get or initialize the API - updated logic
+// get_sl_api remains mostly the same, but calls the simpler load_streamline_api
 fn get_sl_api() -> Result<&'static StreamlineApi, &'static LoadError> {
-    SL_API.get_or_init(|| {
-        // Load library first
-        let library = load_library_only()?;
-        // Load symbols into temporary holder with correct lifetimes
-        let temp_holder = load_symbols_temp(library)?;
-        // Transmute the entire holder to the final StreamlineApi with 'static lifetimes
-        // This is safe because the holder (including the Library) is being placed
-        // into the OnceLock, extending its lifetime to 'static.
-        let static_api = unsafe { std::mem::transmute::<TempApiHolder<'_>, StreamlineApi>(temp_holder) };
-        Ok(static_api)
-    }).as_ref()
+    SL_API.get_or_init(load_streamline_api).as_ref()
 }
 
+// --- Public wrapper functions --- 
+// Modified to load symbols on demand
 
-// --- Public wrapper functions ---
-// These provide the interface that the rest of your Rust code will use.
+// Helper macro for loading symbols within wrappers
+macro_rules! get_sl_func {
+    ($api:expr, $fn_type:ty, $name:expr) => {
+        $api._lib.get::<$fn_type>($name).map_err(|e| {
+            // Log error, return specific SlStatus
+            eprintln!(
+                "Streamline API Error: Failed to load symbol '{}': {}",
+                String::from_utf8_lossy($name).trim_end_matches('\0'),
+                e
+            );
+            SlStatus::ErrorFunctionLoadFailed // Use custom error code
+        })
+    };
+}
 
 pub unsafe fn slInitializeSDK() -> SlStatus {
     match get_sl_api() {
-        Ok(api) => (api.slInitializeSDK)(),
+        Ok(api) => match get_sl_func!(api, FnSlInitializeSDK, b"slInitializeSDK\0") {
+            Ok(func) => func(),
+            Err(status) => status,
+        },
         Err(e) => {
-             eprintln!("{}", e);
+             eprintln!("{}", e); // Print LoadError if library failed loading
              SlStatus::ErrorLibraryLoadFailed
         }
     }
@@ -327,7 +271,10 @@ pub unsafe fn slInitializeSDK() -> SlStatus {
 
 pub unsafe fn slShutdownSDK() -> SlStatus {
     match get_sl_api() {
-        Ok(api) => (api.slShutdownSDK)(),
+        Ok(api) => match get_sl_func!(api, FnSlShutdownSDK, b"slShutdownSDK\0") {
+            Ok(func) => func(),
+            Err(status) => status,
+        },
         Err(e) => {
              eprintln!("{}", e);
              SlStatus::ErrorLibraryLoadFailed
@@ -337,10 +284,13 @@ pub unsafe fn slShutdownSDK() -> SlStatus {
 
 pub unsafe fn slIsFeatureSupported(feature: SlFeature, adapter_info: *const c_void) -> SlBool {
      match get_sl_api() {
-        Ok(api) => (api.slIsFeatureSupported)(feature, adapter_info),
+        Ok(api) => match get_sl_func!(api, FnSlIsFeatureSupported, b"slIsFeatureSupported\0") {
+            Ok(func) => func(feature, adapter_info),
+            Err(_) => SL_FALSE, // Return false if function load failed
+        },
         Err(e) => {
              eprintln!("{}", e);
-             SL_FALSE // Return false if API not loaded
+             SL_FALSE // Return false if library failed loading
         }
     }
 }
@@ -354,14 +304,17 @@ pub unsafe fn slCreateDlssFeature(
     native_device: *mut c_void,
 ) -> SlStatus {
      match get_sl_api() {
-        Ok(api) => (api.slCreateDlssFeature)(
-            dlss_feature_handle,
-            application_id,
-            quality_mode,
-            output_width,
-            output_height,
-            native_device,
-        ),
+        Ok(api) => match get_sl_func!(api, FnSlCreateDlssFeature, b"slCreateDlssFeature\0") {
+            Ok(func) => func(
+                dlss_feature_handle,
+                application_id,
+                quality_mode,
+                output_width,
+                output_height,
+                native_device,
+            ),
+            Err(status) => status,
+        },
         Err(e) => {
              eprintln!("{}", e);
              SlStatus::ErrorLibraryLoadFailed
@@ -383,19 +336,22 @@ pub unsafe fn slEvaluateDlssFeature(
     params: *const SlDLSSOptions,
 ) -> SlStatus {
      match get_sl_api() {
-        Ok(api) => (api.slEvaluateDlssFeature)(
-            dlss_feature_handle,
-            cmd_buffer,
-            input_resource,
-            output_resource,
-            motion_vectors,
-            depth,
-            jitter_x,
-            jitter_y,
-            render_width,
-            render_height,
-            params,
-        ),
+        Ok(api) => match get_sl_func!(api, FnSlEvaluateDlssFeature, b"slEvaluateDlssFeature\0") {
+            Ok(func) => func(
+                dlss_feature_handle,
+                cmd_buffer,
+                input_resource,
+                output_resource,
+                motion_vectors,
+                depth,
+                jitter_x,
+                jitter_y,
+                render_width,
+                render_height,
+                params,
+            ),
+            Err(status) => status,
+        },
         Err(e) => {
              eprintln!("{}", e);
              SlStatus::ErrorLibraryLoadFailed
@@ -405,7 +361,10 @@ pub unsafe fn slEvaluateDlssFeature(
 
 pub unsafe fn slDestroyDlssFeature(dlss_feature_handle: SlDlssFeature) -> SlStatus {
      match get_sl_api() {
-        Ok(api) => (api.slDestroyDlssFeature)(dlss_feature_handle),
+        Ok(api) => match get_sl_func!(api, FnSlDestroyDlssFeature, b"slDestroyDlssFeature\0") {
+            Ok(func) => func(dlss_feature_handle),
+            Err(status) => status,
+        },
         Err(e) => {
              eprintln!("{}", e);
              SlStatus::ErrorLibraryLoadFailed
@@ -418,7 +377,10 @@ pub unsafe fn slDLSSSetOptions(
     options: *const SlDLSSOptions,
 ) -> SlStatus {
      match get_sl_api() {
-        Ok(api) => (api.slDLSSSetOptions)(dlss_feature_handle, options),
+        Ok(api) => match get_sl_func!(api, FnSlDLSSSetOptions, b"slDLSSSetOptions\0") {
+            Ok(func) => func(dlss_feature_handle, options),
+            Err(status) => status,
+        },
         Err(e) => {
              eprintln!("{}", e);
              SlStatus::ErrorLibraryLoadFailed
