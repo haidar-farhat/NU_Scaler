@@ -1111,7 +1111,6 @@ impl PyDlssUpscaler {
             UpscalingQuality::Native => Ok("native".to_string()),
         }
     }
-
     pub fn set_quality(&mut self, quality_str: &str) -> PyResult<()> {
         let quality = match quality_str.to_lowercase().as_str() {
             "ultra" => UpscalingQuality::Ultra,
