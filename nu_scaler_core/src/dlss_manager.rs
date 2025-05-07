@@ -1,4 +1,4 @@
-"""// nu_scaler_core/src/dlss_manager.rs
+// nu_scaler_core/src/dlss_manager.rs
 
 use std::sync::Once;
 use dlss_sys; // Assuming dlss-sys is a top-level dependency in nu_scaler_core's Cargo.toml
@@ -9,28 +9,27 @@ static mut SL_INITIALIZED_SUCCESSFULLY: bool = false;
 #[derive(Debug)]
 pub enum DlssManagerError {
     SdkInitializationFailed(dlss_sys::SlStatus),
-    SdkAlreadyInitialized, // Or handle this gracefully
+    // SdkAlreadyInitialized, // Decided to let Once handle this; new() will just return Ok if already init.
 }
 
 pub struct DlssManager {
-    // Later, this might hold a raw device pointer if we want to cache it,
-    // or references to GPU resources. For now, it's mainly a conceptual owner
-    // of the initialized SDK state for this instance of the manager.
-    _private: (), // To make it a struct
+    // This struct primarily serves to gate access to DLSS features
+    // ensuring the SDK is initialized.
+    _private: (), 
 }
 
 impl DlssManager {
     pub fn new() -> Result<Self, DlssManagerError> {
-        let mut initialization_status = dlss_sys::SlStatus::Success; // Assume success if already initialized
+        let mut captured_status_on_fail = dlss_sys::SlStatus::Success; // Placeholder for error from closure
 
         SL_INIT.call_once(|| {
-            // This closure is executed only once
+            // This closure is executed only once per process.
             let status = unsafe { dlss_sys::slInitializeSDK() };
             if status == dlss_sys::SlStatus::Success {
                 unsafe { SL_INITIALIZED_SUCCESSFULLY = true; }
-                println!("[DLSS Manager] Streamline SDK Initialized successfully.");
+                println!("[DLSS Manager] Streamline SDK Initialized successfully via slInitializeSDK().");
             } else {
-                initialization_status = status; // Capture the error status
+                captured_status_on_fail = status; // Capture the error status
                 eprintln!("[DLSS Manager] Streamline SDK Initialization failed with status: {:?}", status);
             }
         });
@@ -38,71 +37,111 @@ impl DlssManager {
         if unsafe { SL_INITIALIZED_SUCCESSFULLY } {
             Ok(DlssManager { _private: () })
         } else {
-            // If call_once was executed previously and failed, SL_INITIALIZED_SUCCESSFULLY would be false.
-            // If call_once just executed and failed, initialization_status holds the error.
-            // This logic might need refinement if new() can be called multiple times after a failed init.
-            // For now, if it wasn't successful, we return the captured status or a generic error.
-             Err(DlssManagerError::SdkInitializationFailed(initialization_status))
+            // This means the call_once executed (or had executed previously) and failed.
+            Err(DlssManagerError::SdkInitializationFailed(captured_status_on_fail))
         }
     }
 
+    /// Checks if the global SDK initialization has been successfully performed.
     pub fn is_sdk_initialized() -> bool {
-        unsafe { SL_INITIALIZED_SUCCESSFULLY }
+        // Check if Once has run and if it was successful.
+        SL_INIT.is_completed() && unsafe { SL_INITIALIZED_SUCCESSFULLY }
     }
 
-    // We will add methods here later like:
-    // pub fn create_dlss_feature(&self, device_ptr: *mut std::ffi::c_void, width: u32, height: u32, quality: DlssQuality) -> Result<SlDlssFeatureHandle, DlssError> { ... }
+    // TODO: Add methods like:
+    // pub fn create_dlss_feature(&self, device_ptr: *mut std::ffi::c_void, width: u32, height: u32 /*, other_options */) 
+    //   -> Result<SlDlssFeatureHandle, DlssFeatureError> 
+    // {
+    //   if !Self::is_sdk_initialized() { return Err(DlssFeatureError::SdkNotInitialized); }
+    //   // ... actual call to dlss_sys::slCreateDlssFeature ...
+    // }
 }
 
-// Optional: Add a global function to simplify getting an initialized manager or checking status.
+/// Ensures the Streamline SDK is initialized.
+/// Call this once before any DLSS operations if you're not using a DlssManager instance directly.
 pub fn ensure_sdk_initialized() -> Result<(), DlssManagerError> {
     if DlssManager::is_sdk_initialized() {
         return Ok(());
     }
-    DlssManager::new().map(|_| ()) // Create an instance to trigger initialization
+    // Attempt to initialize by creating a manager instance.
+    DlssManager::new().map(|_| ()) 
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // Note: These tests will actually try to initialize the SDK.
-    // They might fail if the Streamline DLLs are not findable by the test runner,
-    // or if the SDK has issues on the test machine.
+    // IMPORTANT: These tests interact with global state (SL_INIT, SL_INITIALIZED_SUCCESSFULLY)
+    // and perform actual FFI calls. They are more like integration tests.
+    // Running `cargo test` will execute these.
+    //
+    // To make these tests work:
+    // 1. Ensure NVIDIA drivers supporting DLSS/Streamline are installed.
+    // 2. Ensure the Streamline SDK DLLs (e.g., sl.interposer.dll and its dependencies)
+    //    are accessible to the test executable. This usually means they need to be:
+    //    a) In a directory listed in the system's PATH environment variable.
+    //    b) In the same directory as the test executable (e.g., C:\Nu_Scaler\NU_Scaler\target\debug\).
+    //       Your `dlss-sys/build.rs` links the .lib but doesn't copy DLLs. You might need a
+    //       post-build step for your main application, and for tests, you might need to
+    //       manually copy them or adjust PATH for the test environment.
 
     #[test]
-    fn test_sdk_initialization() {
-        // This relies on the NVIDIA Streamline DLLs (sl.interposer.dll, etc.)
-        // being locatable by the test executable (e.g., in PATH or next to it).
-        // Your build.rs for dlss-sys only links the .lib, it doesn't copy DLLs.
-        // For testing, you might need to ensure DLLs are in the target/debug folder.
-        
-        // Clear the flag for testing, this is a bit hacky for test isolation.
-        // In a real scenario, Once ensures it only runs once per process.
-        // For repeated test runs in the same process, this is problematic without process isolation.
-        // This test is more of an integration check.
-        // For multiple test functions, consider a setup/teardown mechanism for SL_INITIALIZED_SUCCESSFULLY if possible,
-        // or ensure tests that depend on successful init run after a basic init test.
-        // However, `Once` itself cannot be reset, so the actual slInitializeSDK call happens once per process life.
-        let initial_state_for_test = unsafe { SL_INITIALIZED_SUCCESSFULLY };
-        let reinitialize_attempt = !initial_state_for_test; // Only really try if not already marked true
+    fn test_initial_sdk_initialization_attempt() {
+        // This test assumes it might be the first one to run and trigger initialization.
+        // Or, if another test ran `ensure_sdk_initialized` or `DlssManager::new()`,
+        // it will check the outcome of that single global initialization.
 
-        if reinitialize_attempt {
-            println!("Test: Attempting SDK initialization as part of test_sdk_initialization.");
-        }
-
-        match DlssManager::new() {
-            Ok(_) => {
+        println!("Attempting to ensure SDK is initialized via ensure_sdk_initialized()...");
+        match ensure_sdk_initialized() {
+            Ok(()) => {
+                println!("test_initial_sdk_initialization_attempt: SDK initialized or was already initialized successfully.");
                 assert!(DlssManager::is_sdk_initialized(), "SDK should be marked as initialized.");
-                println!("SDK Init test: Success (or was already initialized successfully).");
             }
             Err(e) => {
-                // This might happen if, for example, NVIDIA drivers are not installed,
-                // or if sl.interposer.dll is not found or cannot load its dependencies.
-                eprintln!("SDK Init test: Failed to initialize SDK: {:?}. This might be expected if environment is not set up for DLSS execution.", e);
-                assert!(!DlssManager::is_sdk_initialized(), "SDK should not be marked as initialized on error.");
+                eprintln!("test_initial_sdk_initialization_attempt: SDK initialization failed: {:?}. This can be normal if the environment (drivers, DLLs) isn't set up for DLSS execution.", e);
+                assert!(!DlssManager::is_sdk_initialized(), "SDK should NOT be marked as initialized on error.");
+                // In a CI environment or for specific test setups, you might choose to panic or not.
+                // For now, we'll just assert the state.
+                // panic!("SDK Initialization failed, which might be an issue depending on the test environment: {:?}", e);
+            }
+        }
+    }
+
+    #[test]
+    fn test_subsequent_initialization_calls_do_not_reinitialize() {
+        // Ensures that after the first attempt (successful or not by SL_INIT),
+        // further calls to DlssManager::new() or ensure_sdk_initialized()
+        // reflect the outcome of that first attempt without re-running the slInitializeSDK FFI.
+
+        println!("First ensure_sdk_initialized call (may trigger actual init if not done yet)...");
+        let _ = ensure_sdk_initialized(); // Outcome handled in the test above or by SL_INIT state
+        
+        let first_call_state = DlssManager::is_sdk_initialized();
+        println!("SDK state after first ensure: {}", first_call_state);
+
+        println!("Calling ensure_sdk_initialized() again...");
+        let result_second_call = ensure_sdk_initialized();
+        let second_call_state = DlssManager::is_sdk_initialized();
+        println!("SDK state after second ensure: {}", second_call_state);
+
+        assert_eq!(first_call_state, second_call_state, "SDK initialization state should remain consistent.");
+
+        if first_call_state {
+            assert!(result_second_call.is_ok(), "If SDK was init, subsequent calls should also be Ok.");
+        } else {
+            // If the first init failed, subsequent attempts to get a manager will also fail,
+            // reflecting that initial permanent failure for the process.
+            assert!(result_second_call.is_err(), "If SDK init failed, subsequent calls should also reflect error.");
+        }
+
+        // Try creating a DlssManager instance directly
+        match DlssManager::new() {
+            Ok(_) => {
+                assert!(first_call_state, "If DlssManager::new() succeeded, SDK should have been marked initialized from the first attempt.");
+            }
+            Err(_) => {
+                assert!(!first_call_state, "If DlssManager::new() failed, SDK should have been marked as not initialized from the first attempt.");
             }
         }
     }
 }
-"" 
