@@ -7,10 +7,11 @@
  * The bindings allow for image upscaling using NVIDIA's AI-based upscaling technology
  * to achieve better rendering performance with minimal loss in visual quality.
  */
+#![allow(clippy::all)]
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
-#![allow(unused)]
+#![allow(dead_code)]
 
 use std::ffi::{c_void, CStr, CString};
 use std::path::Path;

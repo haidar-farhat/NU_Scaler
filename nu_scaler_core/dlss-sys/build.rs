@@ -1,72 +1,59 @@
-use anyhow::{anyhow, Result};
 use std::env;
 use std::path::PathBuf;
 
-fn main() -> Result<()> {
-    // Read environment variables
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    
-    // Look for DLSS SDK in several standard locations
-    let dlss_sdk_path = find_dlss_sdk()?;
-    println!("cargo:rustc-link-search=native={}", dlss_sdk_path.display());
-    
-    // Link against DLSS SDK
-    println!("cargo:rustc-link-lib=dylib=nvsdk_ngx");
-    
-    // Make sure our output responds to changes in headers
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=wrapper.h");
-    
-    // The bindgen::Builder is the main entry point to bindgen
+
+    // --- DLSS SDK Path --- 
+    // Option 1: Set an environment variable DLSS_SDK_PATH
+    let sdk_path_env = env::var("DLSS_SDK_PATH").ok();
+    // Option 2: Hardcode the path (replace with your actual path)
+    let sdk_path_hardcoded = PathBuf::from("C:/NVIDIA/DLSS_SDK"); // EXAMPLE! Update this!
+
+    let dlss_sdk_path = match sdk_path_env {
+        Some(p) => PathBuf::from(p),
+        None => sdk_path_hardcoded,
+    };
+
+    if !dlss_sdk_path.exists() {
+        panic!("DLSS SDK path does not exist: {}. Please set DLSS_SDK_PATH or update build.rs.", dlss_sdk_path.display());
+    }
+
+    let dlss_include_path = dlss_sdk_path.join("include");
+    let dlss_lib_path = dlss_sdk_path.join("lib/x64"); // Assuming 64-bit
+
+    if !dlss_include_path.exists() {
+        panic!("DLSS SDK include path does not exist: {}", dlss_include_path.display());
+    }
+    if !dlss_lib_path.exists() {
+        panic!("DLSS SDK library path does not exist: {}", dlss_lib_path.display());
+    }
+
+    println!("cargo:rustc-link-search=native={}", dlss_lib_path.display());
+    // Determine the correct library to link against. This might vary based on the DLSS version 
+    // and whether you're linking the debug or release version of the DLL.
+    // Common names are nvngx_dlss.lib or similar.
+    println!("cargo:rustc-link-lib=nvngx_dlss"); // EXAMPLE! Verify library name.
+
     let bindings = bindgen::Builder::default()
         .header("wrapper.h")
-        .clang_arg(format!("-I{}", dlss_sdk_path.display()))
+        // Tell bindgen the include path for nvsdk_ngx*.h files
+        .clang_arg(format!("-I{}", dlss_include_path.display()))
+        // Add any other necessary clang args
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+        .allowlist_function("NVSDK_NGX_.*") // Adjust based on what you need
+        .allowlist_type("NVSDK_NGX_.*")
+        .allowlist_var("NVSDK_NGX_.*")
+        .generate_comments(true)
+        .derive_debug(true)
+        .derive_default(true)
         .generate()
-        .map_err(|_| anyhow!("Unable to generate bindings to DLSS SDK"))?;
+        .expect("Unable to generate DLSS bindings");
 
-    // Write the bindings to the $OUT_DIR/bindings.rs file
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     bindings
-        .write_to_file(out_path.join("bindings.rs"))
-        .map_err(|_| anyhow!("Could not write DLSS bindings"))?;
+        .write_to_file(out_path.join("dlss_bindings.rs"))
+        .expect("Couldn't write DLSS bindings!");
 
     Ok(())
-}
-
-fn find_dlss_sdk() -> Result<PathBuf> {
-    // 1. Try environment variable
-    if let Ok(path) = env::var("DLSS_SDK_PATH") {
-        let path = PathBuf::from(path);
-        if path.exists() {
-            return Ok(path);
-        }
-    }
-
-    // 2. Try standard locations
-    let standard_paths = [
-        // Windows standard paths
-        r"C:\Program Files\NVIDIA\DLSS",
-        r"C:\NVIDIA\DLSS SDK",
-        r"C:\NVIDIA_DLSS_SDK",
-        // Project-relative paths
-        "./vendor/DLSS",
-        "../vendor/DLSS",
-        "../../vendor/DLSS",
-    ];
-
-    for path_str in standard_paths.iter() {
-        let path = PathBuf::from(path_str);
-        if path.exists() {
-            return Ok(path);
-        }
-    }
-
-    // If not found, provide instructions
-    println!("cargo:warning=NVIDIA DLSS SDK not found. Using stub implementation.");
-    println!("cargo:warning=To use the real DLSS SDK:");
-    println!("cargo:warning=1. Download it from NVIDIA Developer site");
-    println!("cargo:warning=2. Set DLSS_SDK_PATH environment variable");
-    
-    // Use internal stub headers as fallback
-    Ok(PathBuf::from("./stub"))
 } 
