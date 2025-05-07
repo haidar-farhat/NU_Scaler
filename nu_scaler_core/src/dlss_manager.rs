@@ -18,8 +18,8 @@ pub enum DlssManagerError {
 fn perform_initialization() -> Result<(), DlssManagerError> {
     info!("[DLSS Manager] Attempting Streamline SDK initialization...");
     match dlss_sys::slInitializeSDK() { // This is the wrapper from dlss-sys crate
-        Ok(status) => {
-            if status == SlStatus::Success {
+        std::result::Result::Ok(status) => { // Fully qualified Ok
+            if status == dlss_sys::SlStatus::Success { // Fully qualified SlStatus for comparison
                 info!("[DLSS Manager] Streamline SDK initialized successfully via slInitializeSDK().");
                 Ok(())
             } else {
@@ -27,7 +27,7 @@ fn perform_initialization() -> Result<(), DlssManagerError> {
                 Err(DlssManagerError::SdkInitializationFailed(status))
             }
         }
-        Err(load_error) => {
+        std::result::Result::Err(load_error) => { // Fully qualified Err
             // load_error is &'static dlss_sys::LoadError
             let error_message = load_error.0.clone(); // Assuming LoadError(String)
             error!("[DLSS Manager] Failed to load slInitializeSDK symbol: {}", error_message);
