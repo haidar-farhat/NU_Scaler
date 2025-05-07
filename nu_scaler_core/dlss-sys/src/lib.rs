@@ -98,6 +98,7 @@ pub enum SlDLSSMode {
     MaxQuality = 3,     // Value for SL_DLSS_MODE_QUALITY
     UltraPerformance = 4,
     UltraQuality = 5, // If it exists
+    DLAA = 6,           // Added DLAA mode
     // These values are illustrative. Check sl_dlss.h for actual enum values.
     // Ensure these align with what you defined in UpscalingQuality if used for mapping.
 }
