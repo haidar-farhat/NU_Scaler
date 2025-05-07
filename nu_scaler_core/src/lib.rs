@@ -731,8 +731,8 @@ pub struct NuScaler {
     capture: ScreenCapture,
     upscaler: Box<dyn Upscaler>,
     gpu_info: Option<GpuInfo>,
-    device: Option<Arc<wgpu::Device>>,
-    queue: Option<Arc<wgpu::Queue>>,
+    _device: Option<Arc<wgpu::Device>>,
+    _queue: Option<Arc<wgpu::Queue>>,
 }
 
 // Add WindowInfo struct
@@ -770,8 +770,8 @@ impl NuScaler {
             capture: ScreenCapture::new(),
             upscaler,
             gpu_info,
-            device: Some(device),
-            queue: Some(queue),
+            _device: Some(device),
+            _queue: Some(queue),
         })
     }
     
@@ -794,8 +794,8 @@ impl NuScaler {
             capture: ScreenCapture::new(),
             upscaler,
             gpu_info,
-            device: Some(device),
-            queue: Some(queue),
+            _device: Some(device),
+            _queue: Some(queue),
         })
     }
     
