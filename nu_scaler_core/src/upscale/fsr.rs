@@ -1,17 +1,24 @@
 #![cfg(feature = "fsr3")]
 use anyhow::Result;
 use std::any::Any;
+use std::ffi::c_void; // For opaque FSR context handle
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
-use wgpu::{
-    BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor,
-    BindGroupLayoutEntry, BindingType, Buffer, BufferBindingType, BufferDescriptor, BufferUsages,
-    CommandEncoderDescriptor, ComputePipeline, ComputePipelineDescriptor, Device, MapMode,
-    PipelineLayoutDescriptor, Queue, ShaderModule, ShaderModuleDescriptor, ShaderSource,
-};
+// Remove WGPU specific imports not directly needed by the FsrUpscaler struct itself yet
+// use wgpu::util::DeviceExt;
+// use wgpu::{...
+// };
 
-use super::{Upscaler, UpscalingQuality, UpscalingTechnology};
+use crate::gpu::GpuResources; // Added for storing shared GPU resources
+use super::{Upscaler, UpscalingQuality /*, UpscalingTechnology*/}; // Removed unused UpscalingTechnology
 
+// fsr3-sys FFI functions will be used here later
+// For now, assuming a pattern similar to DLSS integration.
+// e.g., use crate::fsr3_sys; 
+
+// FSR 1.0 EASU and RCAS shaders are kept below for now, but will not be directly used by this FSR3 SDK upscaler.
+// ... (existing FSR_EASU_SHADER and FSR_RCAS_SHADER strings) ...
+
+// Keep existing FSR 1.0 Shaders (EASU and RCAS) here for now
 // FSR 1.0 EASU (Edge Adaptive Spatial Upsampling) shader
 // Simplified implementation of AMD FSR algorithm
 const FSR_EASU_SHADER: &str = r#"
@@ -255,8 +262,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 /// FSR upscaler (AMD FidelityFX Super Resolution)
 pub struct FsrUpscaler {
     quality: UpscalingQuality,
-    device: Option<Arc<Device>>,
-    queue: Option<Arc<Queue>>,
+    gpu_resources: Option<Arc<GpuResources>>,
+    fsr_context: Option<*mut c_void>, // Opaque handle for FSR3 context/feature
+    input_width: u32,
+    input_height: u32,
+    output_width: u32,
+    output_height: u32,
+    initialized: bool,
 }
 
 impl FsrUpscaler {
@@ -264,45 +276,64 @@ impl FsrUpscaler {
     pub fn new(quality: UpscalingQuality) -> Self {
         Self {
             quality,
-            device: None,
-            queue: None,
+            gpu_resources: None,
+            fsr_context: None,
+            input_width: 0,
+            input_height: 0,
+            output_width: 0,
+            output_height: 0,
+            initialized: false,
         }
     }
 
     /// Set device and queue for GPU operations
-    pub fn set_device_queue(&mut self, device: Arc<Device>, queue: Arc<Queue>) {
-        self.device = Some(device);
-        self.queue = Some(queue);
+    pub fn set_device_queue(&mut self, device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>) {
+        let gpu_info = None; // Placeholder, may need to get from adapter if FSR SDK requires specifics
+        self.gpu_resources = Some(Arc::new(GpuResources::new(device, queue, gpu_info)));
     }
 }
 
 impl Upscaler for FsrUpscaler {
     fn initialize(
         &mut self,
-        _input_width: u32,
-        _input_height: u32,
-        _output_width: u32,
-        _output_height: u32,
+        _input_width: u32, // Application's desired render width (pre-FSR)
+        _input_height: u32, // Application's desired render height (pre-FSR)
+        _output_width: u32,   // Final display/output width
+        _output_height: u32,  // Final display/output height
     ) -> Result<()> {
-        // Placeholder: In a real implementation, this would set up the FSR pipeline
-        Ok(())
+        if !self.gpu_resources.is_some() {
+            return Err(anyhow::anyhow!("FsrUpscaler: GpuResources not set before initialize"));
+        }
+        // TODO: Implement FSR3 SDK initialization
+        // 1. Ensure FSR3 SDK is loaded/globally initialized (if applicable, via fsr3_sys)
+        // 2. Get native device handle from self.gpu_resources
+        // 3. Call fsr3_sys function to create FSR context/feature using output_width, output_height
+        //    Store the context in self.fsr_context
+        // 4. Determine actual input_width, input_height based on quality and output_width/height
+        //    Store them in self.input_width, self.input_height
+        // 5. Set self.output_width, self.output_height
+        // 6. Mark as initialized
+        println!("[FsrUpscaler] initialize() called - FSR3 SDK integration not yet implemented.");
+        self.initialized = false; // Keep false until fully implemented
+        Err(anyhow::anyhow!("FSR3 Upscaler initialize() not implemented"))
     }
 
-    fn upscale(&self, input: &[u8]) -> Result<Vec<u8>> {
-        // Placeholder: In a real implementation, this would use FSR to upscale
-        // For now, just make a copy and add quality marker for testing
-        let mut output = input.to_vec();
-
-        // Mark first few bytes with the FSR signature for debugging
-        let sig = b"FSR";
-        let sig_len = std::cmp::min(sig.len(), output.len());
-        output[..sig_len].copy_from_slice(&sig[..sig_len]);
-
-        Ok(output)
+    fn upscale(&self, _input_bytes: &[u8]) -> Result<Vec<u8>> {
+        if !self.initialized || self.fsr_context.is_none() {
+            return Err(anyhow::anyhow!("FsrUpscaler: Not initialized or FSR context missing."));
+        }
+        // TODO: Implement FSR3 SDK upscale call
+        // 1. Get GpuResources, device, queue
+        // 2. Create WGPU input buffers/textures (color, depth, motion vectors)
+        // 3. Get native handles for these resources (DX12 limitations apply)
+        // 4. Call fsr3_sys dispatch/evaluate function with context and resource handles
+        // 5. Read back from WGPU output buffer/texture
+        println!("[FsrUpscaler] upscale() called - FSR3 SDK integration not yet implemented.");
+        Err(anyhow::anyhow!("FSR3 Upscaler upscale() not implemented"))
     }
 
     fn name(&self) -> &'static str {
-        "FsrUpscaler"
+        "Fsr3SdkUpscaler" // Name to distinguish from potential FSR1 shader upscaler
     }
 
     fn quality(&self) -> UpscalingQuality {
@@ -310,7 +341,16 @@ impl Upscaler for FsrUpscaler {
     }
 
     fn set_quality(&mut self, quality: UpscalingQuality) -> Result<()> {
-        self.quality = quality;
+        if self.quality != quality {
+            self.quality = quality;
+            if self.initialized {
+                // TODO: Mark for re-initialization or call FSR specific function to update quality settings
+                println!("[FsrUpscaler] Quality changed. Re-initialization logic for FSR3 not yet implemented.");
+                 // For now, just note it. A full implementation would destroy and recreate the FSR context
+                 // or call an FSR API function to change the mode if supported dynamically.
+                self.initialized = false; // Force re-init for now
+            }
+        }
         Ok(())
     }
 
@@ -320,5 +360,16 @@ impl Upscaler for FsrUpscaler {
 
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
+    }
+}
+
+impl Drop for FsrUpscaler {
+    fn drop(&mut self) {
+        if let Some(context) = self.fsr_context.take() {
+            // TODO: Call the appropriate fsr3_sys function to destroy the FSR context
+            // Example: unsafe { fsr3_sys::ffxFsr3ContextDestroy(&mut context_wrapper_if_needed) };
+            println!("[FsrUpscaler] Destroying FSR3 context (placeholder): {:?}", context);
+            // Make sure to handle the actual FSR3 SDK call for destruction correctly.
+        }
     }
 }
