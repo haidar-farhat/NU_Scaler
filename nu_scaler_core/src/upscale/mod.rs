@@ -963,6 +963,13 @@ impl Upscaler for WgpuUpscaler {
         Ok(())
     }
     fn upscale(&self, input: &[u8]) -> Result<Vec<u8>> {
+        // Test log file creation
+        let log_path = r"C:\Nu_Scaler\NU_Scaler\upscale_debug.log";
+        match std::fs::write(log_path, b"[Rust] Test log\n") {
+            Ok(_) => println!("[Rust] Test log written"),
+            Err(e) => println!("[Rust] ERROR: Could not write test log: {}", e),
+        }
+        std::io::stdout().flush().unwrap();
         println!("[Rust] WgpuUpscaler::upscale CALLED");
         // Quick validation
         if !self.initialized {
