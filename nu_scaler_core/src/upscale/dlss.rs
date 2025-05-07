@@ -35,17 +35,18 @@ impl DlssUpscaler {
     }
 
     // Method for the factory to set GpuResources
-    // Conforming to the set_device_queue structure seen in the factory, but taking GpuResources
-    pub fn set_gpu_resources(&mut self, gpu_resources: Arc<GpuResources>) {
-        self.gpu_resources = Some(gpu_resources);
-    }
-
-    // Alternative, if GpuResources needs to be constructed here
-    // pub fn set_device_queue(&mut self, device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>, /* gpu_info: Option<GpuInfo> */) {
-    //     // Potentially create GpuInfo or pass as None
-    //     let gpu_info = None; // Placeholder
-    //     self.gpu_resources = Some(Arc::new(GpuResources::new(device, queue, gpu_info)));
+    // pub fn set_gpu_resources(&mut self, gpu_resources: Arc<GpuResources>) {
+    //     self.gpu_resources = Some(gpu_resources);
     // }
+
+    // Conforming to the UpscalerFactory pattern
+    pub fn set_device_queue(&mut self, device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>) {
+        // GpuInfo might be obtainable from the device/adapter or passed in if crucial.
+        // For now, passing None. If GpuInfo is needed for GpuResources MemoryPool or other critical functions,
+        // this might need to be sourced properly.
+        let gpu_info = None; // Placeholder: GpuInfo might be needed from adapter.
+        self.gpu_resources = Some(Arc::new(GpuResources::new(device, queue, gpu_info)));
+    }
 
     fn map_quality_to_dlss_mode(quality: UpscalingQuality, output_width: u32, output_height: u32) -> (SlDLSSMode, u32, u32) {
         let mode = match quality {
