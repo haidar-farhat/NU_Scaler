@@ -49,27 +49,33 @@ print(f"[main.py] nu_scaler_core available: {nu_scaler_core is not None}")
 from nu_scaler.gpu_optimizer import optimize_upscaler, force_gpu_activation
 
 class AspectRatioPreview(QLabel):
-    """A QLabel that displays a QPixmap scaled with aspect ratio, with overlay support and full-screen toggle."""
+    """
+    QLabel-based widget for displaying a QPixmap with aspect-ratio-aware scaling and a modern overlay.
+    Supports double-click to toggle full-screen. Overlay is always visible and customizable.
+    """
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAlignment(Qt.AlignCenter)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setStyleSheet("background: #181818; border: 1px solid #444;")
         self._pixmap = None
-        self.overlay_text = ""
+        self._overlay_text = ""
         self._is_fullscreen = False
         self._parent_window = None
         self.installEventFilter(self)
 
-    def set_pixmap(self, pixmap):
+    def set_pixmap(self, pixmap: QPixmap):
+        """Set the pixmap to display."""
         self._pixmap = pixmap
         self.update()
 
-    def set_overlay(self, text):
-        self.overlay_text = text
+    def set_overlay(self, text: str):
+        """Set the overlay text."""
+        self._overlay_text = text
         self.update()
 
     def set_parent_window(self, window):
+        """Set the parent window for full-screen toggling."""
         self._parent_window = window
 
     def eventFilter(self, obj, event):
@@ -91,14 +97,14 @@ class AspectRatioPreview(QLabel):
     def paintEvent(self, event):
         super().paintEvent(event)
         painter = QPainter(self)
+        # Draw the scaled pixmap centered
         if self._pixmap:
-            # Calculate scaled size with aspect ratio
             scaled = self._pixmap.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
             x = (self.width() - scaled.width()) // 2
             y = (self.height() - scaled.height()) // 2
             painter.drawPixmap(x, y, scaled)
         # Draw overlay
-        if self.overlay_text:
+        if self._overlay_text:
             overlay_rect = self.rect().adjusted(12, 12, -12, -12)
             painter.setRenderHint(QPainter.Antialiasing)
             painter.setBrush(QColor(30, 30, 30, 180))
@@ -108,7 +114,7 @@ class AspectRatioPreview(QLabel):
             font = QFont()
             font.setPointSize(12)
             painter.setFont(font)
-            painter.drawText(overlay_rect, Qt.AlignTop | Qt.AlignRight, self.overlay_text)
+            painter.drawText(overlay_rect, Qt.AlignTop | Qt.AlignRight, self._overlay_text)
 
 class UpscaleWorker(QObject):
     finished = Signal(bytes, int, int, float)
@@ -642,26 +648,28 @@ class LiveFeedScreen(QWidget):
         print(f'[DEBUG] on_upscale_finished: {id(self)}')
         print(f"[DEBUG] Upscale finished in {elapsed*1000:.2f} ms at {time.strftime('%H:%M:%S')}")
         if out_bytes:
-            qimg = QImage(out_bytes, out_w, out_h, QImage.Format_RGBA8888)
-            pixmap = QPixmap.fromImage(qimg)
-            self.output_preview.set_pixmap(pixmap)
-            inst_fps = 1.0 / elapsed if elapsed > 0 else 0.0
-            self.fps = 0.95 * self.fps + 0.05 * inst_fps if self.fps > 0 else inst_fps
-            # Overlay details
-            vram_str = self.memory_stats_label.text()
-            overlay = (f"Input: {out_w//self.upscale_scale:.0f}×{out_h//self.upscale_scale:.0f}\n"
-                       f"Upscaled: {out_w}×{out_h}\n"
-                       f"FPS: {self.fps:.1f}\n"
-                       f"{vram_str}\n"
-                       f"Frame Time: {elapsed*1000:.1f} ms")
-            self.output_preview.set_overlay(overlay)
-            self.status_bar.setText(f"Frame Time: {elapsed * 1000:.1f} ms   FPS: {self.fps:.1f}   Resolution: {out_w//self.upscale_scale:.0f}×{out_h//self.upscale_scale:.0f} → {out_w}×{out_h}")
-            self.profiler_signal.emit(elapsed * 1000, self.fps, out_w//self.upscale_scale, out_h//self.upscale_scale)
-            if self.fps < 30:
-                self.warning_signal.emit(f"Warning: Low FPS ({self.fps:.1f})", True)
-            else:
-                self.warning_signal.emit("", False)
-            self.last_frame_time = time.perf_counter()
+            try:
+                qimg = QImage(out_bytes, out_w, out_h, QImage.Format_RGBA8888)
+                pixmap = QPixmap.fromImage(qimg)
+                self.output_preview.set_pixmap(pixmap)
+                inst_fps = 1.0 / elapsed if elapsed > 0 else 0.0
+                self.fps = 0.95 * self.fps + 0.05 * inst_fps if self.fps > 0 else inst_fps
+                vram_str = self.memory_stats_label.text()
+                overlay = (f"Input: {out_w//self.upscale_scale:.0f}×{out_h//self.upscale_scale:.0f}\n"
+                           f"Upscaled: {out_w}×{out_h}\n"
+                           f"FPS: {self.fps:.1f}\n"
+                           f"{vram_str}\n"
+                           f"Frame Time: {elapsed*1000:.1f} ms")
+                self.output_preview.set_overlay(overlay)
+                self.status_bar.setText(f"Frame Time: {elapsed * 1000:.1f} ms   FPS: {self.fps:.1f}   Resolution: {out_w//self.upscale_scale:.0f}×{out_h//self.upscale_scale:.0f} → {out_w}×{out_h}")
+                self.profiler_signal.emit(elapsed * 1000, self.fps, out_w//self.upscale_scale, out_h//self.upscale_scale)
+                if self.fps < 30:
+                    self.warning_signal.emit(f"Warning: Low FPS ({self.fps:.1f})", True)
+                else:
+                    self.warning_signal.emit("", False)
+                self.last_frame_time = time.perf_counter()
+            except Exception as e:
+                print(f"[ERROR] Failed to update output preview: {e}")
         # The timer will continue to fire at the set interval
 
     def on_upscale_error(self, error_msg):
@@ -675,6 +683,7 @@ class LiveFeedScreen(QWidget):
         # The timer will continue to fire at the set interval
 
     def toggle_start_stop(self):
+        """Toggle start/stop capture via hotkey."""
         if self.start_btn.isEnabled():
             self.start_capture()
         elif self.stop_btn.isEnabled():
