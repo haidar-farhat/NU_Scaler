@@ -1,9 +1,9 @@
+use pyo3::prelude::*;
+use pyo3::types::PyBytes;
+use std::time::Instant;
 use crate::upscale::{/*Upscaler,*/ UpscalingQuality, UpscalingTechnology, UpscalerFactory};
 use crate::gpu::detector::GpuDetector;
-use std::time::{Duration, Instant};
-use std::sync::Arc;
 use anyhow::{Result, anyhow};
-use pyo3::prelude::*;
 
 /// Performance metrics collected during benchmark
 #[derive(Debug, Clone)]
