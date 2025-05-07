@@ -18,6 +18,7 @@ use std::path::Path;
 use std::ptr;
 use std::sync::Once;
 use thiserror::Error;
+use std::os::raw::{c_uint};
 
 /// Re-exports for convenience
 pub use libc::{c_char, c_int, c_uint, size_t};
@@ -570,4 +571,29 @@ mod tests {
         // that doesn't require full graphics context setup, e.g., a version check.
         assert_eq!(2 + 2, 4);
     }
+}
+
+#[repr(C)]
+pub enum SlStatus { Success = 0, /* … other error codes … */ }
+
+#[link(name = "sl.interposer")]
+extern "C" {
+    pub fn slCreateDlssFeature(
+        device: *mut c_void,
+        width: u32,
+        height: u32,
+        flags: c_uint,
+        out_feature: *mut *mut c_void,
+    ) -> SlStatus;
+
+    pub fn slEvaluateDlssFeature(
+        feature: *mut c_void,
+        input_color: *const c_void,
+        input_depth: *const c_void,
+        jitter_x: f32,
+        jitter_y: f32,
+        output_color: *mut c_void,
+    ) -> SlStatus;
+
+    pub fn slDestroyDlssFeature(feature: *mut c_void) -> SlStatus;
 }
