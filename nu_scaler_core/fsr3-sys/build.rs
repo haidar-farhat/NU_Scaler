@@ -2,6 +2,12 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Only proceed if the specific environment variable is set
+    if env::var("NU_SCALER_BUILD_FSR3").is_err() {
+        println!("cargo:warning=NU_SCALER_BUILD_FSR3 not set, skipping FSR3 SDK setup.");
+        return Ok(()); // Exit early, do nothing
+    }
+
     println!("cargo:rerun-if-changed=wrapper.h");
 
     // --- FSR3 SDK Path --- 
