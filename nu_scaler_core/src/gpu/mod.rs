@@ -98,12 +98,14 @@ impl GpuResources {
     /// and within the lifetime of the WGPU device.
     /// The underlying WGPU instance and device must remain alive while this handle is in use.
     pub unsafe fn get_native_device_handle(&self) -> Result<*mut std::ffi::c_void, GpuError> {
+        /*
         #[cfg(target_os = "windows")]
         {
             use wgpu::hal::dx12::Api as Dx12Api;
-            use windows::core::Interface;
+            use windows::core::Interface; // Needed for .as_raw()
             let native_handle_opt: Option<*mut std::ffi::c_void> = 
                 self.device.as_hal::<Dx12Api, _, _>(|hal_device_opt| {
+                    // Try d.raw_device() -> as_raw() -> cast()
                     hal_device_opt.map(|d| d.raw_device().as_raw().cast::<c_void>())
                 });
 
@@ -113,6 +115,7 @@ impl GpuResources {
                 }
             }
         }
+        */
 
         #[cfg(target_os = "linux")]
         {
@@ -138,13 +141,15 @@ impl GpuResources {
     /// and within the lifetime of the WGPU texture and device.
     /// The underlying WGPU instance, device, and texture must remain alive while this handle is in use.
     pub unsafe fn get_native_texture_handle(&self, texture: &wgpu::Texture) -> Result<*mut std::ffi::c_void, GpuError> {
+        /*
         #[cfg(target_os = "windows")]
         {
             use wgpu::hal::dx12::Api as Dx12Api;
-            use windows::core::Interface;
+            use windows::core::Interface; // Might be needed if raw_resource_ptr returns ComPtr
             let mut native_handle_opt: Option<*mut std::ffi::c_void> = None;
             texture.as_hal::<Dx12Api, _>(|hal_texture_opt| {
                 if let Some(ht) = hal_texture_opt {
+                    // Try guessing ht.raw_resource_ptr()
                     native_handle_opt = Some(ht.raw_resource_ptr().cast::<c_void>());
                 }
             });
@@ -154,6 +159,7 @@ impl GpuResources {
                 }
             }
         }
+        */
 
         #[cfg(target_os = "linux")]
         {
