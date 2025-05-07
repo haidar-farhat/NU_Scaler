@@ -3,8 +3,8 @@ use std::path::PathBuf;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=src/lib.rs"); // Rerun if manual bindings change
-    // Potentially rerun if you copy SDK headers into the project for reference
-    // println!("cargo:rerun-if-changed=include/sl_dlss.h"); 
+                                                   // Potentially rerun if you copy SDK headers into the project for reference
+                                                   // println!("cargo:rerun-if-changed=include/sl_dlss.h");
 
     let streamline_sdk_path = PathBuf::from(
         env::var("NVIDIA_STREAMLINE_SDK_PATH")
@@ -31,4 +31,4 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rustc-link-lib=sl.interposer"); // User needs to verify this library name
 
     Ok(())
-} 
+}
