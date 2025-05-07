@@ -286,38 +286,26 @@ class LiveFeedScreen(QWidget):
         # Upscaling controls
         upscale_controls = QGroupBox("Upscaling Settings")
         upscale_form = QFormLayout(upscale_controls)
-        self.technology_box = QComboBox()
-        # Ensure options match available Rust implementations
-        available_techs = []
-        if hasattr(nu_scaler_core, 'PyWgpuUpscaler') or hasattr(nu_scaler_core, 'PyAdvancedWgpuUpscaler'):
-            available_techs.append("WGPU")
+        self.method_box = QComboBox()
+        methods = []
         if hasattr(nu_scaler_core, 'PyDlssUpscaler'):
-            available_techs.append("DLSS")
-        # Add other techs like FSR here if/when implemented
-        # available_techs.append("FSR (Not Impl.)") 
-        self.technology_box.addItems(available_techs)
-        print(f"[LiveFeedScreen] available_techs: {available_techs}")
-        if "WGPU" in available_techs:
-             self.technology_box.setCurrentText("WGPU") # Default to WGPU if available
-        elif "DLSS" in available_techs:
-             self.technology_box.setCurrentText("DLSS")
-
-        self.technology_box.currentTextChanged.connect(self.update_technology_ui)
+            methods.append("DLSS")
+        if hasattr(nu_scaler_core, 'PyWgpuUpscaler'):
+            methods.append("WGPU Nearest")
+            methods.append("WGPU Bilinear")
+        # Add FSR, etc. as needed
+        self.method_box.addItems(methods)
         self.quality_box = QComboBox()
         self.quality_box.addItems(["ultra", "quality", "balanced", "performance"])
-        self.algorithm_box = QComboBox()
-        self.algorithm_box.addItems(["nearest", "bilinear"])
         self.scale_slider = QSlider(Qt.Horizontal)
         self.scale_slider.setRange(10, 40)
         self.scale_slider.setValue(20)
         self.scale_slider.valueChanged.connect(self.update_scale_label)
         self.scale_label = QLabel("2.0×")
-        upscale_form.addRow("Technology:", self.technology_box)
+        upscale_form.addRow("Method:", self.method_box)
         upscale_form.addRow("Quality:", self.quality_box)
-        upscale_form.addRow("Algorithm:", self.algorithm_box)
         upscale_form.addRow("Scale Factor:", self.scale_slider)
         upscale_form.addRow("", self.scale_label)
-        self.technology_box.currentTextChanged.connect(self.update_technology_ui)
         right_layout.addWidget(upscale_controls)
         right_layout.addStretch()
         # Status bar
@@ -490,25 +478,6 @@ class LiveFeedScreen(QWidget):
         threading.Timer(5, watchdog, args=("5s after stop_capture",)).start()
         threading.Timer(10, watchdog, args=("10s after stop_capture",)).start()
 
-    def update_technology_ui(self, technology):
-        try:
-            if technology == "FSR 3.0":
-                self.quality_box.setEnabled(True)
-                self.algorithm_box.setEnabled(False)
-                self.algorithm_box.setCurrentText("bilinear")
-            elif technology == "DLSS":
-                self.quality_box.setEnabled(True)
-                self.algorithm_box.setEnabled(False)
-                self.algorithm_box.setCurrentText("bilinear")
-            elif technology == "Basic":
-                self.quality_box.setEnabled(True)
-                self.algorithm_box.setEnabled(True)
-            else:
-                self.quality_box.setEnabled(True)
-                self.algorithm_box.setEnabled(False)
-        except Exception as e:
-            print(f'[DEBUG] update_technology_ui: {e}')
-
     def toggle_advanced_upscaling(self, state):
         try:
             self.advanced_upscaling = bool(state)
@@ -569,74 +538,51 @@ class LiveFeedScreen(QWidget):
         out_w = int(in_w * scale)
         out_h = int(in_h * scale)
 
-        # Get selected quality and technology
+        # Get selected quality and method
         quality = self.quality_box.currentText()
-        technology = self.technology_box.currentText() # Use the technology dropdown
+        method = self.method_box.currentText()
 
         try:
-            # --- Select Upscaler based on technology ---
-            if technology == "DLSS":
+            if method == "DLSS":
                 if hasattr(nu_scaler_core, 'PyDlssUpscaler'):
-                    print(f"[PYTHON INFO] Creating PyDlssUpscaler (Quality: {quality})")
                     self.log_signal.emit(f"Creating DLSS Upscaler (Quality: {quality})")
                     self.upscaler = nu_scaler_core.PyDlssUpscaler(quality)
-                    # DLSS uses specific render resolutions based on quality, initialize handles that
-                    # Note: PyDlssUpscaler's initialize should handle the input/output mapping
-                    print(f"[PYTHON INFO] Initializing DLSS Upscaler ({in_w}x{in_h} -> {out_w}x{out_h})")
-                    self.upscaler.initialize(in_w, in_h, out_w, out_h) 
-                    print("[PYTHON INFO] DLSS Upscaler Initialized.")
-                    self.advanced_upscaling = False # DLSS implies specific handling
+                    self.upscaler.initialize(in_w, in_h, out_w, out_h)
+                    self.advanced_upscaling = False
                 else:
                     self.log_signal.emit("Error: PyDlssUpscaler not found in nu_scaler_core.")
                     return None
-
-            elif technology == "WGPU":
-                if self.advanced_upscaling:
-                    if hasattr(nu_scaler_core, 'PyAdvancedWgpuUpscaler'):
-                        self.log_signal.emit(f"[PYTHON INFO] Creating Advanced WGPU Upscaler (Quality: {quality})")
-                        # Assuming 'bilinear' is a reasonable default algo for advanced
-                        self.upscaler = nu_scaler_core.PyAdvancedWgpuUpscaler(quality, "bilinear", True)
-                        # optimize_upscaler(self.upscaler) # Potentially optimize advanced upscaler
-                        force_gpu_activation(self.upscaler) # Force activation for advanced
-                    else:
-                         self.log_signal.emit("[PYTHON INFO] Error: PyAdvancedWgpuUpscaler not found, falling back.")
-                         self.upscaler = nu_scaler_core.PyWgpuUpscaler(quality, "bilinear") # Fallback
-                         self.advanced_upscaling = False
+            elif method == "WGPU Nearest":
+                if hasattr(nu_scaler_core, 'PyWgpuUpscaler'):
+                    self.log_signal.emit(f"Creating WGPU Upscaler (nearest) (Quality: {quality})")
+                    self.upscaler = nu_scaler_core.PyWgpuUpscaler(quality, "nearest")
+                    self.upscaler.initialize(in_w, in_h, out_w, out_h)
                 else:
-                    if hasattr(nu_scaler_core, 'PyWgpuUpscaler'):
-                        self.log_signal.emit(f"[PYTHON INFO] Creating Basic WGPU Upscaler (Quality: {quality})")
-                        # Assuming 'bilinear' is a reasonable default algo for basic
-                        self.upscaler = nu_scaler_core.PyWgpuUpscaler(quality, "bilinear")
-                    else:
-                         self.log_signal.emit("Error: PyWgpuUpscaler not found in nu_scaler_core.")
-                         return None
-
-                # Initialize WGPU upscaler
-                print(f"[PYTHON INFO] Initializing WGPU Upscaler ({in_w}x{in_h} -> {out_w}x{out_h})")
-                self.upscaler.initialize(in_w, in_h, out_w, out_h)
-                print("[PYTHON INFO] WGPU Upscaler Initialized.")
-            
-            # elif technology == "FSR (Not Impl.)":
-            #     self.log_signal.emit("FSR Upscaler not implemented yet.")
-            #     return None # Or create a placeholder/fallback?
-            
+                    self.log_signal.emit("Error: PyWgpuUpscaler not found in nu_scaler_core.")
+                    return None
+            elif method == "WGPU Bilinear":
+                if hasattr(nu_scaler_core, 'PyWgpuUpscaler'):
+                    self.log_signal.emit(f"Creating WGPU Upscaler (bilinear) (Quality: {quality})")
+                    self.upscaler = nu_scaler_core.PyWgpuUpscaler(quality, "bilinear")
+                    self.upscaler.initialize(in_w, in_h, out_w, out_h)
+                else:
+                    self.log_signal.emit("Error: PyWgpuUpscaler not found in nu_scaler_core.")
+                    return None
             else:
-                self.log_signal.emit(f"Error: Unknown upscaling technology selected: {technology}")
+                self.log_signal.emit(f"Error: Unknown upscaling method selected: {method}")
                 return None
-            # --- End Upscaler Selection ---
 
             self.upscaler_initialized = True
             self.log_signal.emit(f"Upscaler '{self.upscaler.name()}' initialized ({in_w}x{in_h} -> {out_w}x{out_h})")
-            # Store current settings to avoid re-initialization if unchanged
             self._last_in_w = in_w
             self._last_in_h = in_h
             self._last_scale = scale
             self._last_quality = quality
-            self._last_technology = technology
+            self._last_method = method
             return self.upscaler
 
         except Exception as e:
-            error_msg = f"Error initializing upscaler ({technology}, {quality}): {e}"
+            error_msg = f"Error initializing upscaler ({method}, {quality}): {e}"
             print(error_msg)
             traceback.print_exc()
             self.log_signal.emit(error_msg)
@@ -784,16 +730,17 @@ class SettingsScreen(QWidget):
         self.scale_label = QLabel("2.0×")
         self.scale_slider.valueChanged.connect(lambda: self.scale_label.setText(f"{self.scale_slider.value()/10.0:.1f}×"))
         self.scale_slider.setToolTip("Set the upscaling factor (1.0× to 4.0×).")
-        self.method = QComboBox()
-        self.method.addItems(["AMD FSR", "NVIDIA NIS", "Pure Rust Interpolation"])
-        self.method.setToolTip("Select the upscaling algorithm.")
-        self.advanced_btn = QPushButton("Advanced Algorithm Settings")
-        self.advanced_btn.setToolTip("Open advanced settings for the selected algorithm.")
-        self.advanced_btn.clicked.connect(self.open_advanced_settings)
+        self.method_box = QComboBox()
+        self.method_box.addItems(["DLSS", "WGPU Nearest", "WGPU Bilinear"])
+        self.method_box.setToolTip("Select the upscaling method.")
+        self.quality_box = QComboBox()
+        self.quality_box.addItems(["ultra", "quality", "balanced", "performance"])
+        self.quality_box.setToolTip("Select the upscaling quality.")
+        self.scale_slider.valueChanged.connect(self.update_scale_label)
+        upscale_form.addRow("Method:", self.method_box)
+        upscale_form.addRow("Quality:", self.quality_box)
         upscale_form.addRow("Scale Factor:", self.scale_slider)
         upscale_form.addRow("", self.scale_label)
-        upscale_form.addRow("Upscaling Method:", self.method)
-        upscale_form.addRow(self.advanced_btn)
         # Interpolation Settings
         interp_group = QGroupBox("Interpolation Settings")
         interp_form = QFormLayout(interp_group)
@@ -865,11 +812,6 @@ class SettingsScreen(QWidget):
     def refresh_devices(self):
         if self.live_feed_screen:
             self.live_feed_screen.refresh_windows()
-
-    def open_advanced_settings(self):
-        # Placeholder: show a message or open a modal
-        from PySide6.QtWidgets import QMessageBox
-        QMessageBox.information(self, "Advanced Settings", "Advanced algorithm settings coming soon!")
 
     def start_pipeline(self):
         if self.live_feed_screen:
