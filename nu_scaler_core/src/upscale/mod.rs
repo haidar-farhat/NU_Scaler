@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::any::Any;
 use pyo3::prelude::*;
 use crate::gpu::{detector::GpuDetector, memory::{MemoryPool, AllocationStrategy, MemoryPressure}, GpuResources};
+use std::io::Write;
 
 // Add new module declarations
 mod fsr;
@@ -1003,11 +1004,13 @@ impl Upscaler for WgpuUpscaler {
             queue.submit(Some(encoder.finish()));
             let t_upload_end = Instant::now();
             println!("[Rust] Buffer upload (staging): {:.2} ms", (t_upload_end - t_upload_start).as_secs_f64() * 1000.0);
+            std::io::stdout().flush().unwrap();
         } else {
             let t_upload_start = Instant::now();
             queue.write_buffer(input_buffer, 0, input);
             let t_upload_end = Instant::now();
             println!("[Rust] Buffer upload (direct): {:.2} ms", (t_upload_end - t_upload_start).as_secs_f64() * 1000.0);
+            std::io::stdout().flush().unwrap();
         }
         let t_shader_start = Instant::now();
         let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
@@ -1034,6 +1037,7 @@ impl Upscaler for WgpuUpscaler {
         queue.submit(Some(encoder.finish()));
         let t_shader_end = Instant::now();
         println!("[Rust] Shader dispatch + copy: {:.2} ms", (t_shader_end - t_shader_start).as_secs_f64() * 1000.0);
+        std::io::stdout().flush().unwrap();
         let buffer_slice = staging_buffer.slice(..);
         let t_map_start = Instant::now();
         let result = {
@@ -1055,13 +1059,16 @@ impl Upscaler for WgpuUpscaler {
         };
         let t_map_end = Instant::now();
         println!("[Rust] Buffer map/download: {:.2} ms", (t_map_end - t_map_start).as_secs_f64() * 1000.0);
+        std::io::stdout().flush().unwrap();
         staging_buffer.unmap();
         let t_poll_start = Instant::now();
         device.poll(wgpu::Maintain::Wait);
         let t_poll_end = Instant::now();
         println!("[Rust] Device poll: {:.2} ms", (t_poll_end - t_poll_start).as_secs_f64() * 1000.0);
+        std::io::stdout().flush().unwrap();
         let t_total = Instant::now() - t_start;
         println!("[Rust] Total upscale time: {:.2} ms", t_total.as_secs_f64() * 1000.0);
+        std::io::stdout().flush().unwrap();
         if self.adaptive_quality && self.gpu_resources.is_some() {
             if let Some(resources) = &self.gpu_resources {
                 let _ = resources.memory_pool.update_vram_usage();
