@@ -7,14 +7,16 @@
 #include "C:/nvideasdk/bckup/Streamline/include/sl.h"
 
 // Conditionally include DLSS-G header if the main sl.h defines SL_DLSS_G
-// This assumes sl_dlss_g.h is also directly in C:/nvideasdk/bckup/Streamline/include/
-#if SL_DLSS_G && __has_include("C:/nvideasdk/bckup/Streamline/include/sl_dlss_g.h")
+// and the header file actually exists at the specified path.
+#if defined(SL_DLSS_G) && __has_include("C:/nvideasdk/bckup/Streamline/include/sl_dlss_g.h")
 #include "C:/nvideasdk/bckup/Streamline/include/sl_dlss_g.h"
 #endif
 
-// Add other specific headers here if sl.h doesn't pull them in and they are needed,
-// for example:
-// #if SL_REFLEX_ENABLED && __has_include("C:/nvideasdk/bckup/Streamline/include/sl_reflex.h")
+// If you need other specific Streamline headers (e.g., sl_reflex.h, sl_nis.h, etc.)
+// that are not transitively included by sl.h, add them here using a similar
+// absolute path and conditional inclusion pattern if appropriate.
+// Example:
+// #if defined(SL_REFLEX_ENABLED) && __has_include("C:/nvideasdk/bckup/Streamline/include/sl_reflex.h")
 // #include "C:/nvideasdk/bckup/Streamline/include/sl_reflex.h"
 // #endif
 
