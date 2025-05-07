@@ -1,72 +1,67 @@
-use anyhow::{anyhow, Result};
 use std::env;
 use std::path::PathBuf;
 
-fn main() -> Result<()> {
-    // Read environment variables
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    
-    // Look for FSR 3.0 SDK in several standard locations
-    let fsr3_sdk_path = find_fsr3_sdk()?;
-    println!("cargo:rustc-link-search=native={}", fsr3_sdk_path.display());
-    
-    // Link against FSR 3.0 SDK
-    println!("cargo:rustc-link-lib=dylib=ffx_fsr3");
-    
-    // Make sure our output responds to changes in headers
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=wrapper.h");
+
+    // --- FSR3 SDK Path --- 
+    // Option 1: Set an environment variable FSR3_SDK_PATH
+    let sdk_path_env = env::var("FSR3_SDK_PATH").ok();
+    // Option 2: Hardcode the path (replace with your actual path)
+    let sdk_path_hardcoded = PathBuf::from("C:/AMD/FSR3_SDK"); // EXAMPLE! Update this!
+
+    let fsr3_sdk_path = match sdk_path_env {
+        Some(p) => PathBuf::from(p),
+        None => sdk_path_hardcoded,
+    };
+
+    if !fsr3_sdk_path.exists() {
+        panic!("FSR3 SDK path does not exist: {}. Please set FSR3_SDK_PATH or update build.rs.", fsr3_sdk_path.display());
+    }
+
+    // Adjust these paths based on the FSR3 SDK structure
+    let fsr3_include_path = fsr3_sdk_path.join("include"); 
+    let fsr3_lib_path = fsr3_sdk_path.join("lib/ffx_fsr3_x64"); // EXAMPLE! Verify this path
+
+    if !fsr3_include_path.exists() {
+        panic!("FSR3 SDK include path does not exist: {}", fsr3_include_path.display());
+    }
+    if !fsr3_lib_path.exists() {
+        panic!("FSR3 SDK library path does not exist: {}", fsr3_lib_path.display());
+    }
+
+    println!("cargo:rustc-link-search=native={}", fsr3_lib_path.display());
+    // Determine the correct FSR3 library to link. This could be something like:
+    // ffx_fsr3_api_x64.lib or ffx_fsr3_api_dx12_x64.lib / ffx_fsr3_api_vk_x64.lib etc.
+    // depending on the graphics API you are using (DX12, Vulkan) with WGPU.
+    // For now, assuming a generic name, PLEASE VERIFY.
+    println!("cargo:rustc-link-lib=ffx_fsr3_api_x64"); // EXAMPLE! Verify library name.
     
-    // The bindgen::Builder is the main entry point to bindgen
+    // WGPU typically uses DX12 on Windows by default. If Vulkan is used, this might need adjustment.
+    // The FSR3 SDK has different libraries for DX12 and Vulkan.
+
     let bindings = bindgen::Builder::default()
         .header("wrapper.h")
-        .clang_arg(format!("-I{}", fsr3_sdk_path.display()))
+        .clang_arg(format!("-I{}", fsr3_include_path.display()))
+        // Add FSR3 specific defines or include paths if necessary
+        // e.g., .clang_arg("-DFFX_GCC") or .clang_arg("-DFFX_CPU")
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+        .allowlist_function("ffxFsr3.*") // Or more specific FSR3 API functions
+        .allowlist_type("FfxFsr3.*")
+        .allowlist_var("FFX_FSR3_.*") // Constants
+        .generate_comments(true)
+        .derive_debug(true)
+        .derive_default(true)
+        // FSR3 headers might use C++ features that bindgen needs to handle
+        .enable_cxx_namespaces()
+        .opaque_type("std::.*") // To avoid issues with std types if FSR3 uses C++
         .generate()
-        .map_err(|_| anyhow!("Unable to generate bindings to FSR 3.0 SDK"))?;
+        .expect("Unable to generate FSR3 bindings");
 
-    // Write the bindings to the $OUT_DIR/bindings.rs file
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     bindings
-        .write_to_file(out_path.join("bindings.rs"))
-        .map_err(|_| anyhow!("Could not write FSR 3.0 bindings"))?;
+        .write_to_file(out_path.join("fsr3_bindings.rs"))
+        .expect("Couldn't write FSR3 bindings!");
 
     Ok(())
-}
-
-fn find_fsr3_sdk() -> Result<PathBuf> {
-    // 1. Try environment variable
-    if let Ok(path) = env::var("FSR3_SDK_PATH") {
-        let path = PathBuf::from(path);
-        if path.exists() {
-            return Ok(path);
-        }
-    }
-
-    // 2. Try standard locations
-    let standard_paths = [
-        // Windows standard paths
-        r"C:\Program Files\AMD\FSR3",
-        r"C:\AMD\FSR3 SDK",
-        r"C:\AMD_FSR3_SDK",
-        // Project-relative paths
-        "./vendor/FSR3",
-        "../vendor/FSR3",
-        "../../vendor/FSR3",
-    ];
-
-    for path_str in standard_paths.iter() {
-        let path = PathBuf::from(path_str);
-        if path.exists() {
-            return Ok(path);
-        }
-    }
-
-    // If not found, provide instructions
-    println!("cargo:warning=AMD FSR 3.0 SDK not found. Using stub implementation.");
-    println!("cargo:warning=To use the real FSR 3.0 SDK:");
-    println!("cargo:warning=1. Download it from AMD developer site");
-    println!("cargo:warning=2. Set FSR3_SDK_PATH environment variable");
-    
-    // Use internal stub headers as fallback
-    Ok(PathBuf::from("./stub"))
 }
