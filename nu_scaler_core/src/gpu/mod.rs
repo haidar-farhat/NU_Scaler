@@ -6,12 +6,27 @@ use std::sync::Arc;
 use wgpu::{Device, Queue};
 use crate::gpu::memory::{MemoryPool, AllocationStrategy, MemoryPressure, VramStats};
 use detector::GpuInfo;
+use thiserror::Error;
 
 /// Supported GPU providers
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GpuProvider {
     Wgpu,
     Vulkan,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum GpuError {
+    #[error("Native handle is null")]
+    NullHandle,
+    #[error("Unsupported HAL backend for native handle retrieval")]
+    UnsupportedBackend,
+    #[error("Failed to get native adapter handle")]
+    FailedToGetNativeAdapterHandle,
+    #[error("Failed to get native device handle")]
+    FailedToGetNativeDeviceHandle,
+    #[error("Failed to get native texture handle")]
+    FailedToGetNativeTextureHandle,
 }
 
 /// Placeholder for GPU context (device, queue, etc.)
@@ -73,6 +88,81 @@ impl GpuResources {
     /// Clean up memory pools to free resources
     pub fn cleanup_memory(&self) {
         self.memory_pool.cleanup_pools();
+    }
+
+    /// # Safety
+    ///
+    /// The returned pointer is a raw, non-null, native device handle (e.g., ID3D12Device* or VkDevice).
+    /// The caller is responsible for ensuring that the handle is used correctly
+    /// and within the lifetime of the WGPU device.
+    /// The underlying WGPU instance and device must remain alive while this handle is in use.
+    pub unsafe fn get_native_device_handle(&self) -> Result<*mut std::ffi::c_void, GpuError> {
+        // Import HAL APIs. These might need to be gated by cfg attributes
+        // if you only want to compile support for specific backends.
+        use wgpu::hal::Device as HalDevice; // Common trait for HAL devices
+        // Assuming Dx12 and Vulkan are the primary targets. Add others as needed.
+        #[cfg(feature = "dx12")]
+        use wgpu::hal::dx12::Api as Dx12Api;
+        #[cfg(feature = "vulkan")]
+        use wgpu::hal::vulkan::Api as VulkanApi;
+
+        // The actual HAL API used by wgpu::Device is not directly exposed in a platform-agnostic way
+        // after device creation without enabling specific features and checking the adapter's backend.
+        // For this example, we'll try to downcast based on common feature flags.
+        // A more robust solution might involve storing the backend type upon GpuResources creation.
+
+        #[cfg(feature = "dx12")]
+        {
+            if let Some(raw_device_handle) = self.device.as_hal::<Dx12Api>().raw_device() {
+                // For ID3D12Device, this should directly be the pointer.
+                // Ensure the type conversion is correct for your specific HAL version/needs.
+                return Ok(raw_device_handle as *mut std::ffi::c_void);
+            }
+        }
+
+        #[cfg(feature = "vulkan")]
+        {
+             // For Vulkan, `raw_device()` returns `ash::vk::Device` which is a newtype around `vk::VkDevice_T*`
+             // We need to get the actual pointer.
+            if let Some(vk_device) = self.device.as_hal::<VulkanApi>().raw_device() {
+                 return Ok(vk_device.handle() as *mut std::ffi::c_void);
+            }
+        }
+        
+        // Fallback or if no specific backend feature is enabled/matched
+        Err(GpuError::UnsupportedBackend)
+    }
+
+    /// # Safety
+    ///
+    /// The returned pointer is a raw, non-null, native texture handle (e.g., ID3D12Resource* or VkImage).
+    /// The caller is responsible for ensuring that the handle is used correctly
+    /// and within the lifetime of the WGPU texture and device.
+    /// The underlying WGPU instance, device, and texture must remain alive while this handle is in use.
+    pub unsafe fn get_native_texture_handle(&self, texture: &wgpu::Texture) -> Result<*mut std::ffi::c_void, GpuError> {
+        use wgpu::hal::Texture as HalTexture; // Common trait for HAL textures
+        #[cfg(feature = "dx12")]
+        use wgpu::hal::dx12::Api as Dx12Api;
+        #[cfg(feature = "vulkan")]
+        use wgpu::hal::vulkan::Api as VulkanApi;
+
+        #[cfg(feature = "dx12")]
+        {
+            // For ID3D12Resource
+            if let Some(raw_texture_handle) = texture.as_hal::<Dx12Api>().raw_texture() {
+                 return Ok(raw_texture_handle as *mut std::ffi::c_void);
+            }
+        }
+
+        #[cfg(feature = "vulkan")]
+        {
+            // For VkImage
+            if let Some(vk_image) = texture.as_hal::<VulkanApi>().raw_texture() {
+                return Ok(vk_image as *mut std::ffi::c_void); // vk::VkImage is typically a u64 handle, castable to pointer
+            }
+        }
+        
+        Err(GpuError::UnsupportedBackend)
     }
 }
 
