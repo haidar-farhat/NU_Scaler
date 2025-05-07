@@ -15,7 +15,11 @@
 // Any custom Rust helper functions or structs that operate on these FFI types
 // can also be defined here if needed.
 
-use std::ffi::c_void;
+use std::ffi::{c_char, c_void};
+use std::fmt;
+use std::sync::OnceLock;
+
+use libloading::{Library, Symbol};
 
 // Based on sl_consts.h, sl_dlss.h, and common patterns
 
@@ -44,6 +48,8 @@ pub enum SlStatus {
     ErrorDx11 = -200,
     ErrorDx12 = -300,
     // ... other error codes from sl.h or Streamline documentation
+    ErrorLibraryLoadFailed = -1000, // Custom error for loading issues
+    ErrorFunctionLoadFailed = -1001, // Custom error for symbol loading issues
 }
 
 impl SlStatus {
@@ -152,79 +158,234 @@ pub struct SlConstants {
 }
 
 
-// --- Streamline SDK API Functions ---
-extern "C" {
-    // Core SDK functions (from sl.h or similar)
-    pub fn slInitializeSDK() -> SlStatus;
-    pub fn slShutdownSDK() -> SlStatus;
+// --- Define Function Pointer Types ---
+type FnSlInitializeSDK = unsafe extern "C" fn() -> SlStatus;
+type FnSlShutdownSDK = unsafe extern "C" fn() -> SlStatus;
+type FnSlIsFeatureSupported = unsafe extern "C" fn(feature: SlFeature, adapter_info: *const c_void) -> SlBool;
+type FnSlCreateDlssFeature = unsafe extern "C" fn(
+    dlss_feature_handle: *mut SlDlssFeature,
+    application_id: u32,
+    quality_mode: SlDLSSMode,
+    output_width: u32,
+    output_height: u32,
+    native_device: *mut c_void,
+) -> SlStatus;
+type FnSlEvaluateDlssFeature = unsafe extern "C" fn(
+    dlss_feature_handle: SlDlssFeature,
+    cmd_buffer: *mut c_void,
+    input_resource: *mut c_void,
+    output_resource: *mut c_void,
+    motion_vectors: *mut c_void,
+    depth: *mut c_void,
+    jitter_x: f32,
+    jitter_y: f32,
+    render_width: u32,
+    render_height: u32,
+    params: *const SlDLSSOptions,
+) -> SlStatus;
+type FnSlDestroyDlssFeature = unsafe extern "C" fn(dlss_feature_handle: SlDlssFeature) -> SlStatus;
+type FnSlDLSSSetOptions = unsafe extern "C" fn(
+    dlss_feature_handle: SlDlssFeature,
+    options: *const SlDLSSOptions,
+) -> SlStatus;
+// Add other function pointer types here if needed, e.g.:
+// type FnSlDLSSGetOptimalSettings = unsafe extern "C" fn(...) -> SlStatus;
+// type FnSlDLSSGetState = unsafe extern "C" fn(...) -> SlStatus;
 
-    pub fn slIsFeatureSupported(feature: SlFeature, adapter_info: *const c_void /* SlAdapterInfo* */) -> SlBool;
-    // pub fn slGetFeatureRequirements(feature: SlFeature, requirements: *mut SlFeatureRequirements) -> SlStatus; // If needed
-    
-    // Feature management functions
-    pub fn slCreateFeature(viewport: SlViewportHandle, feature_id: SlFeature) -> SlStatus; // Simplified
-    pub fn slDestroyFeature(viewport: SlViewportHandle, feature_id: SlFeature) -> SlStatus; // Simplified
-    
-    // Generic evaluation - might be used internally or you might use feature-specific ones
-    // pub fn slEvaluateFeature(viewport: SlViewportHandle, feature_id: SlFeature, frame_index: u32, constants: *const SlConstants) -> SlStatus;
 
-    // DLSS specific functions (from sl_dlss.h)
+// --- Dynamic Loading Implementation ---
 
-    // Note: The Streamline API often uses a pattern where you "create" a feature on a viewport/command buffer,
-    // then "set options" for it, and then "evaluate" it.
-    // The exact function names and parameters can vary based on Streamline version and abstraction level.
-    // These are based on a common understanding; verify against your sl_dlss.h.
+// Use a more descriptive error type if desired
+#[derive(Debug)]
+struct LoadError(String);
 
-    // Simplified concept of creating a DLSS feature context/handle
-    // The actual API might involve passing a command buffer or device pointer.
-    // For now, using SlDlssFeature as an opaque handle type.
-    pub fn slCreateDlssFeature(
-        dlss_feature_handle: *mut SlDlssFeature, // Output parameter for the handle
-        application_id: u32, // Your app ID from NVIDIA
-        quality_mode: SlDLSSMode, // Initial quality mode
-        output_width: u32,
-        output_height: u32,
-        native_device: *mut c_void // e.g., ID3D12Device* or VkDevice
-    ) -> SlStatus;
-
-    pub fn slEvaluateDlssFeature(
-        dlss_feature_handle: SlDlssFeature,
-        cmd_buffer: *mut c_void, // e.g., ID3D12GraphicsCommandList* or VkCommandBuffer
-        input_resource: *mut c_void, // e.g., ID3D12Resource* or VkImage
-        output_resource: *mut c_void, // e.g., ID3D12Resource* or VkImage
-        motion_vectors: *mut c_void, // Optional: native motion vector resource
-        depth: *mut c_void, // Optional: native depth buffer resource
-        jitter_x: f32,
-        jitter_y: f32,
-        render_width: u32, // Input/render resolution
-        render_height: u32,
-        // ... other parameters like exposure, callback functions etc. from sl_dlss.h for evaluation
-        params: *const SlDLSSOptions // This is a guess, slEvaluate might take options directly or they are set via slDLSSSetOptions
-    ) -> SlStatus;
-
-    pub fn slDestroyDlssFeature(dlss_feature_handle: SlDlssFeature) -> SlStatus;
-
-    pub fn slDLSSGetOptimalSettings(
-        app_id: u32, // May not be needed if feature already created
-        dlss_feature_handle_or_null: SlDlssFeature, // or perhaps just output width/height
-        mode: SlDLSSMode,
-        render_width: u32,
-        render_height: u32,
-        out_optimal_width: *mut u32,
-        out_optimal_height: *mut u32,
-        out_sharpness: *mut f32, // if applicable
-        out_preset_quality: *mut /* SlDLSSPreset */ c_void // Placeholder type
-    ) -> SlStatus;
-
-    pub fn slDLSSSetOptions(
-        dlss_feature_handle: SlDlssFeature,
-        options: *const SlDLSSOptions // Pointer to your options struct
-    ) -> SlStatus;
-
-    // Might return more detailed info than just width/height
-    pub fn slDLSSGetState(
-        dlss_feature_handle: SlDlssFeature,
-        state_buffer: *mut SlDLSSState, // Pointer to a struct to be filled
-        buffer_size: usize // Size of the buffer
-    ) -> SlStatus;
+impl fmt::Display for LoadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Streamline API Load Error: {}", self.0)
+    }
 }
+
+impl From<libloading::Error> for LoadError {
+    fn from(e: libloading::Error) -> Self {
+        LoadError(e.to_string())
+    }
+}
+
+
+// Structure to hold the loaded symbols safely
+// We store the Library to keep it loaded as long as the Symbols are used
+struct StreamlineApi {
+    _lib: Library, // Keep the library loaded
+    // Store symbols directly
+    slInitializeSDK: Symbol<'static, FnSlInitializeSDK>,
+    slShutdownSDK: Symbol<'static, FnSlShutdownSDK>,
+    slIsFeatureSupported: Symbol<'static, FnSlIsFeatureSupported>,
+    slCreateDlssFeature: Symbol<'static, FnSlCreateDlssFeature>,
+    slEvaluateDlssFeature: Symbol<'static, FnSlEvaluateDlssFeature>,
+    slDestroyDlssFeature: Symbol<'static, FnSlDestroyDlssFeature>,
+    slDLSSSetOptions: Symbol<'static, FnSlDLSSSetOptions>,
+    // Add fields for other functions as needed
+}
+
+// Global static variable to hold the initialized API
+static SL_API: OnceLock<Result<StreamlineApi, LoadError>> = OnceLock::new();
+
+// Function to load the library and symbols
+fn load_streamline_api() -> Result<StreamlineApi, LoadError> {
+    unsafe {
+        // Define the expected name of the interposer DLL
+        // Note: Linking sl.interposer.lib *should* make the OS find the DLL
+        // based on standard search paths or the location of the lib.
+        // Specifying the name here might be redundant but can help libloading.
+        let dll_name = if cfg!(target_os = "windows") {
+            "sl.interposer.dll"
+        } else {
+            // TODO: Add correct names/paths for other OS if needed
+            "libsl.interposer.so" // Example for Linux
+        };
+
+        let lib = Library::new(dll_name)?;
+
+        // Load symbols using lib.get(). Need to transmute the lifetime to 'static
+        // because OnceLock requires a 'static lifetime. This is generally safe *if*
+        // we ensure the Library ('lib') lives as long as the symbols (which we do
+        // by storing it in the StreamlineApi struct).
+        let api = StreamlineApi {
+            slInitializeSDK: lib.get(b"slInitializeSDK\0")?.into_raw(),
+            slShutdownSDK: lib.get(b"slShutdownSDK\0")?.into_raw(),
+            slIsFeatureSupported: lib.get(b"slIsFeatureSupported\0")?.into_raw(),
+            slCreateDlssFeature: lib.get(b"slCreateDlssFeature\0")?.into_raw(),
+            slEvaluateDlssFeature: lib.get(b"slEvaluateDlssFeature\0")?.into_raw(),
+            slDestroyDlssFeature: lib.get(b"slDestroyDlssFeature\0")?.into_raw(),
+            slDLSSSetOptions: lib.get(b"slDLSSSetOptions\0")?.into_raw(),
+            // Load other symbols here
+            _lib: lib, // Keep the library loaded
+        };
+        Ok(std::mem::transmute::<StreamlineApi, StreamlineApi>(api)) // Transmute lifetime
+    }
+}
+
+// Function to access the loaded API
+fn get_sl_api() -> Result<&'static StreamlineApi, &'static LoadError> {
+     SL_API.get_or_init(load_streamline_api).as_ref()
+}
+
+
+// --- Public wrapper functions ---
+// These provide the interface that the rest of your Rust code will use.
+
+pub unsafe fn slInitializeSDK() -> SlStatus {
+    match get_sl_api() {
+        Ok(api) => (api.slInitializeSDK)(),
+        Err(e) => {
+             eprintln!("{}", e);
+             SlStatus::ErrorLibraryLoadFailed
+        }
+    }
+}
+
+pub unsafe fn slShutdownSDK() -> SlStatus {
+    match get_sl_api() {
+        Ok(api) => (api.slShutdownSDK)(),
+        Err(e) => {
+             eprintln!("{}", e);
+             SlStatus::ErrorLibraryLoadFailed
+        }
+    }
+}
+
+pub unsafe fn slIsFeatureSupported(feature: SlFeature, adapter_info: *const c_void) -> SlBool {
+     match get_sl_api() {
+        Ok(api) => (api.slIsFeatureSupported)(feature, adapter_info),
+        Err(e) => {
+             eprintln!("{}", e);
+             SL_FALSE // Return false if API not loaded
+        }
+    }
+}
+
+pub unsafe fn slCreateDlssFeature(
+    dlss_feature_handle: *mut SlDlssFeature,
+    application_id: u32,
+    quality_mode: SlDLSSMode,
+    output_width: u32,
+    output_height: u32,
+    native_device: *mut c_void,
+) -> SlStatus {
+     match get_sl_api() {
+        Ok(api) => (api.slCreateDlssFeature)(
+            dlss_feature_handle,
+            application_id,
+            quality_mode,
+            output_width,
+            output_height,
+            native_device,
+        ),
+        Err(e) => {
+             eprintln!("{}", e);
+             SlStatus::ErrorLibraryLoadFailed
+        }
+    }
+}
+
+pub unsafe fn slEvaluateDlssFeature(
+    dlss_feature_handle: SlDlssFeature,
+    cmd_buffer: *mut c_void,
+    input_resource: *mut c_void,
+    output_resource: *mut c_void,
+    motion_vectors: *mut c_void,
+    depth: *mut c_void,
+    jitter_x: f32,
+    jitter_y: f32,
+    render_width: u32,
+    render_height: u32,
+    params: *const SlDLSSOptions,
+) -> SlStatus {
+     match get_sl_api() {
+        Ok(api) => (api.slEvaluateDlssFeature)(
+            dlss_feature_handle,
+            cmd_buffer,
+            input_resource,
+            output_resource,
+            motion_vectors,
+            depth,
+            jitter_x,
+            jitter_y,
+            render_width,
+            render_height,
+            params,
+        ),
+        Err(e) => {
+             eprintln!("{}", e);
+             SlStatus::ErrorLibraryLoadFailed
+        }
+    }
+}
+
+pub unsafe fn slDestroyDlssFeature(dlss_feature_handle: SlDlssFeature) -> SlStatus {
+     match get_sl_api() {
+        Ok(api) => (api.slDestroyDlssFeature)(dlss_feature_handle),
+        Err(e) => {
+             eprintln!("{}", e);
+             SlStatus::ErrorLibraryLoadFailed
+        }
+    }
+}
+
+pub unsafe fn slDLSSSetOptions(
+    dlss_feature_handle: SlDlssFeature,
+    options: *const SlDLSSOptions,
+) -> SlStatus {
+     match get_sl_api() {
+        Ok(api) => (api.slDLSSSetOptions)(dlss_feature_handle, options),
+        Err(e) => {
+             eprintln!("{}", e);
+             SlStatus::ErrorLibraryLoadFailed
+        }
+    }
+}
+
+// Add wrappers for other functions here as needed, following the same pattern
+
+
+// --- Ensure the old extern "C" block is removed ---
