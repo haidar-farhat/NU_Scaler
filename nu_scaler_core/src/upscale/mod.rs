@@ -365,19 +365,23 @@ impl WgpuUpscaler {
             if usage_percent > 85.0 {
                 // High pressure
                 new_quality = match current_quality {
+                    UpscalingQuality::UltraPerformance => UpscalingQuality::UltraPerformance, // Already lowest for this path
                     UpscalingQuality::Ultra => UpscalingQuality::Quality,
                     UpscalingQuality::Quality => UpscalingQuality::Balanced,
                     UpscalingQuality::Balanced => UpscalingQuality::Performance,
                     UpscalingQuality::Performance => UpscalingQuality::Performance, // Already at lowest
+                    UpscalingQuality::Native => UpscalingQuality::Native, // Native might not participate or go to Quality
                 };
                 println!("[AdaptiveQuality] High VRAM pressure ({}%), lowering quality from {:?} to {:?}", usage_percent, current_quality, new_quality);
             } else if usage_percent < 50.0 {
                 // Low pressure
                 new_quality = match current_quality {
+                    UpscalingQuality::UltraPerformance => UpscalingQuality::Performance, // Can go up from UltraPerf
                     UpscalingQuality::Ultra => UpscalingQuality::Ultra, // Already at highest
                     UpscalingQuality::Quality => UpscalingQuality::Ultra,
                     UpscalingQuality::Balanced => UpscalingQuality::Quality,
                     UpscalingQuality::Performance => UpscalingQuality::Balanced,
+                    UpscalingQuality::Native => UpscalingQuality::Native, // Native might stay native or go to Ultra if that means more effects
                 };
                 if new_quality != current_quality {
                     println!("[AdaptiveQuality] Low VRAM pressure ({}%), increasing quality from {:?} to {:?}", usage_percent, current_quality, new_quality);
