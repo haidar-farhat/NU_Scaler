@@ -3,8 +3,8 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QListWidget, QStackedWidget, QFrame,
     QPushButton, QComboBox, QSpinBox, QCheckBox, QSlider, QGroupBox, QFormLayout, QProgressBar, QFileDialog, QSizePolicy
 )
-from PySide6.QtCore import Qt, QTimer, Signal, QThread, QObject, Slot, QEvent, QShortcut
-from PySide6.QtGui import QPixmap, QImage, QAction, QKeySequence, QPainter, QColor, QFont
+from PySide6.QtCore import Qt, QTimer, Signal, QThread, QObject, Slot, QEvent
+from PySide6.QtGui import QPixmap, QImage, QAction, QKeySequence, QPainter, QColor, QFont, QShortcut
 import time
 import random
 import traceback
