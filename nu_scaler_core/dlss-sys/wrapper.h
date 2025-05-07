@@ -1,42 +1,22 @@
-// DLSS SDK wrapper header
-#ifndef DLSS_WRAPPER_H
-#define DLSS_WRAPPER_H
-
-// Standard includes
-#include <stdint.h>
-#include <stdbool.h>
-
-// Try to include DLSS SDK headers
-#if __has_include(<nvsdk_ngx/nvsdk_ngx.h>)
-    // Main NVIDIA NGX SDK header
-    #include <nvsdk_ngx/nvsdk_ngx.h>
-    
-    // DLSS headers
-    #include <nvsdk_ngx/nvsdk_ngx_dlss.h>
-    #include <nvsdk_ngx/nvsdk_ngx_helpers.h>
-    #include <nvsdk_ngx/nvsdk_ngx_params.h>
-    
-    // Define this macro so the stub implementation can be conditionally excluded
-    #define HAS_REAL_DLSS_SDK
-#else
-    // DLSS SDK not available, use stub headers
-    #include "stub/nvsdk_ngx.h"
-    #include "stub/nvsdk_ngx_dlss.h"
-    #include "stub/nvsdk_ngx_params.h"
-#endif
-
 // This wrapper header includes the necessary NVIDIA Streamline SDK headers.
 // Bindgen will process this file.
 
+#ifndef DLSS_STREAMLINE_WRAPPER_H
+#define DLSS_STREAMLINE_WRAPPER_H
+
 // Main Streamline header
-#include "sl.h"
+// It's common for SDK headers to be in a subdirectory of the main include path.
+// e.g. C:/nvideasdk/bckup/Streamline/include/Streamline/sl.h
+// If sl.h is directly in C:/nvideasdk/bckup/Streamline/include, then "sl.h" is correct.
+// Otherwise, adjust the path like "Streamline/sl.h"
+#include "sl.h" 
 
 // Streamline DLSS specific header (if needed and not pulled in by sl.h)
-#include "sl_dlss.h"
+// Check if this is also in a subdirectory like "Streamline/sl_dlss.h"
+#include "sl_dlss.h" 
 
 // Other common Streamline headers you might need, depending on features used:
-// #include "sl_reflex.h"
-// #include "sl_common.h"
-// #include "sl_helpers.h"
+// #include "sl_reflex.h" // Or "Streamline/sl_reflex.h"
+// #include "sl_common.h" // Or "Streamline/sl_common.h"
 
-#endif // DLSS_WRAPPER_H 
+#endif // DLSS_STREAMLINE_WRAPPER_H 
