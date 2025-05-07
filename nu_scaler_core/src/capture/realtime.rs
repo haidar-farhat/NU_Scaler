@@ -1,17 +1,16 @@
-use scrap::{Capturer, Display};
+use anyhow::{Result, anyhow};
+// use image::ImageFormat; // Keep, used in workaround -> Marked as unused, remove for now
+use scrap::{Capturer, Display, Frame as ScrapFrame};
 use std::io::ErrorKind;
 use std::sync::mpsc; // For sending frames from callback
 use std::sync::Mutex;
 use std::thread;
-use image::ImageFormat; // Keep, used in workaround
-use std::env;
-use std::fs;
-use uuid::Uuid;
-use std::time::Duration;
-use std::path::PathBuf;
+// use std::time::Duration; // Unused
+// use std::path::PathBuf; // Unused
+use std::sync::mpsc::{self, Receiver, Sender};
 
 // Windows API imports (needed for list_windows)
-use windows::core::{Error, Result as WindowsResult};
+// use windows::core::{Error, Result as WindowsResult}; // Unused
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowTextW, IsWindowVisible/*, FindWindowW*/}; // FindWindowW unused
 
@@ -21,6 +20,15 @@ use windows_capture::frame::{Frame, FrameBuffer/*, ImageFormat as CaptureImageFo
 use windows_capture::graphics_capture_api::InternalCaptureControl;
 use windows_capture::settings::{Settings, ColorFormat, CursorCaptureSettings, DrawBorderSettings};
 use windows_capture::window::Window;
+
+use windows::Graphics::Capture::{
+    Direct3D11CaptureFramePool,
+    GraphicsCaptureItem,
+};
+use windows::Win32::Graphics::Direct3D11::{ID3D11Texture2D}; 
+use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
+// use windows_capture::frame::{Frame, FrameBuffer/*, ImageFormat as CaptureImageFormat*/}; // Unused FrameBuffer
+use windows_capture::settings::{WindowsCaptureSettings};
 
 #[derive(Debug, Clone)]
 pub enum CaptureTarget {
