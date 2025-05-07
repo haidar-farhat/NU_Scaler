@@ -635,7 +635,7 @@ pub fn create_advanced_upscaler(quality: &str) -> PyResult<PyAdvancedWgpuUpscale
 }
 
 #[pymodule]
-fn nu_scaler_core(py: Python, m: &PyModule) -> PyResult<()> {
+fn nu_scaler_core(_py: Python, m: &PyModule) -> PyResult<()> {
     // Upscaling quality levels
     m.add("QUALITY_ULTRA", UpscalingQuality::Ultra)?;
     m.add("QUALITY_QUALITY", UpscalingQuality::Quality)?;
