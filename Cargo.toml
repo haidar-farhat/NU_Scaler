@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "nu_scaler_core/dlss-sys",
+    # Add other crates in nu_scaler_core or directly in NU_Scaler here if they exist
+]
+
+[patch.crates-io]
+clang-sys = { git = "https://github.com/KyleMayes/clang-sys.git" } 
