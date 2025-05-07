@@ -37,6 +37,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .header("wrapper.h") // Processes nu_scaler_core/dlss-sys/wrapper.h
         // Tell bindgen where to find headers included by wrapper.h (like sl.h)
         .clang_arg(format!("-I{}", sdk_include_path.display()))
+        // Tell bindgen to parse the headers as C++
+        .clang_args(&["-x", "c++", "-std=c++17"]) // Added C++ mode and standard
         // Add other necessary clang args if needed, e.g., for defines:
         // .clang_arg("-DSL_DX12_ENABLED=1") // Check sl_config.h for relevant defines
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
