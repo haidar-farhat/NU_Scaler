@@ -8,7 +8,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let streamline_sdk_path = PathBuf::from(
         env::var("NVIDIA_STREAMLINE_SDK_PATH")
-            .unwrap_or_else(|_| "C:/nvideasdk/bckup/Streamline".to_string()),
+            .unwrap_or_else(|_| "C:\\nvideasdk\\bckup\\Streamline".to_string()),
     );
 
     if !streamline_sdk_path.exists() {
@@ -18,11 +18,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    let lib_path = streamline_sdk_path.join("lib/x64"); // User needs to verify this path
+    let lib_path = streamline_sdk_path.join("lib\\x64");
 
     if !lib_path.exists() {
         panic!(
-            "NVIDIA Streamline SDK library path does not exist: {}. Please verify e.g., Streamline/lib/x64 or Streamline/lib/x64/Release",
+            "NVIDIA Streamline SDK library path does not exist: {}. Please verify e.g., Streamline\\lib\\x64 or Streamline\\lib\\x64\\Release",
             lib_path.display()
         );
     }
