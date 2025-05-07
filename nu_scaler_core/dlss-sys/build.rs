@@ -32,16 +32,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rustc-link-search=native={}", lib_path.display());
     println!("cargo:rustc-link-lib=sl.interposer"); // User needs to verify this library name
 
-    // (Optional) clang-sys version query removed because it isn't supported in this version
-
-    let clang_version_str = if version_cxstring.data.is_null() {
-        "Unknown"
-    } else {
-        unsafe { CStr::from_ptr(version_cxstring.data).to_string_lossy().into_owned() }
-    };
-
-    println!("cargo:warning=bindgen is using libclang version: {}", clang_version_str);
-
     let mut builder = bindgen::Builder::default()
         .header("wrapper.h")
         // Sanitize attributes (from user advice)
