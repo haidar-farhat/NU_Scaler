@@ -7,7 +7,7 @@ use std::sync::Mutex;
 use std::thread;
 // use std::time::Duration; // Unused
 // use std::path::PathBuf; // Unused
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{Receiver, Sender};
 
 // Windows API imports (needed for list_windows)
 // use windows::core::{Error, Result as WindowsResult}; // Unused
