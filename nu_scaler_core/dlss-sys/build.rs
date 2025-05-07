@@ -8,7 +8,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let streamline_sdk_path = PathBuf::from(
         env::var("NVIDIA_STREAMLINE_SDK_PATH")
-            .unwrap_or_else(|_| "C:/nvideasdk/Streamline".to_string()),
+            .unwrap_or_else(|_| "C:/nvideasdk/bckup/Streamline".to_string()),
     );
 
     if !streamline_sdk_path.exists() {
