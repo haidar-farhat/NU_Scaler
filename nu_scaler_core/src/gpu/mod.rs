@@ -139,7 +139,7 @@ impl GpuResources {
     /// The caller is responsible for ensuring that the handle is used correctly
     /// and within the lifetime of the WGPU texture and device.
     /// The underlying WGPU instance, device, and texture must remain alive while this handle is in use.
-    pub unsafe fn get_native_texture_handle(&self, texture: &wgpu::Texture) -> Result<*mut std::ffi::c_void, GpuError> {
+    pub unsafe fn get_native_texture_handle(&self, _texture: &wgpu::Texture) -> Result<*mut std::ffi::c_void, GpuError> {
         /* // Add comment start
         #[cfg(target_os = "windows")]
         {
@@ -164,7 +164,7 @@ impl GpuResources {
         {
             use wgpu::hal::vulkan::Api as VulkanApi;
             let mut native_handle_opt: Option<*mut std::ffi::c_void> = None;
-            texture.as_hal::<VulkanApi, _>(|hal_texture_opt| {
+            _texture.as_hal::<VulkanApi, _>(|hal_texture_opt| {
                 if let Some(ht) = hal_texture_opt {
                     native_handle_opt = Some(ht.raw_texture() as *mut std::ffi::c_void); // vk::Image is u64
                 }
