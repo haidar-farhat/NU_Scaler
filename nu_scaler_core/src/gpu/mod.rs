@@ -100,10 +100,12 @@ impl GpuResources {
         #[cfg(target_os = "windows")]
         {
             use wgpu::hal::dx12::Api as Dx12Api;
-            let native_handle = self.device.as_hal::<Dx12Api, _, _>(|hal_device| {
-                hal_device.map(|d| d.raw_device() as *mut std::ffi::c_void)
-            });
-            if let Some(handle) = native_handle {
+            let native_handle_opt: Option<*mut std::ffi::c_void> = 
+                self.device.as_hal::<Dx12Api, _, _>(|hal_device_opt| {
+                    hal_device_opt.map(|d| d.raw_device().as_raw() as *mut std::ffi::c_void)
+                });
+
+            if let Some(handle) = native_handle_opt {
                 if !handle.is_null() {
                     return Ok(handle);
                 }
@@ -113,10 +115,11 @@ impl GpuResources {
         #[cfg(target_os = "linux")]
         {
             use wgpu::hal::vulkan::Api as VulkanApi;
-            let native_handle = self.device.as_hal::<VulkanApi, _, _>(|hal_device| {
-                hal_device.map(|d| d.raw_device().handle() as *mut std::ffi::c_void)
-            });
-            if let Some(handle) = native_handle {
+            let native_handle_opt: Option<*mut std::ffi::c_void> = 
+                self.device.as_hal::<VulkanApi, _, _>(|hal_device_opt| {
+                    hal_device_opt.map(|d| d.raw_device().handle() as *mut std::ffi::c_void)
+                });
+            if let Some(handle) = native_handle_opt {
                 if !handle.is_null() {
                     return Ok(handle);
                 }
@@ -136,13 +139,14 @@ impl GpuResources {
         #[cfg(target_os = "windows")]
         {
             use wgpu::hal::dx12::Api as Dx12Api;
-            let mut native_handle: Option<*mut std::ffi::c_void> = None;
-            texture.as_hal::<Dx12Api, _>(|hal_texture| {
-                if let Some(ht) = hal_texture {
-                    native_handle = Some(ht.raw_texture() as *mut std::ffi::c_void);
+            let mut native_handle_opt: Option<*mut std::ffi::c_void> = None;
+            texture.as_hal::<Dx12Api, _>(|hal_texture_opt| {
+                if let Some(ht) = hal_texture_opt {
+                    // Assuming ht.raw_texture() returns a ComPtr-like object for ID3D12Resource
+                    native_handle_opt = Some(ht.raw_texture().as_raw() as *mut std::ffi::c_void);
                 }
             });
-            if let Some(handle) = native_handle {
+            if let Some(handle) = native_handle_opt {
                 if !handle.is_null() {
                     return Ok(handle);
                 }
@@ -152,13 +156,15 @@ impl GpuResources {
         #[cfg(target_os = "linux")]
         {
             use wgpu::hal::vulkan::Api as VulkanApi;
-            let mut native_handle: Option<*mut std::ffi::c_void> = None;
-            texture.as_hal::<VulkanApi, _>(|hal_texture| {
-                if let Some(ht) = hal_texture {
-                    native_handle = Some(ht.raw_texture() as *mut std::ffi::c_void);
+            let mut native_handle_opt: Option<*mut std::ffi::c_void> = None;
+            texture.as_hal::<VulkanApi, _>(|hal_texture_opt| {
+                if let Some(ht) = hal_texture_opt {
+                    native_handle_opt = Some(ht.raw_texture() as *mut std::ffi::c_void); // vk::Image is u64
                 }
             });
-            if let Some(handle) = native_handle {
+            if let Some(handle) = native_handle_opt {
+                // For u64, is_null() might not be the right check if 0 is a valid handle.
+                // However, casting to *mut c_void and checking for null is a common pattern.
                 if !handle.is_null() {
                     return Ok(handle);
                 }
