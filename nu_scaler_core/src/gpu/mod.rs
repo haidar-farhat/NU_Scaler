@@ -106,8 +106,8 @@ impl GpuResources {
             use wgpu::hal::dx12::Api as Dx12Api;
             let native_handle_opt: Option<*mut std::ffi::c_void> =
                 self.device.as_hal::<Dx12Api, _, _>(|hal_device_opt| {
-                    hal_device_opt.and_then(|d| Some(d.raw_device().as_ptr() as *mut std::ffi::c_void))
-                });
+                    hal_device_opt.map(|d| d.raw_device().as_ptr() as *mut std::ffi::c_void)
+                }).flatten();
 
             if let Some(handle) = native_handle_opt {
                 if !handle.is_null() {
