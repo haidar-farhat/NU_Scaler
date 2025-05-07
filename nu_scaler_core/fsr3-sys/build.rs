@@ -2,6 +2,9 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Inform Cargo about the custom cfg flag
+    println!("cargo:rustc-check-cfg=cfg(fsr3_bindings_generated)");
+
     // Only proceed if the specific environment variable is set
     if env::var("NU_SCALER_BUILD_FSR3").is_err() {
         println!("cargo:warning=NU_SCALER_BUILD_FSR3 not set, skipping FSR3 SDK setup and binding generation.");
