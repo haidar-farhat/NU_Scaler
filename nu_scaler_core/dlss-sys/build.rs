@@ -4,56 +4,62 @@ use std::path::PathBuf;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=wrapper.h");
 
-    // --- DLSS SDK Path --- 
-    // Option 1: Set an environment variable DLSS_SDK_PATH
-    let sdk_path_env = env::var("DLSS_SDK_PATH").ok();
-    // Option 2: Hardcode the path (replace with your actual path)
-    let sdk_path_hardcoded = PathBuf::from("C:/NVIDIA/DLSS_SDK"); // EXAMPLE! Update this!
+    // --- NVIDIA Streamline SDK Path --- 
+    let sdk_path_env = env::var("NVIDIA_STREAMLINE_SDK_PATH").ok();
+    // User provided path:
+    let sdk_path_hardcoded = PathBuf::from("C:/nvideasdk/bckup/Streamline");
 
-    let dlss_sdk_path = match sdk_path_env {
+    let streamline_sdk_path = match sdk_path_env {
         Some(p) => PathBuf::from(p),
-        None => sdk_path_hardcoded,
+        None => sdk_path_hardcoded, // Use the path you provided
     };
 
-    if !dlss_sdk_path.exists() {
-        panic!("DLSS SDK path does not exist: {}. Please set DLSS_SDK_PATH or update build.rs.", dlss_sdk_path.display());
+    if !streamline_sdk_path.exists() {
+        panic!("NVIDIA Streamline SDK path does not exist: {}. Please set NVIDIA_STREAMLINE_SDK_PATH or ensure the hardcoded path is correct.", streamline_sdk_path.display());
     }
 
-    let dlss_include_path = dlss_sdk_path.join("include");
-    let dlss_lib_path = dlss_sdk_path.join("lib/x64"); // Assuming 64-bit
+    let include_path = streamline_sdk_path.join("include");
+    // IMPORTANT: Verify this subpath. It might be lib/x64/Release or just lib/x64
+    let lib_path = streamline_sdk_path.join("lib/x64"); 
 
-    if !dlss_include_path.exists() {
-        panic!("DLSS SDK include path does not exist: {}", dlss_include_path.display());
+    if !include_path.exists() {
+        panic!("NVIDIA Streamline SDK include path does not exist: {}", include_path.display());
     }
-    if !dlss_lib_path.exists() {
-        panic!("DLSS SDK library path does not exist: {}", dlss_lib_path.display());
+    if !lib_path.exists() {
+        panic!("NVIDIA Streamline SDK library path does not exist: {}. Please verify the exact path to the .lib files (e.g., Streamline/lib/x64 or Streamline/lib/x64/Release)", lib_path.display());
     }
 
-    println!("cargo:rustc-link-search=native={}", dlss_lib_path.display());
-    // Determine the correct library to link against. This might vary based on the DLSS version 
-    // and whether you're linking the debug or release version of the DLL.
-    // Common names are nvngx_dlss.lib or similar.
-    println!("cargo:rustc-link-lib=nvngx_dlss"); // EXAMPLE! Verify library name.
+    println!("cargo:rustc-link-search=native={}", lib_path.display());
+    // IMPORTANT: Verify this library name. For Streamline, it's often sl.interposer.lib
+    // or you might need to link sl.dlss.lib directly if not using the full interposer.
+    println!("cargo:rustc-link-lib=sl.interposer"); // EXAMPLE! Verify library name (without .lib extension)
 
     let bindings = bindgen::Builder::default()
         .header("wrapper.h")
-        // Tell bindgen the include path for nvsdk_ngx*.h files
-        .clang_arg(format!("-I{}", dlss_include_path.display()))
-        // Add any other necessary clang args
+        .clang_arg(format!("-I{}", include_path.display()))
+        // Streamline headers are typically C++, so we might need to enable C++ support
+        .clang_arg("-x")
+        .clang_arg("c++")
+        .clang_arg("-std=c++17") // Or the version Streamline uses
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-        .allowlist_function("NVSDK_NGX_.*") // Adjust based on what you need
-        .allowlist_type("NVSDK_NGX_.*")
-        .allowlist_var("NVSDK_NGX_.*")
+        // Allowlisting for Streamline (sl.* functions/types)
+        .allowlist_function("sl[A-Z].*") 
+        .allowlist_type("sl[A-Z].*")
+        .allowlist_var("sl[A-Z_].*")
+        .allowlist_type("SL_.*") // For SL_ enums and structs if any
+        .allowlist_var("SL_.*")
         .generate_comments(true)
         .derive_debug(true)
         .derive_default(true)
+        .enable_cxx_namespaces()
+        .opaque_type("std::.*")
         .generate()
-        .expect("Unable to generate DLSS bindings");
+        .expect("Unable to generate Streamline/DLSS bindings");
 
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     bindings
         .write_to_file(out_path.join("dlss_bindings.rs"))
-        .expect("Couldn't write DLSS bindings!");
+        .expect("Couldn't write Streamline/DLSS bindings!");
 
     Ok(())
 } 
