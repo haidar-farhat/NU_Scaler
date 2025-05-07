@@ -25,6 +25,9 @@ use upscale::{WgpuUpscaler, UpscaleAlgorithm};
 use capture::realtime::{ScreenCapture, CaptureTarget};
 use gpu::detector::{GpuInfo, GpuVendor};
 
+// Import DlssUpscaler from the correct module
+use crate::upscale::dlss::DlssUpscaler as InnerDlssUpscaler;
+
 /// Public API for initializing the core library (placeholder)
 pub fn initialize() {
     // TODO: Initialize logging, config, etc.
@@ -708,10 +711,8 @@ fn nu_scaler_core(_py: Python, m: &PyModule) -> PyResult<()> {
     }
 
     #[pyfn(m)]
-    fn create_dlss_upscaler(quality: &str) -> PyResult<PyWgpuUpscaler> {
-        // ... (existing stub for DLSS)
-        println!("[PyO3] Creating DLSS-optimized upscaler");
-        PyWgpuUpscaler::new(quality, "bilinear")
+    fn create_dlss_upscaler_pyfn(quality: &str) -> PyResult<PyDlssUpscaler> {
+        PyDlssUpscaler::new(quality)
     }
     
     Ok(())
@@ -854,5 +855,129 @@ impl NuScaler {
     /// Get the name of the active upscaler
     pub fn get_upscaler_name(&self) -> &'static str {
         self.upscaler.name()
+    }
+}
+
+// Helper async function to initialize WGPU resources for standalone upscalers
+// To avoid duplication, this could be refactored if NuScaler::initialize_wgpu is made more generic/static
+async fn init_wgpu_for_standalone_upscaler() -> Result<(Arc<wgpu::Device>, Arc<wgpu::Queue>, Option<GpuInfo>)> {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        backends: wgpu::Backends::PRIMARY, // Consider making this configurable
+        dx12_shader_compiler: wgpu::Dx12Compiler::default(), // Or Fxc, Dxc based on needs
+        gles_minor_version: wgpu::Gles3MinorVersion::default(), // if GLES backend is used
+        ..Default::default()
+    });
+    let adapter = instance
+        .request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: None, // No surface needed for compute-only upscalers
+            force_fallback_adapter: false,
+        })
+        .await
+        .ok_or_else(|| anyhow!("Failed to find a suitable GPU adapter for standalone upscaler."))?;
+    
+    let gpu_info = GpuDetector::detect_from_adapter(&adapter);
+
+    // Define features needed. For DLSS, raw resource handles are key.
+    // wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES might be relevant for some advanced scenarios
+    // but for just getting handles, no specific wgpu features beyond basic might be needed unless
+    // the HAL interop itself implies them.
+    let features = wgpu::Features::empty(); 
+    // Check adapter.features() for what's supported. DLSS might need specific texture formats/usages.
+
+    let (device, queue) = adapter
+        .request_device(
+            &wgpu::DeviceDescriptor {
+                label: Some("standalone_upscaler_device"),
+                features,
+                limits: wgpu::Limits::default(), // Consider using downlevel_defaults() for wider compatibility if needed
+            },
+            None, // Trace path
+        )
+        .await
+        .map_err(|e| anyhow!("Failed to request device for standalone upscaler: {}", e))?;
+    
+    Ok((Arc::new(device), Arc::new(queue), gpu_info))
+}
+
+#[pyclass(name = "DlssUpscaler")]
+pub struct PyDlssUpscaler {
+    inner: InnerDlssUpscaler,
+    // Keep Arcs to ensure device and queue live as long as this Python object
+    _device: Arc<wgpu::Device>, 
+    _queue: Arc<wgpu::Queue>,
+    _gpu_info: Option<GpuInfo>, // Store for potential future use
+}
+
+#[pymethods]
+impl PyDlssUpscaler {
+    #[new]
+    pub fn new(quality_str: &str) -> PyResult<Self> {
+        let quality = match quality_str.to_lowercase().as_str() {
+            "ultra" => UpscalingQuality::Ultra,
+            "quality" => UpscalingQuality::Quality,
+            "balanced" => UpscalingQuality::Balanced,
+            "performance" => UpscalingQuality::Performance,
+            _ => return Err(pyo3::exceptions::PyValueError::new_err(format!("Invalid quality: {}", quality_str))),
+        };
+
+        // Initialize WGPU resources. This blocks.
+        let (device_arc, queue_arc, gpu_info_opt) = 
+            pollster::block_on(init_wgpu_for_standalone_upscaler())
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("WGPU initialization failed for DlssUpscaler: {}", e)))?;
+        
+        let mut upscaler = InnerDlssUpscaler::new(quality);
+        
+        // Construct GpuResources and set it on the inner upscaler
+        // The DlssUpscaler::set_device_queue expects device and queue, then creates GpuResources internally.
+        upscaler.set_device_queue(device_arc.clone(), queue_arc.clone());
+        // If GpuInfo is critical for DlssUpscaler's GpuResources, ensure it's passed or handled.
+        // Currently, DlssUpscaler->set_device_queue creates GpuResources with GpuInfo as None.
+
+        Ok(Self {
+            inner: upscaler,
+            _device: device_arc,
+            _queue: queue_arc,
+            _gpu_info: gpu_info_opt,
+        })
+    }
+
+    pub fn initialize(&mut self, input_width: u32, input_height: u32, output_width: u32, output_height: u32) -> PyResult<()> {
+        self.inner.initialize(input_width, input_height, output_width, output_height)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    pub fn upscale<'py>(&self, py: Python<'py>, input: &'py PyBytes) -> PyResult<&'py PyBytes> {
+        let input_bytes = input.as_bytes();
+        let out_bytes = self.inner.upscale(input_bytes)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyBytes::new(py, &out_bytes))
+    }
+    
+    #[getter]
+    pub fn name(&self) -> PyResult<String> {
+        Ok(self.inner.name().to_string())
+    }
+    
+    #[getter]
+    pub fn quality(&self) -> PyResult<String> {
+        match self.inner.quality() {
+            UpscalingQuality::Ultra => Ok("ultra".to_string()),
+            UpscalingQuality::Quality => Ok("quality".to_string()),
+            UpscalingQuality::Balanced => Ok("balanced".to_string()),
+            UpscalingQuality::Performance => Ok("performance".to_string()),
+        }
+    }
+
+    pub fn set_quality(&mut self, quality_str: &str) -> PyResult<()> {
+        let quality = match quality_str.to_lowercase().as_str() {
+            "ultra" => UpscalingQuality::Ultra,
+            "quality" => UpscalingQuality::Quality,
+            "balanced" => UpscalingQuality::Balanced,
+            "performance" => UpscalingQuality::Performance,
+            _ => return Err(pyo3::exceptions::PyValueError::new_err(format!("Invalid quality: {}", quality_str))),
+        };
+        self.inner.set_quality(quality)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
     }
 }
