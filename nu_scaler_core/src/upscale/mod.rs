@@ -37,10 +37,12 @@ pub use fsr::FsrUpscaler;
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[pyclass]
 pub enum UpscalingQuality {
+    UltraPerformance,
     Ultra,
     Quality,
     Balanced,
     Performance,
+    Native,
 }
 
 /// Supported upscaling algorithms
