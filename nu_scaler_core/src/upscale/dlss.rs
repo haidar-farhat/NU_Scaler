@@ -6,6 +6,7 @@ use crate::dlss_manager::{self /*, DlssManagerError*/}; // Removed unused DlssMa
 use crate::gpu::{GpuError /*, GpuProvider*/, GpuResources}; // Removed unused GpuProvider
 use crate::upscale::{Upscaler, UpscalingQuality};
 use dlss_sys::{self, SlBoolean, SlDLSSMode, SlDLSSOptions, SlDlssFeature, SlStatus}; // Changed crate::dlss_sys to dlss_sys
+use wgpu::util::DeviceExt; // For create_buffer_init
 
 pub struct DlssUpscaler {
     quality: UpscalingQuality,
