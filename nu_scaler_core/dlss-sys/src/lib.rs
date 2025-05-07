@@ -5,9 +5,11 @@ use std::os::raw::{c_void, c_uint};
 
 /// Status codes returned by SL functions.
 #[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum SlStatus {
     Success = 0,
     // Add other SL_STATUS codes as needed...
+    // Example: Error = -1, // Add actual values from sl_consts.h
 }
 
 /// Opaque handle to a DLSS feature instance.
