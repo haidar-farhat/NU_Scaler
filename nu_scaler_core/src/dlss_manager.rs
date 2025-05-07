@@ -119,7 +119,7 @@ mod tests {
                     Ok(_) => panic!("If first init was Err, second should not be Ok."),
                     Err(ref second_err) => {
                         // Check if the errors are of the same type/content (requires PartialEq for DlssManagerError)
-                         assert_eq!(format!(\"{:?}\", first_err), format!(\"{:?}\", second_err), \"Errors should be consistent\");
+                         assert_eq!(format!("{:?}", first_err), format!("{:?}", second_err), "Errors should be consistent");
                     }
                 }
             }
@@ -127,6 +127,6 @@ mod tests {
         
         // Test DlssManager::new() behavior
         let manager_result = DlssManager::new();
-        assert_eq!(manager_result.is_ok(), first_call_state_is_ok, \"DlssManager::new() success should match initial ensure_sdk_initialized() success.\");
+        assert_eq!(manager_result.is_ok(), first_call_state_is_ok, "DlssManager::new() success should match initial ensure_sdk_initialized() success.");
     }
 }
