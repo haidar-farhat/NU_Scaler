@@ -1,10 +1,10 @@
 import sys
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QListWidget, QStackedWidget, QFrame,
-    QPushButton, QComboBox, QSpinBox, QCheckBox, QSlider, QGroupBox, QFormLayout, QProgressBar, QFileDialog
+    QPushButton, QComboBox, QSpinBox, QCheckBox, QSlider, QGroupBox, QFormLayout, QProgressBar, QFileDialog, QSizePolicy
 )
-from PySide6.QtCore import Qt, QTimer, Signal, QThread, QObject, Slot
-from PySide6.QtGui import QPixmap, QImage, QAction
+from PySide6.QtCore import Qt, QTimer, Signal, QThread, QObject, Slot, QEvent, QShortcut
+from PySide6.QtGui import QPixmap, QImage, QAction, QKeySequence, QPainter, QColor, QFont
 import time
 import random
 import traceback
@@ -47,6 +47,68 @@ print(f"[main.py] nu_scaler_core available: {nu_scaler_core is not None}")
 
 # Add import for GPU optimization
 from nu_scaler.gpu_optimizer import optimize_upscaler, force_gpu_activation
+
+class AspectRatioPreview(QLabel):
+    """A QLabel that displays a QPixmap scaled with aspect ratio, with overlay support and full-screen toggle."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAlignment(Qt.AlignCenter)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.setStyleSheet("background: #181818; border: 1px solid #444;")
+        self._pixmap = None
+        self.overlay_text = ""
+        self._is_fullscreen = False
+        self._parent_window = None
+        self.installEventFilter(self)
+
+    def set_pixmap(self, pixmap):
+        self._pixmap = pixmap
+        self.update()
+
+    def set_overlay(self, text):
+        self.overlay_text = text
+        self.update()
+
+    def set_parent_window(self, window):
+        self._parent_window = window
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.MouseButtonDblClick:
+            self.toggle_fullscreen()
+            return True
+        return super().eventFilter(obj, event)
+
+    def toggle_fullscreen(self):
+        if not self._parent_window:
+            return
+        if self._is_fullscreen:
+            self._parent_window.showNormal()
+            self._is_fullscreen = False
+        else:
+            self._parent_window.showFullScreen()
+            self._is_fullscreen = True
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        if self._pixmap:
+            # Calculate scaled size with aspect ratio
+            scaled = self._pixmap.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            x = (self.width() - scaled.width()) // 2
+            y = (self.height() - scaled.height()) // 2
+            painter.drawPixmap(x, y, scaled)
+        # Draw overlay
+        if self.overlay_text:
+            overlay_rect = self.rect().adjusted(12, 12, -12, -12)
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setBrush(QColor(30, 30, 30, 180))
+            painter.setPen(Qt.NoPen)
+            painter.drawRoundedRect(overlay_rect, 12, 12)
+            painter.setPen(QColor(255, 255, 255))
+            font = QFont()
+            font.setPointSize(12)
+            painter.setFont(font)
+            painter.drawText(overlay_rect, Qt.AlignTop | Qt.AlignRight, self.overlay_text)
 
 class UpscaleWorker(QObject):
     finished = Signal(bytes, int, int, float)
@@ -176,11 +238,6 @@ class LiveFeedScreen(QWidget):
         self.input_preview.setStyleSheet("background: #222; border: 1px solid #555;")
         left_layout.addWidget(self.input_label)
         left_layout.addWidget(self.input_preview)
-        # Overlay (floating)
-        self.overlay = QLabel("Input: --\nUpscaled: --\nFPS: 0.0")
-        self.overlay.setStyleSheet("background: rgba(30,30,30,180); color: #fff; padding: 8px; border-radius: 8px;")
-        self.overlay.setAlignment(Qt.AlignRight | Qt.AlignTop)
-        left_layout.addWidget(self.overlay)
         # Controls
         controls = QGroupBox("Capture Controls")
         form = QFormLayout(controls)
@@ -212,19 +269,18 @@ class LiveFeedScreen(QWidget):
         self.output_label = QLabel("Upscaled Output Preview")
         self.output_label.setAlignment(Qt.AlignCenter)
         self.output_label.setStyleSheet("font-size: 18px; color: #ccc;")
-        self.output_preview = QLabel()
-        self.output_preview.setFixedSize(480, 270)
-        self.output_preview.setStyleSheet("background: #222; border: 1px solid #555;")
+        # Modern maximized aspect-ratio-aware preview
+        self.output_preview = AspectRatioPreview()
+        self.output_preview.setMinimumSize(320, 180)
+        self.output_preview.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.output_preview.set_parent_window(self.window())
         right_layout.addWidget(self.output_label)
-        right_layout.addWidget(self.output_preview)
+        right_layout.addWidget(self.output_preview, 1)
         # Upscaling controls
         upscale_controls = QGroupBox("Upscaling Settings")
         upscale_form = QFormLayout(upscale_controls)
-        
-        # Add technology selector
         self.technology_box = QComboBox()
         self.technology_box.addItems(["Auto (Best for GPU)", "FSR 3.0", "DLSS", "Basic"])
-        
         self.quality_box = QComboBox()
         self.quality_box.addItems(["ultra", "quality", "balanced", "performance"])
         self.algorithm_box = QComboBox()
@@ -234,40 +290,28 @@ class LiveFeedScreen(QWidget):
         self.scale_slider.setValue(20)
         self.scale_slider.valueChanged.connect(self.update_scale_label)
         self.scale_label = QLabel("2.0×")
-        
-        # Technology selector is first option
         upscale_form.addRow("Technology:", self.technology_box)
         upscale_form.addRow("Quality:", self.quality_box)
         upscale_form.addRow("Algorithm:", self.algorithm_box)
         upscale_form.addRow("Scale Factor:", self.scale_slider)
         upscale_form.addRow("", self.scale_label)
-        
-        # Connect technology selector to handle enabling/disabling appropriate options
         self.technology_box.currentTextChanged.connect(self.update_technology_ui)
-        
         right_layout.addWidget(upscale_controls)
         right_layout.addStretch()
         # Status bar
         self.status_bar = QLabel("Frame Time: -- ms   FPS: --   Resolution: --")
         self.status_bar.setStyleSheet("background: #181818; color: #aaa; padding: 4px;")
         right_layout.addWidget(self.status_bar)
-        # Layout
         layout.addWidget(left_panel)
-        layout.addWidget(right_panel)
+        layout.addWidget(right_panel, 1)
         self.refresh_windows()
         self.update_scale_label()
-
-        # Add advanced upscaling option
         self.advanced_check = QCheckBox("Advanced GPU Optimization", self)
         self.advanced_check.setChecked(self.advanced_upscaling)
         self.advanced_check.stateChanged.connect(self.toggle_advanced_upscaling)
         upscale_controls.layout().addRow(self.advanced_check)
-        
-        # Add memory stats display
         self.memory_stats_label = QLabel("VRAM: 0.0 MB / 0.0 MB (0%)", self)
         upscale_controls.layout().addRow(self.memory_stats_label)
-        
-        # Add memory management strategy dropdown
         memory_strategy_layout = QHBoxLayout()
         memory_strategy_layout.addWidget(QLabel("Memory Strategy:"))
         self.memory_strategy_box = QComboBox(self)
@@ -276,12 +320,11 @@ class LiveFeedScreen(QWidget):
         self.memory_strategy_box.currentIndexChanged.connect(self.set_memory_strategy)
         memory_strategy_layout.addWidget(self.memory_strategy_box)
         upscale_controls.layout().addRow("", memory_strategy_layout)
-        
-        # Add adaptive quality checkbox
-        self.adaptive_quality_check = QCheckBox("Adaptive Quality", self)
-        self.adaptive_quality_check.setChecked(True)
-        self.adaptive_quality_check.stateChanged.connect(self.toggle_adaptive_quality)
-        upscale_controls.layout().addRow(self.adaptive_quality_check)
+        # Hotkey: Alt+S to start/stop (customizable in settings placeholder)
+        self.start_stop_shortcut = QShortcut(QKeySequence("Alt+S"), self)
+        self.start_stop_shortcut.activated.connect(self.toggle_start_stop)
+        # Placeholder for hotkey customization in settings
+        # TODO: Integrate with settings dialog/config
 
     def update_source_ui(self, text):
         if text == "Window":
@@ -450,16 +493,8 @@ class LiveFeedScreen(QWidget):
             self.upscaler = None
             self.upscaler_initialized = False
             self.memory_strategy_box.setEnabled(self.advanced_upscaling)
-            self.adaptive_quality_check.setEnabled(self.advanced_upscaling)
         except Exception as e:
             print(f'[DEBUG] toggle_advanced_upscaling: {e}')
-
-    def toggle_adaptive_quality(self, state):
-        try:
-            if self.upscaler and hasattr(self.upscaler, 'set_adaptive_quality'):
-                self.upscaler.set_adaptive_quality(bool(state))
-        except Exception as e:
-            print(f'[DEBUG] toggle_adaptive_quality: {e}')
 
     def set_memory_strategy(self, index):
         try:
@@ -606,15 +641,20 @@ class LiveFeedScreen(QWidget):
     def on_upscale_finished(self, out_bytes, out_w, out_h, elapsed):
         print(f'[DEBUG] on_upscale_finished: {id(self)}')
         print(f"[DEBUG] Upscale finished in {elapsed*1000:.2f} ms at {time.strftime('%H:%M:%S')}")
-        # Update the GUI with the upscaled image
         if out_bytes:
             qimg = QImage(out_bytes, out_w, out_h, QImage.Format_RGBA8888)
             pixmap = QPixmap.fromImage(qimg)
-            self.output_preview.setPixmap(pixmap)
-            # Update FPS
+            self.output_preview.set_pixmap(pixmap)
             inst_fps = 1.0 / elapsed if elapsed > 0 else 0.0
             self.fps = 0.95 * self.fps + 0.05 * inst_fps if self.fps > 0 else inst_fps
-            self.overlay.setText(f"Input: {out_w//self.upscale_scale:.0f}×{out_h//self.upscale_scale:.0f}\nUpscaled: {out_w}×{out_h}\nFPS: {self.fps:.1f}")
+            # Overlay details
+            vram_str = self.memory_stats_label.text()
+            overlay = (f"Input: {out_w//self.upscale_scale:.0f}×{out_h//self.upscale_scale:.0f}\n"
+                       f"Upscaled: {out_w}×{out_h}\n"
+                       f"FPS: {self.fps:.1f}\n"
+                       f"{vram_str}\n"
+                       f"Frame Time: {elapsed*1000:.1f} ms")
+            self.output_preview.set_overlay(overlay)
             self.status_bar.setText(f"Frame Time: {elapsed * 1000:.1f} ms   FPS: {self.fps:.1f}   Resolution: {out_w//self.upscale_scale:.0f}×{out_h//self.upscale_scale:.0f} → {out_w}×{out_h}")
             self.profiler_signal.emit(elapsed * 1000, self.fps, out_w//self.upscale_scale, out_h//self.upscale_scale)
             if self.fps < 30:
@@ -633,6 +673,12 @@ class LiveFeedScreen(QWidget):
         self.upscaler_initialized = False
         traceback.print_exc()
         # The timer will continue to fire at the set interval
+
+    def toggle_start_stop(self):
+        if self.start_btn.isEnabled():
+            self.start_capture()
+        elif self.stop_btn.isEnabled():
+            self.stop_capture()
 
 class SettingsScreen(QWidget):
     def __init__(self, live_feed_screen=None):
