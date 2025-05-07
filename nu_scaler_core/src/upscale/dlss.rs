@@ -1,240 +1,191 @@
-use anyhow::Result;
-use wgpu::{Device, Queue, ShaderModule, ComputePipeline, Buffer, BindGroup, BindGroupLayout, BufferUsages, ShaderModuleDescriptor, ShaderSource, ComputePipelineDescriptor, PipelineLayoutDescriptor, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, BufferBindingType, BindGroupDescriptor, BindGroupEntry, CommandEncoderDescriptor, BufferDescriptor, MapMode};
-use wgpu::util::DeviceExt;
+use anyhow::{Result, anyhow};
 use std::sync::Arc;
-use std::any::Any;
+use std::ffi::c_void;
 
-use super::{Upscaler, UpscalingQuality, UpscalingTechnology};
+use crate::dlss_manager::{self, DlssManagerError};
+use crate::dlss_sys::{self, SlDlssFeature, SlStatus, SlDLSSOptions, SlDLSSMode, SlBoolean};
+use crate::gpu::{GpuResources, GpuError, GpuProvider}; // Added GpuProvider if needed for GpuResources construction
+use crate::upscale::{Upscaler, UpscalingQuality};
 
-// Placeholder shader for when actual DLSS integration is not available
-// This implements a high-quality edge-aware upscaler that approximates DLSS behavior
-const DLSS_FALLBACK_SHADER: &str = r#"
-// DLSS Fallback Shader - Higher quality upscaling for NVIDIA GPUs
-// Note: This is NOT actual DLSS, just a high-quality placeholder until DLSS SDK integration
-
-struct Dimensions {
-    in_width: u32,
-    in_height: u32,
-    out_width: u32,
-    out_height: u32,
-    quality: u32,    // Quality setting (0=Ultra, 1=Quality, 2=Balanced, 3=Performance)
-    iteration: u32,  // Multi-pass iteration (0 or 1)
-    reserved1: u32,
-    reserved2: u32,
-}
-
-@group(0) @binding(0) var<storage, read> input_img: array<u32>;
-@group(0) @binding(1) var<storage, read_write> output_img: array<u32>;
-@group(0) @binding(2) var<uniform> dims: Dimensions;
-
-// Helper functions for color handling
-fn unpack_rgba8(p: u32) -> vec4<f32> {
-    return vec4<f32>(
-        f32((p >> 0) & 0xFF),
-        f32((p >> 8) & 0xFF),
-        f32((p >> 16) & 0xFF),
-        f32((p >> 24) & 0xFF)
-    ) / 255.0;
-}
-
-fn pack_rgba8(v: vec4<f32>) -> u32 {
-    let r = u32(clamp(v.x, 0.0, 1.0) * 255.0);
-    let g = u32(clamp(v.y, 0.0, 1.0) * 255.0);
-    let b = u32(clamp(v.z, 0.0, 1.0) * 255.0);
-    let a = u32(clamp(v.w, 0.0, 1.0) * 255.0);
-    return (a << 24) | (b << 16) | (g << 8) | r;
-}
-
-// Fetch texel with clamping
-fn sampleInput(p: vec2<i32>) -> vec4<f32> {
-    let px = clamp(p.x, 0, i32(dims.in_width) - 1);
-    let py = clamp(p.y, 0, i32(dims.in_height) - 1);
-    let idx = py * i32(dims.in_width) + px;
-    return unpack_rgba8(input_img[idx]);
-}
-
-// Calculate gradient at position
-fn calcGradient(p: vec2<i32>) -> vec2<f32> {
-    // Sample a 3x3 neighborhood
-    let c = sampleInput(p).rgb;
-    let n = sampleInput(p + vec2<i32>(0, -1)).rgb;
-    let s = sampleInput(p + vec2<i32>(0, 1)).rgb;
-    let e = sampleInput(p + vec2<i32>(1, 0)).rgb;
-    let w = sampleInput(p + vec2<i32>(-1, 0)).rgb;
-    
-    // Calculate horizontal and vertical gradients
-    let gh = length(e - c) - length(c - w);
-    let gv = length(s - c) - length(c - n);
-    
-    return vec2<f32>(gh, gv);
-}
-
-// Lanczos filter with a=2
-fn lanczos2(x: f32) -> f32 {
-    if (abs(x) < 0.00001) {
-        return 1.0;
-    }
-    if (abs(x) >= 2.0) {
-        return 0.0;
-    }
-    let pix = 3.14159265359 * x;
-    return (2.0 * sin(pix) * sin(pix / 2.0)) / (pix * pix);
-}
-
-// Main compute shader
-@compute @workgroup_size(8, 8)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    if (gid.x >= dims.out_width || gid.y >= dims.out_height) {
-        return;
-    }
-
-    // Map to input coordinates with proper scaling
-    let outPos = vec2<f32>(f32(gid.x) + 0.5, f32(gid.y) + 0.5);
-    let scale = vec2<f32>(f32(dims.in_width) / f32(dims.out_width), 
-                          f32(dims.in_height) / f32(dims.out_height));
-    let inPos = outPos * scale;
-    
-    // Determine the filter kernel size based on quality
-    var kernelSize: i32;
-    var sharpness: f32;
-    
-    switch (dims.quality) {
-        case 0u: { // Ultra
-            kernelSize = 3;
-            sharpness = 0.9;
-        }
-        case 1u: { // Quality
-            kernelSize = 3;
-            sharpness = 0.7;
-        }
-        case 2u: { // Balanced
-            kernelSize = 2;
-            sharpness = 0.5;
-        }
-        default: { // Performance
-            kernelSize = 2;
-            sharpness = 0.3;
-        }
-    }
-    
-    // Integer position and fractional offset
-    let intPos = vec2<i32>(i32(floor(inPos.x)), i32(floor(inPos.y)));
-    let frac = inPos - vec2<f32>(f32(intPos.x), f32(intPos.y));
-    
-    // Detect edges using gradients
-    let gradient = calcGradient(intPos);
-    let gradMag = length(gradient) * 4.0;
-    let gradDir = normalize(gradient + vec2<f32>(0.0001, 0.0001));
-    
-    // Weight along and perpendicular to the edge
-    let edgeWeight = clamp(gradMag, 0.0, 1.0);
-    let alongWeight = abs(dot(vec2<f32>(frac - 0.5), gradDir)) * edgeWeight;
-    
-    var totalColor = vec4<f32>(0.0);
-    var totalWeight = 0.0;
-    
-    // Adaptive sampling kernel
-    for (var dy = -kernelSize; dy <= kernelSize; dy++) {
-        for (var dx = -kernelSize; dx <= kernelSize; dx++) {
-            let offset = vec2<f32>(f32(dx), f32(dy));
-            let samplePos = vec2<i32>(intPos.x + dx, intPos.y + dy);
-            
-            // Calculate proper filter weights based on distance and edge direction
-            let dist = length(frac - 0.5 + offset);
-            
-            // Adjust filter along edges
-            var weight = lanczos2(dist);
-            
-            // Edge-aware weight adjustment
-            if (edgeWeight > 0.2) {
-                let offsetDir = normalize(offset + vec2<f32>(0.0001, 0.0001));
-                let alignmentFactor = abs(dot(offsetDir, gradDir));
-                weight *= mix(1.0, alignmentFactor * 2.0, edgeWeight);
-            }
-            
-            let sampleColor = sampleInput(samplePos);
-            totalColor += sampleColor * weight;
-            totalWeight += weight;
-        }
-    }
-    
-    // Normalize color
-    var finalColor = totalColor / max(totalWeight, 0.0001);
-    
-    // Apply sharpening as a final step (if in the second iteration)
-    if (dims.iteration == 1) {
-        let center = sampleInput(intPos);
-        let sharpenAmount = mix(0.2, 0.6, sharpness);
-        finalColor = mix(finalColor, center, sharpenAmount);
-    }
-    
-    // Output final color
-    let dst_idx = gid.y * dims.out_width + gid.x;
-    output_img[dst_idx] = pack_rgba8(finalColor);
-}
-"#;
-
-/// DLSS upscaler (NVIDIA Deep Learning Super Sampling)
 pub struct DlssUpscaler {
     quality: UpscalingQuality,
-    device: Option<Arc<Device>>,
-    queue: Option<Arc<Queue>>,
+    gpu_resources: Option<Arc<GpuResources>>,
+    dlss_feature: Option<SlDlssFeature>,
+    native_device_handle: *mut c_void, 
+    input_width: u32,
+    input_height: u32,
+    output_width: u32,
+    output_height: u32,
+    initialized: bool,
 }
 
 impl DlssUpscaler {
-    /// Create a new DLSS upscaler
     pub fn new(quality: UpscalingQuality) -> Self {
         Self {
             quality,
-            device: None,
-            queue: None,
+            gpu_resources: None, // Initialize as None
+            dlss_feature: None,
+            native_device_handle: std::ptr::null_mut(),
+            input_width: 0,
+            input_height: 0,
+            output_width: 0,
+            output_height: 0,
+            initialized: false,
         }
     }
-    
-    /// Set device and queue for GPU operations
-    pub fn set_device_queue(&mut self, device: Arc<Device>, queue: Arc<Queue>) {
-        self.device = Some(device);
-        self.queue = Some(queue);
+
+    // Method for the factory to set GpuResources
+    // Conforming to the set_device_queue structure seen in the factory, but taking GpuResources
+    pub fn set_gpu_resources(&mut self, gpu_resources: Arc<GpuResources>) {
+        self.gpu_resources = Some(gpu_resources);
+    }
+
+    // Alternative, if GpuResources needs to be constructed here
+    // pub fn set_device_queue(&mut self, device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>, /* gpu_info: Option<GpuInfo> */) {
+    //     // Potentially create GpuInfo or pass as None
+    //     let gpu_info = None; // Placeholder
+    //     self.gpu_resources = Some(Arc::new(GpuResources::new(device, queue, gpu_info)));
+    // }
+
+    fn map_quality_to_dlss_mode(quality: UpscalingQuality, output_width: u32, output_height: u32) -> (SlDLSSMode, u32, u32) {
+        let mode = match quality {
+            UpscalingQuality::Ultra => SlDLSSMode::UltraQuality,
+            UpscalingQuality::Quality => SlDLSSMode::MaxQuality,
+            UpscalingQuality::Balanced => SlDLSSMode::Balanced,
+            UpscalingQuality::Performance => SlDLSSMode::MaxPerformance,
+        };
+        let render_width = match mode {
+            SlDLSSMode::UltraQuality | SlDLSSMode::DLAA => output_width * 2 / 3, 
+            SlDLSSMode::MaxQuality => output_width * 2 / 3, 
+            SlDLSSMode::Balanced => output_width * 58 / 100, 
+            SlDLSSMode::MaxPerformance => output_width / 2, 
+            SlDLSSMode::UltraPerformance => output_width / 3, 
+            _ => output_width,
+        };
+        let render_height = match mode {
+            SlDLSSMode::UltraQuality | SlDLSSMode::DLAA => output_height * 2 / 3,
+            SlDLSSMode::MaxQuality => output_height * 2 / 3,
+            SlDLSSMode::Balanced => output_height * 58 / 100,
+            SlDLSSMode::MaxPerformance => output_height / 2,
+            SlDLSSMode::UltraPerformance => output_height / 3,
+            _ => output_height,
+        };
+        (mode, render_width, render_height)
     }
 }
 
 impl Upscaler for DlssUpscaler {
-    fn initialize(&mut self, _input_width: u32, _input_height: u32, _output_width: u32, _output_height: u32) -> Result<()> {
-        // Placeholder: In a real implementation, this would set up the DLSS pipeline
+    fn initialize(&mut self, input_width: u32, input_height: u32, output_width: u32, output_height: u32) -> Result<()> {
+        if self.initialized {
+            if self.input_width == input_width && self.input_height == input_height && 
+               self.output_width == output_width && self.output_height == output_height {
+                return Ok(());
+            }
+            if let Some(feature) = self.dlss_feature.take() {
+                unsafe { dlss_sys::slDestroyDlssFeature(feature) };
+                println!("[DLSS Upscaler] Destroyed existing DLSS feature due to dimension change.");
+            }
+            self.initialized = false;
+        }
+
+        let gpu_res = self.gpu_resources.as_ref().ok_or_else(|| anyhow!("GpuResources not set before initialize"))?;
+
+        self.input_width = input_width;
+        self.input_height = input_height;
+        self.output_width = output_width;
+        self.output_height = output_height;
+        
+        println!("[DLSS Upscaler] Initializing with Input: {}x{}, Output: {}x{}", 
+            input_width, input_height, output_width, output_height);
+
+        dlss_manager::ensure_sdk_initialized().map_err(|e| anyhow!("DLSS SDK init failed: {:?}", e))?;
+        println!("[DLSS Upscaler] DLSS SDK ensured to be initialized.");
+
+        self.native_device_handle = unsafe { gpu_res.get_native_device_handle()? };
+        if self.native_device_handle.is_null() {
+            return Err(anyhow!("Failed to get native GPU device handle or handle is null. Potential GpuError: {:?}", GpuError::NullHandle));
+        }
+        println!("[DLSS Upscaler] Got native device handle: {:?}", self.native_device_handle);
+        
+        let mut dlss_feature_handle: SlDlssFeature = std::ptr::null_mut();
+        let status = unsafe {
+            dlss_sys::slCreateDlssFeature(
+                self.native_device_handle,
+                input_width, 
+                input_height, 
+                0, 
+                &mut dlss_feature_handle,
+            )
+        };
+
+        if status != SlStatus::Success || dlss_feature_handle.is_null() {
+            return Err(anyhow!("slCreateDlssFeature failed with status {:?} or returned null handle.", status));
+        }
+        self.dlss_feature = Some(dlss_feature_handle);
+        println!("[DLSS Upscaler] slCreateDlssFeature successful. Handle: {:?}", dlss_feature_handle);
+
+        let (dlss_mode, _render_w, _render_h) = Self::map_quality_to_dlss_mode(self.quality, output_width, output_height);
+        
+        let options = SlDLSSOptions {
+            mode: dlss_mode,
+            output_width: output_width,
+            output_height: output_height,
+            color_buffers_hdr: SlBoolean::False, 
+            ..SlDLSSOptions::default()
+        };
+        
+        println!("[DLSS Upscaler] DLSS Options prepared: mode={:?}, output={}x{}", options.mode, options.output_width, options.output_height);
+        // Actual setting of options via slDLSSSetOptions or slSetFeatureSpecifics would happen here if API allows/requires.
+
+        self.initialized = true;
         Ok(())
     }
-    
-    fn upscale(&self, input: &[u8]) -> Result<Vec<u8>> {
-        // Placeholder: In a real implementation, this would use DLSS to upscale
-        // For now, just make a copy and add quality marker for testing
-        let mut output = input.to_vec();
-        
-        // Mark first few bytes with the DLSS signature for debugging
-        let sig = b"DLSS";
-        let sig_len = std::cmp::min(sig.len(), output.len());
-        output[..sig_len].copy_from_slice(&sig[..sig_len]);
-        
-        Ok(output)
+
+    fn upscale(&self, input_bytes: &[u8]) -> Result<Vec<u8>> {
+        if !self.initialized || self.dlss_feature.is_none() || self.gpu_resources.is_none() {
+            return Err(anyhow!("DlssUpscaler not initialized, feature not created, or GpuResources not set."));
+        }
+        // let _dlss_feature = self.dlss_feature.unwrap();
+        // let _gpu_res = self.gpu_resources.as_ref().unwrap();
+
+        // Actual upscale logic with WGPU texture creation & FFI call is still TODO.
+        println!("[DLSS Upscaler] Upscale called for input size: {} bytes. (Output target: {}x{})", 
+            input_bytes.len(), self.output_width, self.output_height);
+        Err(anyhow!("DLSS upscale logic not yet fully implemented."))
     }
-    
+
     fn name(&self) -> &'static str {
-        "DlssUpscaler"
+        "DLSSUpscaler"
     }
-    
+
     fn quality(&self) -> UpscalingQuality {
         self.quality
     }
-    
+
     fn set_quality(&mut self, quality: UpscalingQuality) -> Result<()> {
+        if self.quality == quality {
+            return Ok(());
+        }
         self.quality = quality;
+        if self.initialized {
+            println!("[DLSS Upscaler] Quality changed to {:?}. Re-initialization might be needed, or options updated on feature.", quality);
+            // Logic to call slDLSSSetOptions or mark for re-init would go here.
+        }
         Ok(())
     }
-    
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-    
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
+
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+}
+
+impl Drop for DlssUpscaler {
+    fn drop(&mut self) {
+        if let Some(feature_handle) = self.dlss_feature.take() {
+            println!("[DLSS Upscaler] Dropping DlssUpscaler, destroying DLSS feature: {:?}", feature_handle);
+            let status = unsafe { dlss_sys::slDestroyDlssFeature(feature_handle) };
+            if status != SlStatus::Success {
+                eprintln!("[DLSS Upscaler] Error destroying DLSS feature {:?}: {:?}", feature_handle, status);
+            }
+        }
     }
 } 
