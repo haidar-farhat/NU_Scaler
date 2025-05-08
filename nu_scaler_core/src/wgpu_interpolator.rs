@@ -420,7 +420,7 @@ impl WgpuFrameInterpolator {
         let flow_upsample_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some("Flow Upsample Pipeline"),
             layout: Some(&flow_upsample_pipeline_layout),
-            module: &upsample_shader_module,
+            module: &flow_upsample_shader_module,
             entry_point: "main",
         });
 
