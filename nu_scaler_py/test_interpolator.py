@@ -82,7 +82,8 @@ def run_benchmark(interp, width, height, time_t=0.5):
 def run_test():
     print("Initializing WgpuFrameInterpolator...")
     try:
-        interp = WgpuFrameInterpolator()
+        # Explicitly request square16x16 preset
+        interp = WgpuFrameInterpolator(workgroup_preset_str="square16x16")
     except Exception as e:
         print(f"Error initializing WgpuFrameInterpolator: {e}")
         exit(1)
