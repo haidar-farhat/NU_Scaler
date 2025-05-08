@@ -8,6 +8,7 @@ use crate::gpu::memory::PyVramStats;
 use crate::gpu::memory::{/*VramStats,*/ AllocationStrategy, MemoryPressure};
 use crate::gpu::GpuResources;
 use crate::upscale::{Upscaler, UpscalerFactory, UpscalingQuality, UpscalingTechnology};
+use crate::wgpu_interpolator::WgpuFrameInterpolator;
 use anyhow::{anyhow, Result};
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
@@ -803,6 +804,9 @@ fn nu_scaler_core(_py: Python, m: &PyModule) -> PyResult<()> {
             ))
         }
     }
+
+    // Add the new class
+    m.add_class::<WgpuFrameInterpolator>()?;
 
     Ok(())
 }

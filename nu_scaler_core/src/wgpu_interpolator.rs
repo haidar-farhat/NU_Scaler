@@ -23,6 +23,7 @@ use std::num::NonZeroU64;
 use crate::gpu::detector::GpuDetector;
 use futures::executor::block_on; // Import block_on
 use wgpu::util::TextureDataOrder; // Added import
+use pyo3::prelude::*; // Add import
 
 // Uniform structure for the warp/blend shader - MATCHING ORIGINAL SPEC (48 Bytes)
 #[repr(C)]
@@ -88,6 +89,7 @@ struct RefineHSUniforms {
                   // A safer version for 16-byte total would be: { size: [u32;2], alpha: f32, _internal_pad: u32 }
 }
 
+#[pyclass] // Add this attribute
 pub struct WgpuFrameInterpolator {
     device: Arc<Device>,
     queue: Arc<Queue>,
@@ -119,6 +121,11 @@ pub struct WgpuFrameInterpolator {
     flow_upsample_pipeline: Option<ComputePipeline>,
     flow_refine_bgl: Option<BindGroupLayout>,
     flow_refine_pipeline: Option<ComputePipeline>,
+}
+
+#[pymethods] // Add this block
+impl WgpuFrameInterpolator {
+    // We will add Python methods here later (like #[new], interpolate_py, etc.)
 }
 
 impl WgpuFrameInterpolator {
