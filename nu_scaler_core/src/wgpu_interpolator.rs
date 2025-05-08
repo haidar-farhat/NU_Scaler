@@ -17,12 +17,10 @@ use wgpu::{
     MultisampleState, TextureSampleType, TextureAspect,
     include_wgsl,
 };
-use crate::utils::teinture_wgpu::{self, WgpuState}; // Keep this, will fix if utils::teinture_wgpu is wrong later
 use wgpu::util::DeviceExt;
 use log::{debug, info, warn};
 use std::num::NonZeroU64;
 use crate::gpu::detector::GpuDetector;
-use crate::utils::teinture_wgpu::{ComparableTexture, create_texture_with_data, TextureDataOrder};
 use futures::executor::block_on; // Import block_on
 
 // Uniform structure for the warp/blend shader - MATCHING ORIGINAL SPEC (48 Bytes)
@@ -737,8 +735,6 @@ impl WgpuFrameInterpolator {
         // ** Get immutable info before mutable borrow **
         let width = self.pyramid_a_textures[level].as_ref().unwrap().width();
         let height = self.pyramid_a_textures[level].as_ref().unwrap().height();
-        let prev_frame_tex_view = self.pyramid_a_views[level].as_ref().expect("Prev frame view missing");
-        let next_frame_tex_view = self.pyramid_b_views[level].as_ref().expect("Next frame view missing");
         let pipeline = self.horn_schunck_pipeline.as_ref().expect("HS pipeline missing");
         let bgl = &self.horn_schunck_bgl; // Borrow BGL
         let sampler_for_hs = &self.flow_sampler; // Borrow sampler
@@ -746,6 +742,10 @@ impl WgpuFrameInterpolator {
         // ** Perform mutable borrow **
         self.ensure_flow_textures(width, height);
         // ** Mutable borrow ends **
+        
+        // ** Get immutable views AFTER mutable borrow **
+        let prev_frame_tex_view = self.pyramid_a_views[level].as_ref().expect("Prev frame view missing");
+        let next_frame_tex_view = self.pyramid_b_views[level].as_ref().expect("Next frame view missing");
 
         // Create uniforms
         let uniforms = CoarseHSParams { size: [width, height], lambda: alpha_sq, _padding: 0 };
@@ -876,10 +876,10 @@ impl WgpuFrameInterpolator {
             return current_flow_texture_idx;
         }
 
-        let upsample_pipeline = self.flow_upsample_pipeline.clone().expect("Upsample pipeline not init");
-        let upsample_bgl = self.flow_upsample_bgl.clone().expect("Upsample BGL not init");
-        let refine_pipeline = self.flow_refine_pipeline.clone().expect("Refine pipeline not init");
-        let refine_bgl = self.flow_refine_bgl.clone().expect("Refine BGL not init");
+        let upsample_pipeline = self.flow_upsample_pipeline.as_ref().expect("Upsample pipeline not init");
+        let upsample_bgl = self.flow_upsample_bgl.as_ref().expect("Upsample BGL not init");
+        let refine_pipeline = self.flow_refine_pipeline.as_ref().expect("Refine pipeline not init");
+        let refine_bgl = self.flow_refine_bgl.as_ref().expect("Refine BGL not init");
         let flow_sampler = self.flow_sampler.clone();
 
         for finer_level_idx in (0..coarsest_flow_pyramid_level_idx).rev() {
@@ -905,7 +905,7 @@ impl WgpuFrameInterpolator {
             let upsample_bgl = self.flow_upsample_bgl.as_ref().expect("Upsample BGL missing");
             let refine_pipeline = self.flow_refine_pipeline.as_ref().expect("Refine pipeline missing");
             let refine_bgl = self.flow_refine_bgl.as_ref().expect("Refine BGL missing");
-            let sampler_ref = &self.flow_sampler; // Borrow sampler
+            let sampler_ref = &self.flow_sampler; // Borrow sampler, removed clone
 
             info!("Refining flow: Level {} ({}x{}) from Level {} ({}x{}). Output to flow_tex[{}].", 
                    finer_level_idx, dst_w, dst_h, coarser_level_idx, src_w, src_h, upsampled_flow_texture_idx);
