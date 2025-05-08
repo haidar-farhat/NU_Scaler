@@ -446,23 +446,19 @@ impl WgpuFrameInterpolator {
         // --- Phase 2.3 Setup: Hierarchical Flow Refinement --- 
 
         // Flow Upsample Shader, BGL, and Pipeline
-        // Using MINIMAL hardcoded string for diagnostics
+        // Using NO STRUCT shader string for diagnostics
         let flow_upsample_shader_string = r#"
-struct TestUniforms {
-  a: u32;
-}
-@group(0) @binding(0) var<uniform> u: TestUniforms;
 @compute @workgroup_size(1, 1, 1) fn main() {
-  let _ = u.a; 
+  // Does absolutely nothing, has no struct
 }
 "#;
 
         let flow_upsample_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Flow Upsample Shader"), // Label remains the same for error tracking
+            label: Some("Flow Upsample Shader (No Struct)"), // Modified label
             source: wgpu::ShaderSource::Wgsl(flow_upsample_shader_string.into()),
         });
 
-        // Temporarily disable BGL and Pipeline creation for flow_upsample
+        // Keep BGL and Pipeline as None since the shader is useless
         let flow_upsample_bgl = None;
         let flow_upsample_pipeline = None;
 
