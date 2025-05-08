@@ -28,6 +28,8 @@ use pollster; // Need this for blocking on async #[new]
 use pyo3::types::PyBytes;
 use pyo3::wrap_pyfunction;
 use pyo3::numpy::{PyArrayDyn, PyReadonlyArrayDyn, ToPyArray};
+use std::num::NonZeroU32;
+use wgpu::util::DeviceExt; // For create_buffer_init
 
 // Uniform structure for the warp/blend shader - MATCHING ORIGINAL SPEC (48 Bytes)
 #[repr(C)]
@@ -162,7 +164,7 @@ impl WgpuFrameInterpolator {
         }
     }
 
-    // Changed interpolate_py to accept and return PyBytes
+    // Implement full byte-based interpolation logic
     #[pyo3(signature = (frame_a_bytes, frame_b_bytes, width, height, *, time_t=0.5))]
     fn interpolate_py<'py>(
         &self,
@@ -174,7 +176,7 @@ impl WgpuFrameInterpolator {
         time_t: f32
     ) -> PyResult<Py<PyBytes>>
     {
-        println!("[WgpuFrameInterpolator] Python interpolate_py (PyBytes) called.");
+        println!("[WgpuFrameInterpolator] Python interpolate_py (PyBytes - Full Impl) called.");
         println!("  Dimensions: {}x{}, time_t: {}", width, height, time_t);
 
         // 1. Receive & Validate Inputs
@@ -183,7 +185,7 @@ impl WgpuFrameInterpolator {
         let b_data = frame_b_bytes.as_bytes();
         if a_data.len() != expected_size || b_data.len() != expected_size {
             return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-              format!("Expected {} bytes per frame for {}x{}x4 RGBA, got frame_a: {} bytes, frame_b: {} bytes", 
+              format!("Expected {} bytes per frame for {}x{}x4 RGBA, got frame_a: {} bytes, frame_b: {} bytes",
                       expected_size, width, height, a_data.len(), b_data.len())
             ));
         }
@@ -196,8 +198,8 @@ impl WgpuFrameInterpolator {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm, // Common format for input/output images
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            format: wgpu::TextureFormat::Rgba8Unorm, // Use Rgba8Unorm
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST, // Removed COPY_SRC as they are only inputs here
             view_formats: &[],
         };
 
@@ -227,7 +229,7 @@ impl WgpuFrameInterpolator {
         let flow_texture_format = wgpu::TextureFormat::Rg16Float;
         let flow_bytes_per_pixel = 4; // RG16Float: 2 components * 2 bytes/component
         let zero_flow_data_len = (width * height * flow_bytes_per_pixel) as usize;
-        let zero_flow_data: Vec<u8> = vec![0; zero_flow_data_len]; 
+        let zero_flow_data: Vec<u8> = vec![0; zero_flow_data_len];
         let flow_tex = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Py_Zero_Flow_Tex"),
             size: texture_size_extent, // Flow has same dimensions as frames
@@ -287,16 +289,16 @@ impl WgpuFrameInterpolator {
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&frame_b_view) },
                 wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&flow_view) },
                 wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&output_view) },
-                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::Sampler(&self.shared_sampler) }, // Assuming shared_sampler is appropriate
-                wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::Sampler(&self.flow_sampler) },   // Assuming flow_sampler is appropriate
+                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::Sampler(&self.shared_sampler) }, // Added missing sampler
+                wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::Sampler(&self.flow_sampler) },   // Added missing sampler
             ],
         });
 
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Py_Interp_Encoder") });
         {
-            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { 
+            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("Py_WarpBlend_Pass"),
-                timestamp_writes: None,
+                timestamp_writes: None, // Added missing field
             });
             compute_pass.set_pipeline(warp_blend_pipeline);
             compute_pass.set_bind_group(0, &bind_group, &[]);
@@ -318,43 +320,42 @@ impl WgpuFrameInterpolator {
         let mut readback_encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Py_Readback_Encoder") });
         readback_encoder.copy_texture_to_buffer(
             wgpu::ImageCopyTexture { texture: &output_tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
-            wgpu::ImageCopyBuffer { 
-                buffer: &output_buffer, 
-                layout: wgpu::ImageDataLayout { 
-                    offset: 0, 
-                    bytes_per_row: Some(width * 4), 
-                    rows_per_image: Some(height) 
+            wgpu::ImageCopyBuffer {
+                buffer: &output_buffer,
+                layout: wgpu::ImageDataLayout {
+                    offset: 0,
+                    // Use NonZeroU32::new for bytes_per_row and rows_per_image if wgpu version requires it
+                    bytes_per_row: Some(width * 4),
+                    rows_per_image: Some(height)
                 }
             },
             texture_size_extent,
         );
         self.queue.submit(Some(readback_encoder.finish()));
 
-        let result_bytes = pollster::block_on(async {
+        // Block and map the buffer to read data
+        let result_bytes: Vec<u8> = pollster::block_on(async {
             let buffer_slice = output_buffer.slice(..);
-            // buffer_slice.map_async(wgpu::MapMode::Read).await.unwrap(); // This was the manager's suggestion but map_async takes a callback
             let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
             buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
                 sender.send(result).expect("Failed to send map_async result");
             });
-            self.device.poll(wgpu::Maintain::Wait); // Wait for mapping
+            // Poll the device until the buffer is mapped
+            self.device.poll(wgpu::Maintain::Wait); // Use Wait for blocking readback
             
+            // Receive the result from the callback
             match receiver.receive().await {
                 Some(Ok(())) => {
                     let data = buffer_slice.get_mapped_range();
                     let bytes_vec = data.to_vec();
-                    drop(data); // Unmap buffer before it's dropped
+                    drop(data); // Ensure the mapped range is dropped before unmap
                     output_buffer.unmap();
                     Ok(bytes_vec)
                 }
-                Some(Err(e)) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                    format!("Failed to map output buffer: {}", e)
-                )),
-                None => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                    "Buffer map channel closed prematurely".to_string()
-                )),
+                Some(Err(e)) => Err(format!("Failed to map output buffer: {}", e)),
+                None => Err("Buffer map channel closed prematurely".to_string()),
             }
-        })?;
+        }).map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e))?; // Map potential mapping error to PyErr
 
         // 6. Return PyBytes
         Ok(PyBytes::new_bound(py, &result_bytes).into())
@@ -726,7 +727,7 @@ impl WgpuFrameInterpolator {
         {
             let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
                 label: Some("Warp/Blend Compute Pass (Phase 1)"),
-                timestamp_writes: None,
+                timestamp_writes: None, // Added missing field
             });
             compute_pass.set_pipeline(&self.warp_blend_pipeline.as_ref().unwrap());
             compute_pass.set_bind_group(0, &bind_group, &[]);
