@@ -1,0 +1,21 @@
+# This is a template. After running 'cargo init --lib' in your test directory,
+# add/merge these sections into the generated Cargo.toml.
+
+# [dependencies]
+# pyo3 = { version = "0.21", features = ["extension-module", "numpy"] }
+
+# [lib]
+# crate-type = ["cdylib"]
+
+# --- Full example Cargo.toml for the minimal test ---
+[package]
+name = "py3_numpy_test" # This will be set by cargo init
+version = "0.1.0"      # This will be set by cargo init
+edition = "2021"     # This will be set by cargo init
+
+[dependencies]
+pyo3 = { version = "0.21", features = ["extension-module", "numpy"] }
+
+[lib]
+crate-type = ["cdylib"]
+name = "py3_numpy_test" # Ensure this matches your package name if cargo init uses a different one 

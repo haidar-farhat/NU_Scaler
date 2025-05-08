@@ -1,0 +1,15 @@
+use pyo3::prelude::*;
+use pyo3::numpy::{PyArray1, ToPyArray}; // ToPyArray might be needed for .into()
+
+#[pyfunction]
+fn hello_numpy(py: Python) -> Py<PyArray1<u8>> {
+    let arr = vec![1u8, 2, 3];
+    // PyArray1::from_vec(py, arr).to_owned() // Older style
+    arr.to_pyarray_bound(py).into() // More idiomatic for PyO3 0.21+
+}
+
+#[pymodule]
+fn py3_numpy_test(_py: Python, m: &PyModule) -> PyResult<()> { // Ensure module name matches lib name in Cargo.toml
+    m.add_function(wrap_pyfunction!(hello_numpy, m)?)?;
+    Ok(())
+} 
