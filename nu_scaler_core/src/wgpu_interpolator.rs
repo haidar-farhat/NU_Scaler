@@ -10,148 +10,148 @@ use wgpu::{
     TextureViewDimension, SamplerBindingType, BufferBindingType, PipelineLayoutDescriptor,
     ComputePipelineDescriptor, ShaderModuleDescriptor, ShaderSource, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BufferUsages, BindGroupDescriptor, BindGroupEntry, BindingResource,
-    CommandEncoderDescriptor, ComputePassDescriptor,
+    CommandEncoderDescriptor, ComputePassDescriptor, Texture, TextureUsages, Extent3d,
+    ImageCopyTexture, ImageDataLayout, Origin3d, Buffer,
 };
 
-// Uniform structure for the warp/blend shader
+// Uniform structure for the warp/blend shader as per new spec
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct InterpolationUniforms {
-    output_dims: [u32; 2], // width, height
-    time_t: f32,
-    _padding: u32, // WGSL uniform structs require members to be aligned to 4 bytes. vec2<u32> is 8, f32 is 4.
-                   // For robust layout, ensure total size is multiple of 16 for some platforms if it's a larger struct.
-                   // Here, [u32;2] + f32 + u32 = 8 + 4 + 4 = 16 bytes. This should be fine.
+    size: [u32; 2],       // vec2<u32> -> offset 0, size 8
+    _pad0: [u32; 2],      // vec2<u32> -> offset 8, size 8 (aligns time_t to 16)
+    time_t: f32,          // f32       -> offset 16, size 4
+    _pad1: [f32; 3],      // vec3<f32> -> offset 20, size 12 (total size 32 bytes)
+}
+
+impl InterpolationUniforms {
+    fn new(width: u32, height: u32, time_t: f32) -> Self {
+        Self {
+            size: [width, height],
+            _pad0: [0, 0], // Padding
+            time_t,
+            _pad1: [0.0, 0.0, 0.0], // Padding
+        }
+    }
 }
 
 pub struct WgpuFrameInterpolator {
     device: Arc<Device>,
-    // queue: Arc<Queue>, // The queue is used per-call in interpolate, not stored if not needed otherwise
-
     warp_blend_pipeline: ComputePipeline,
     warp_blend_bind_group_layout: BindGroupLayout,
-    // Optical flow pipeline and related resources will be added later
 }
 
 impl WgpuFrameInterpolator {
     pub fn new(device: Arc<Device>) -> Result<Self> {
+        // WGSL Shader source as per Phase 1.1
         let warp_blend_shader_source = r#"
             struct InterpolationUniforms {
-                output_dims: vec2<u32>,
-                time_t: f32,
-                // _padding: u32, // Not needed if vec2<u32> aligns correctly
+              size: vec2<u32>,
+              _pad0: vec2<u32>,
+              time_t: f32,
+              _pad1: vec3<f32>,
             };
 
-            @group(0) @binding(0) var frame_a_tex: texture_2d<f32>;
-            @group(0) @binding(1) var frame_b_tex: texture_2d<f32>;
-            @group(0) @binding(2) var flow_texture: texture_storage_2d<rg32float, read>;
-            @group(0) @binding(3) var output_texture: texture_storage_2d<rgba8unorm, write>;
-            @group(0) @binding(4) var frame_sampler: sampler;
-            @group(0) @binding(5) var<uniform> uniforms: InterpolationUniforms;
+            @group(0) @binding(0) var<uniform> u: InterpolationUniforms;
+            @group(0) @binding(1) var frame_a_tex: texture_2d<f32>;
+            @group(0) @binding(2) var frame_b_tex: texture_2d<f32>;
+            @group(0) @binding(3) var flow_tex: texture_2d<vec2<f32>>; // Assuming rg32float sampled
+            @group(0) @binding(4) var out_tex: texture_storage_2d<rgba8unorm, write>;
+            @group(0) @binding(5) var image_sampler: sampler;
+            @group(0) @binding(6) var flow_sampler: sampler; // Could be non-filtering
 
             @compute @workgroup_size(16, 16, 1)
-            fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-                if (gid.x >= uniforms.output_dims.x || gid.y >= uniforms.output_dims.y) {
+            fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+                if (global_id.x >= u.size.x || global_id.y >= u.size.y) {
                     return;
                 }
 
-                let output_coord_i32 = vec2<i32>(i32(gid.x), i32(gid.y));
-                let current_pixel_center = vec2<f32>(f32(gid.x) + 0.5, f32(gid.y) + 0.5);
-                let flow_motion_vector = textureLoad(flow_texture, output_coord_i32).xy;
-                let output_dims_f32 = vec2<f32>(f32(uniforms.output_dims.x), f32(uniforms.output_dims.y));
+                let output_coord_i32 = vec2<i32>(i32(global_id.x), i32(global_id.y));
+                let current_pixel_center_uv = (vec2<f32>(global_id.xy) + 0.5) / vec2<f32>(u.size);
 
-                let uv_sample_coord_frame_a = (current_pixel_center - uniforms.time_t * flow_motion_vector) / output_dims_f32;
-                let uv_sample_coord_frame_b = (current_pixel_center + (1.0 - uniforms.time_t) * flow_motion_vector) / output_dims_f32;
+                // Sample flow texture (flow vectors are typically stored as pixel displacements)
+                let flow_pixel_delta = textureSampleLevel(flow_tex, flow_sampler, current_pixel_center_uv, 0.0).xy;
 
-                let color_frame_a = textureSample(frame_a_tex, frame_sampler, uv_sample_coord_frame_a);
-                let color_frame_b = textureSample(frame_b_tex, frame_sampler, uv_sample_coord_frame_b);
+                // Normalized UV coordinates for sampling frame_a and frame_b
+                let uv0 = ((vec2<f32>(global_id.xy) + 0.5) - u.time_t * flow_pixel_delta) / vec2<f32>(u.size);
+                let uv1 = ((vec2<f32>(global_id.xy) + 0.5) + (1.0 - u.time_t) * flow_pixel_delta) / vec2<f32>(u.size);
 
-                let interpolated_color = mix(color_frame_a, color_frame_b, uniforms.time_t);
-                textureStore(output_texture, output_coord_i32, interpolated_color);
+                let c0 = textureSampleLevel(frame_a_tex, image_sampler, uv0, 0.0);
+                let c1 = textureSampleLevel(frame_b_tex, image_sampler, uv1, 0.0);
+
+                let blended_color = mix(c0, c1, u.time_t);
+                textureStore(out_tex, output_coord_i32, blended_color);
             }
         "#;
 
         let warp_blend_shader_module = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("Warp/Blend Shader Module"),
+            label: Some("Warp/Blend Shader Module (Phase 1)"),
             source: ShaderSource::Wgsl(warp_blend_shader_source.into()),
         });
 
         let warp_blend_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: Some("Warp/Blend Bind Group Layout"),
+            label: Some("Warp/Blend BGL (Phase 1)"),
             entries: &[
-                // frame_a_tex (texture_2d<f32>)
+                // u: InterpolationUniforms
                 BindGroupLayoutEntry {
                     binding: 0,
                     visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
+                    ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
                     count: None,
                 },
-                // frame_b_tex (texture_2d<f32>)
+                // frame_a_tex
                 BindGroupLayoutEntry {
                     binding: 1,
                     visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
+                    ty: BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: TextureViewDimension::D2, multisampled: false },
                     count: None,
                 },
-                // flow_texture (texture_storage_2d<rg32float, read>)
+                // frame_b_tex
                 BindGroupLayoutEntry {
                     binding: 2,
                     visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::ReadOnly,
-                        format: TextureFormat::Rg32Float,
-                        view_dimension: TextureViewDimension::D2,
-                    },
+                    ty: BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: TextureViewDimension::D2, multisampled: false },
                     count: None,
                 },
-                // output_texture (texture_storage_2d<rgba8unorm, write>)
+                // flow_tex (texture_2d<vec2<f32>> implies filterable float or unfilterable float)
                 BindGroupLayoutEntry {
                     binding: 3,
                     visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::StorageTexture {
-                        access: StorageTextureAccess::WriteOnly,
-                        format: TextureFormat::Rgba8Unorm, // Common output format
-                        view_dimension: TextureViewDimension::D2,
-                    },
+                    ty: BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: TextureViewDimension::D2, multisampled: false }, // Assuming filterable for now, format Rg32Float
                     count: None,
                 },
-                // frame_sampler
+                // out_tex (storage texture)
                 BindGroupLayoutEntry {
                     binding: 4,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::StorageTexture { access: StorageTextureAccess::WriteOnly, format: TextureFormat::Rgba8Unorm, view_dimension: TextureViewDimension::D2 },
+                    count: None,
+                },
+                // image_sampler (for frame_a, frame_b)
+                BindGroupLayoutEntry {
+                    binding: 5,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::Sampler(SamplerBindingType::Filtering),
                     count: None,
                 },
-                // uniforms buffer
+                // flow_sampler (for flow_tex)
                 BindGroupLayoutEntry {
-                    binding: 5,
+                    binding: 6,
                     visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None, //wgpu::BufferSize::new(std::mem::size_of::<InterpolationUniforms>() as u64),
-                    },
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering), // Could be NonFiltering if flow data is precise per texel
                     count: None,
                 },
             ],
         });
 
         let warp_blend_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
-            label: Some("Warp/Blend Pipeline Layout"),
+            label: Some("Warp/Blend Pipeline Layout (Phase 1)"),
             bind_group_layouts: &[&warp_blend_bind_group_layout],
             push_constant_ranges: &[],
         });
 
         let warp_blend_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
-            label: Some("Warp/Blend Pipeline"),
+            label: Some("Warp/Blend Pipeline (Phase 1)"),
             layout: Some(&warp_blend_pipeline_layout),
             module: &warp_blend_shader_module,
             entry_point: "main",
@@ -159,7 +159,6 @@ impl WgpuFrameInterpolator {
 
         Ok(Self {
             device,
-            // queue,
             warp_blend_pipeline,
             warp_blend_bind_group_layout,
         })
@@ -168,52 +167,50 @@ impl WgpuFrameInterpolator {
     #[allow(clippy::too_many_arguments)]
     pub fn interpolate(
         &self,
-        queue: &Queue, // Pass queue as an argument for the call
+        queue: &Queue,
         frame_a_view: &TextureView,
         frame_b_view: &TextureView,
-        flow_texture_view: &TextureView, // Assumed to be populated by optical flow pass
+        flow_texture_view: &TextureView,
         output_texture_view: &TextureView,
-        sampler: &Sampler, // Sampler for frame_a and frame_b
+        image_sampler: &Sampler, // Sampler for frame_a and frame_b
+        flow_sampler: &Sampler,  // Sampler for flow_texture
         width: u32,
         height: u32,
-        time_t: f32, // Interpolation factor 0.0 to 1.0
+        time_t: f32,
     ) -> Result<()> {
-        let uniforms_data = InterpolationUniforms {
-            output_dims: [width, height],
-            time_t,
-            _padding: 0, // Ensure struct is Pod
-        };
+        let uniforms_data = InterpolationUniforms::new(width, height, time_t);
         let uniform_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Interpolation Uniform Buffer"),
+            label: Some("Interpolation Uniform Buffer (Phase 1)"),
             contents: bytemuck::bytes_of(&uniforms_data),
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST, // COPY_DST only if we update it later, else just UNIFORM
         });
 
         let bind_group = self.device.create_bind_group(&BindGroupDescriptor {
-            label: Some("Warp/Blend Bind Group"),
+            label: Some("Warp/Blend Bind Group (Phase 1)"),
             layout: &self.warp_blend_bind_group_layout,
             entries: &[
-                BindGroupEntry { binding: 0, resource: BindingResource::TextureView(frame_a_view) },
-                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(frame_b_view) },
-                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(flow_texture_view) },
-                BindGroupEntry { binding: 3, resource: BindingResource::TextureView(output_texture_view) },
-                BindGroupEntry { binding: 4, resource: BindingResource::Sampler(sampler) },
-                BindGroupEntry { binding: 5, resource: uniform_buffer.as_entire_binding() },
+                BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
+                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(frame_a_view) },
+                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(frame_b_view) },
+                BindGroupEntry { binding: 3, resource: BindingResource::TextureView(flow_texture_view) },
+                BindGroupEntry { binding: 4, resource: BindingResource::TextureView(output_texture_view) },
+                BindGroupEntry { binding: 5, resource: BindingResource::Sampler(image_sampler) },
+                BindGroupEntry { binding: 6, resource: BindingResource::Sampler(flow_sampler) },
             ],
         });
 
         let mut encoder = self.device.create_command_encoder(&CommandEncoderDescriptor {
-            label: Some("Interpolate Command Encoder"),
+            label: Some("Interpolate Command Encoder (Phase 1)"),
         });
         {
             let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
-                label: Some("Warp/Blend Compute Pass"),
+                label: Some("Warp/Blend Compute Pass (Phase 1)"),
                 timestamp_writes: None,
             });
             compute_pass.set_pipeline(&self.warp_blend_pipeline);
             compute_pass.set_bind_group(0, &bind_group, &[]);
             
-            let workgroup_size_x = 16; 
+            let workgroup_size_x = 16;
             let workgroup_size_y = 16;
             let dispatch_x = (width + workgroup_size_x - 1) / workgroup_size_x;
             let dispatch_y = (height + workgroup_size_y - 1) / workgroup_size_y;
@@ -223,27 +220,128 @@ impl WgpuFrameInterpolator {
         queue.submit(Some(encoder.finish()));
         Ok(())
     }
-
-    // Future methods for optical flow:
-    // pub fn compute_optical_flow(&self, /* ... params ... */) -> Result<Texture> { /* ... */ }
 }
 
-// Helper function to create a dummy flow texture (e.g., zero flow) for testing
-pub fn create_dummy_flow_texture(device: &Device, width: u32, height: u32) -> (Texture, TextureView) {
-    let texture_size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
-    let flow_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("Dummy Flow Texture"),
+// Helper to create a texture with specific data (RGBA8 for test images)
+pub fn create_texture_with_data(
+    device: &Device,
+    queue: &Queue,
+    width: u32,
+    height: u32,
+    data: &[u8],
+    label: Option<&str>,
+    format: TextureFormat,
+    usage: TextureUsages,
+) -> Texture {
+    assert_eq!(data.len() as u32, width * height * format.block_copy_size(None).unwrap());
+    let texture_size = Extent3d { width, height, depth_or_array_layers: 1 };
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label,
         size: texture_size,
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: TextureFormat::Rg32Float, // For (dx, dy)
-        usage: TextureUsages::STORAGE_BINDING | TextureUsages::COPY_DST, // Allow writing dummy data
+        format,
+        usage: usage | TextureUsages::COPY_DST,
         view_formats: &[],
     });
-    // Optionally, write zero data to it or some pattern
-    // For zero data, it might be initialized to zero by default, or use queue.write_texture
+    queue.write_texture(
+        ImageCopyTexture { texture: &texture, mip_level: 0, origin: Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+        data,
+        ImageDataLayout { offset: 0, bytes_per_row: Some(width * format.block_copy_size(None).unwrap()), rows_per_image: Some(height) },
+        texture_size,
+    );
+    texture
+}
 
-    let flow_texture_view = flow_texture.create_view(&wgpu::TextureViewDescriptor::default());
-    (flow_texture, flow_texture_view)
+// Helper to create a flow texture (RG32Float for dx, dy)
+// For testing, this can create zero flow or a constant flow.
+pub fn create_flow_texture_with_data(
+    device: &Device,
+    queue: &Queue,
+    width: u32,
+    height: u32,
+    flow_data: &[(f32, f32)], // Array of (dx, dy) pairs, one per pixel
+    label: Option<&str>,
+) -> Texture {
+    assert_eq!(flow_data.len() as u32, width * height);
+    let byte_data: Vec<u8> = flow_data.iter().flat_map(|(dx, dy)| [dx.to_ne_bytes(), dy.to_ne_bytes()].concat()).collect();
+    create_texture_with_data(device, queue, width, height, &byte_data, label, TextureFormat::Rg32Float, TextureUsages::TEXTURE_BINDING)
+}
+
+// Helper to create a generic output texture (e.g. Rgba8Unorm for display, Rg32Float for flow)
+pub fn create_output_texture(
+    device: &Device, 
+    width: u32, 
+    height: u32, 
+    format: TextureFormat, 
+    label: Option<&str>
+) -> Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label,
+        size: Extent3d { width, height, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: TextureUsages::STORAGE_BINDING | TextureUsages::COPY_SRC | TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    })
+}
+
+// Helper for reading texture data back to CPU via a buffer
+// This is async due to buffer mapping.
+// For tests, it's often called with pollster::block_on.
+pub async fn read_texture_to_cpu(
+    device: &Device,
+    queue: &Queue,
+    texture: &Texture,
+    width: u32,
+    height: u32,
+    bytes_per_pixel: u32,
+) -> Result<Vec<u8>> {
+    let buffer_size = (width * height * bytes_per_pixel) as wgpu::BufferAddress;
+    let buffer_desc = wgpu::BufferDescriptor {
+        label: Some("Texture Readback Buffer"),
+        size: buffer_size,
+        usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    };
+    let readback_buffer = device.create_buffer(&buffer_desc);
+
+    let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
+        label: Some("Texture Readback Encoder"),
+    });
+    encoder.copy_texture_to_buffer(
+        ImageCopyTexture {
+            texture,
+            mip_level: 0,
+            origin: Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::ImageCopyBuffer {
+            buffer: &readback_buffer,
+            layout: ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(width * bytes_per_pixel),
+                rows_per_image: Some(height),
+            },
+        },
+        Extent3d { width, height, depth_or_array_layers: 1 },
+    );
+    queue.submit(Some(encoder.finish()));
+
+    let buffer_slice = readback_buffer.slice(..);
+    let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
+    buffer_slice.map_async(wgpu::MapMode::Read, move |v| sender.send(v).unwrap());
+    
+    device.poll(wgpu::Maintain::Wait); // Important to wait for GPU to finish processing, including the map_async callback
+
+    if let Some(Ok(())) = receiver.receive().await {
+        let data = buffer_slice.get_mapped_range().to_vec();
+        readback_buffer.unmap();
+        Ok(data)
+    } else {
+        Err(anyhow::anyhow!("Failed to map texture readback buffer or mapping failed."))
+    }
 } 
