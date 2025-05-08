@@ -16,7 +16,7 @@ use wgpu::BufferUsages;
 
 pub mod benchmark;
 pub mod capture;
-pub mod dlss_manager;
+// pub mod dlss_manager;
 pub mod gpu;
 pub mod renderer;
 pub mod upscale;
@@ -26,7 +26,7 @@ use gpu::detector::{GpuInfo, GpuVendor};
 use upscale::{UpscaleAlgorithm, WgpuUpscaler};
 
 // Import DlssUpscaler from the correct module
-use crate::upscale::dlss::DlssUpscaler as InnerDlssUpscaler;
+// use crate::upscale::dlss::DlssUpscaler as InnerDlssUpscaler;
 
 /// Public API for initializing the core library (placeholder)
 pub fn initialize() {
@@ -777,7 +777,7 @@ fn nu_scaler_core(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<PyAdvancedWgpuUpscaler>()?;
 
     // Register DLSS upscaler class so it is visible to Python
-    m.add_class::<PyDlssUpscaler>()?;
+    // m.add_class::<PyDlssUpscaler>()?;
 
     // Add memory-managed upscaler factory function
     m.add_function(wrap_pyfunction!(create_advanced_upscaler, m)?)?;
