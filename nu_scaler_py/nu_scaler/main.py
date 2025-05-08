@@ -307,7 +307,6 @@ class LiveFeedScreen(QWidget):
         self.input_label.setAlignment(Qt.AlignCenter)
         self.input_label.setStyleSheet("font-size: 18px; color: #ccc;")
         self.preview_label = AspectRatioPreview()
-        self.preview_label.set_parent_window(self.window())
         left_layout.addWidget(self.input_label)
         left_layout.addWidget(self.preview_label, 1)
         # Controls
