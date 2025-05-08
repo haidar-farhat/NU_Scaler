@@ -77,38 +77,42 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         let width = frame.width() as usize;
         let height = frame.height() as usize;
 
-        // --- WORKAROUND REMOVED: Save to temp file and read back ---
-        println!("[CaptureHandler] Frame arrived ({}x{}). Skipping temp file write.", width, height);
-        // The following lines are commented out to disable file writing:
-        /*
-        let temp_dir = std::env::temp_dir();
-        let unique_id = uuid::Uuid::new_v4(); // Requires uuid crate dependency
-        let mut temp_path = temp_dir;
-        temp_path.push(format!("nu_scaler_frame_{}.bmp", unique_id));
+        // Access the frame buffer directly
+        match frame.buffer() {
+            Ok(buffer) => {
+                // NOTE: Assuming the buffer format is BGRA, which is expected by the
+                // conversion logic in `PyScreenCapture::get_frame` in lib.rs for window captures.
+                // Clone the data to ensure ownership for sending across the channel.
+                let frame_data_to_send = buffer.as_slice().to_vec();
 
-        frame.save_as_image(&temp_path, windows_capture::frame::ImageFormat::Bmp)
-             .map_err(|e| Box::new(e) as Self::Error)?;
-        let buffer = fs::read(&temp_path).map_err(|e| Box::new(e) as Self::Error)?;
-        let _ = fs::remove_file(&temp_path); // Ignore remove error
-        
-        // Send the frame data (read from BMP file)
-        match self.frame_sender.lock() {
-            Ok(sender) => {
-                if sender.send(Some((buffer, width, height))).is_err() {
-                    eprintln!("[CaptureHandler] Receiver disconnected. Stopping capture implicitly.");
+                // Send the raw frame data (BGRA expected)
+                match self.frame_sender.lock() {
+                    Ok(sender) => {
+                        if sender.send(Some((frame_data_to_send, width, height))).is_err() {
+                            // Receiver disconnected, likely means capture was stopped.
+                            // It's okay to just log this, as the closing mechanism handles shutdown.
+                            eprintln!("[CaptureHandler] Receiver disconnected during frame send.");
+                            // Optionally return an error or signal stop more formally if needed
+                            // return Err(Box::new(std::io::Error::new(ErrorKind::BrokenPipe, "Receiver disconnected")));
+                        }
+                    },
+                    Err(poison_error) => {
+                        // Mutex poisoning is serious, indicates a panic while locked.
+                        let msg = format!("Mutex poisoned during frame send: {}", poison_error);
+                        eprintln!("[CaptureHandler] FATAL: {}", msg);
+                        // Return an error to potentially stop the capture thread cleanly.
+                        return Err(Box::new(std::io::Error::new(ErrorKind::Other, msg)));
+                    }
                 }
-            },
-            Err(poison_error) => {
-                let msg = format!("Mutex poisoned: {}", poison_error);
-                eprintln!("[CaptureHandler] {}", msg);
-                return Err(Box::new(std::io::Error::new(ErrorKind::Other, msg)) as Self::Error);
+            }
+            Err(e) => {
+                // Failed to get buffer from the frame. Log and return error.
+                eprintln!("[CaptureHandler] Failed to get frame buffer: {:?}", e);
+                // Convert the windows_capture error into the required boxed error type.
+                // Assuming the error type implements std::error::Error + Send + Sync.
+                return Err(Box::new(e));
             }
         }
-        */
-        // --- End WORKAROUND REMOVED ---
-
-        // Since the file write is skipped, we don't have a buffer to send.
-        // We will simply not send anything for this frame.
 
         Ok(())
     }
