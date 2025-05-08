@@ -1112,10 +1112,46 @@ mod tests {
         let output_texture = device.create_texture(&output_texture_desc);
         let output_texture_view = output_texture.create_view(&TextureViewDescriptor::default());
 
-        // TODO: Fix interpolate call signature
-        // interpolator.interpolate(...);
+        // Create samplers needed for interpolate
+        // Using the samplers created in WgpuFrameInterpolator::new for consistency
+        let image_sampler = interpolator.shared_sampler.as_ref().expect("Missing shared sampler");
+        let flow_sampler_ref = &interpolator.flow_sampler; // flow_sampler is not Option
         
-        // ... (Read back and verify) ...
+        // Call interpolate with correct arguments
+        interpolator.interpolate(
+            &queue, // Pass queue
+            &prev_frame.create_view(&TextureViewDescriptor::default()), // Create views on the fly
+            &next_frame.create_view(&TextureViewDescriptor::default()),
+            &motion_vectors.create_view(&TextureViewDescriptor::default()),
+            &output_texture_view,
+            image_sampler, // Pass image sampler
+            flow_sampler_ref, // Pass flow sampler
+            width,
+            height,
+            0.0, // time_t (blend_factor)
+        ).expect("Interpolate call failed (blend 0.0)");
+        
+        let comparable_output = ComparableTexture::from_texture(&device, &queue, &output_texture, "Output Zero Flow");
+        let comparable_prev = ComparableTexture::from_texture(&device, &queue, &prev_frame, "Prev Frame Zero Flow");
+        assert!(comparable_output.is_similar(&comparable_prev, 0.01), "Output with zero flow (blend 0.0) should match prev_frame");
+
+        // Test with blend_factor = 1.0
+        interpolator.interpolate(
+            &queue, // Pass queue
+            &prev_frame.create_view(&TextureViewDescriptor::default()),
+            &next_frame.create_view(&TextureViewDescriptor::default()),
+            &motion_vectors.create_view(&TextureViewDescriptor::default()),
+            &output_texture_view,
+            image_sampler, // Pass image sampler
+            flow_sampler_ref, // Pass flow sampler
+            width,
+            height,
+            1.0, // time_t (blend_factor)
+        ).expect("Interpolate call failed (blend 1.0)");
+
+        let comparable_output_blend1 = ComparableTexture::from_texture(&device, &queue, &output_texture, "Output Zero Flow Blend 1");
+        let comparable_next = ComparableTexture::from_texture(&device, &queue, &next_frame, "Next Frame Zero Flow Blend 1");
+        assert!(comparable_output_blend1.is_similar(&comparable_next, 0.01), "Output with zero flow (blend 1.0) should match next_frame");
     }
 
     #[test]
@@ -1136,8 +1172,8 @@ mod tests {
         };
         let input_texture = create_texture_with_data(&device, &queue, &input_texture_desc, TextureDataOrder::LayerMajor, &dummy_image_data);
 
-        // TODO: Fix build_pyramid call signature
-        // interpolator.build_pyramid(&queue, &input_texture, num_levels, true).expect("Build pyramid A failed");
+        // Correct build_pyramid call signature
+        interpolator.build_pyramid(&queue, &input_texture, num_levels, true).expect("Build pyramid A failed");
 
         assert_eq!(interpolator.pyramid_a_textures.len(), num_levels as usize);
         assert_eq!(interpolator.pyramid_a_views.len(), num_levels as usize);
@@ -1184,9 +1220,11 @@ mod tests {
             },
             TextureDataOrder::LayerMajor, &black_image_data,
         );
-        // TODO: Fix build_pyramid call signature
-        // interpolator.build_pyramid(&queue, &prev_frame_texture, num_pyramid_levels as u32, true).expect("Build pyramid A failed");
-        // interpolator.build_pyramid(&queue, &next_frame_texture, num_pyramid_levels as u32, false).expect("Build pyramid B failed");
+        
+        // Correct build_pyramid calls
+        interpolator.build_pyramid(&queue, &prev_frame_texture, num_pyramid_levels as u32, true).expect("Build pyramid A failed");
+        interpolator.build_pyramid(&queue, &next_frame_texture, num_pyramid_levels as u32, false).expect("Build pyramid B failed");
+        
         let coarsest_level_idx = num_pyramid_levels - 1;
         interpolator.compute_coarse_flow(coarsest_level_idx, 0, 0.02f32.powi(2));
         let level_width = width / (2u32.pow(coarsest_level_idx as u32));
@@ -1212,9 +1250,6 @@ mod tests {
             view_formats: &[], // Added
         };
         // ... (create textures) ...
-        // TODO: Fix build_pyramid call signature
-        // interpolator.build_pyramid(&queue, &frame_a_texture, num_pyramid_levels as u32, true).expect("Build pyramid A failed");
-        // interpolator.build_pyramid(&queue, &frame_b_texture, num_pyramid_levels as u32, false).expect("Build pyramid B failed");
         // ... (compute coarse flow) ...
         // ... (call refine_flow_hierarchy) ...
         // ... (read back and verify flow) ...
