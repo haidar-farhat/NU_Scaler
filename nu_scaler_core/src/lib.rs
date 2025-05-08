@@ -20,8 +20,8 @@ pub mod capture;
 pub mod gpu;
 pub mod renderer;
 pub mod upscale;
-pub mod frame_interpolator;
-pub mod wgpu_interpolator;
+// pub mod frame_interpolator; // CPU based, will be superseded
+pub mod wgpu_interpolator; // Added new GPU based module
 
 use capture::realtime::{CaptureTarget, ScreenCapture};
 use gpu::detector::{GpuInfo, GpuVendor};
@@ -802,12 +802,6 @@ fn nu_scaler_core(_py: Python, m: &PyModule) -> PyResult<()> {
                 "FSR3 support is not enabled in this build.",
             ))
         }
-    }
-
-    #[pyfn(m)]
-    #[pyo3(name = "create_dlss_upscaler")]
-    fn create_dlss_upscaler_pyfn(quality: &str) -> PyResult<PyDlssUpscaler> {
-        PyDlssUpscaler::new(quality)
     }
 
     Ok(())
