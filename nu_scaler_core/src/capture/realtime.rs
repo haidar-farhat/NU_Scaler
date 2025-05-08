@@ -341,15 +341,9 @@ impl RealTimeCapture for ScreenCapture {
                                 // Update dimensions based on received frame
                                 self.width = width;
                                 self.height = height;
-                                // Convert BGRA from windows-capture to RGBA
-                                let mut rgba = Vec::with_capacity(bgra_buffer.len());
-                                for chunk in bgra_buffer.chunks_exact(4) {
-                                    rgba.push(chunk[2]);
-                                    rgba.push(chunk[1]);
-                                    rgba.push(chunk[0]);
-                                    rgba.push(chunk[3]);
-                                }
-                                Some((rgba, width, height))
+                                // The conversion is handled later in lib.rs based on target type.
+                                // Return the raw BGRA buffer received from the channel.
+                                Some((bgra_buffer, width, height))
                             }
                             Ok(None) => {
                                 self.debug_print("Received stop signal from WGC handler.");
