@@ -586,7 +586,9 @@ class LiveFeedScreen(QWidget):
                     pid = int(pid_str)
                     
                     # Ideal scenario: Core supports capturing by PID directly
-                    if hasattr(nu_scaler_core, "PyCaptureTarget") and "WindowByPid" in nu_scaler_core.PyCaptureTarget.__members__ and hasattr(nu_scaler_core, "PyWindowByPid"):
+                    # Check if PyCaptureTarget exists and has a WindowByPid attribute/member
+                    # Also check if the corresponding PyWindowByPid struct/class exists.
+                    if hasattr(nu_scaler_core, "PyCaptureTarget") and hasattr(nu_scaler_core.PyCaptureTarget, "WindowByPid") and hasattr(nu_scaler_core, "PyWindowByPid"):
                         capture_target_type = nu_scaler_core.PyCaptureTarget.WindowByPid
                         capture_target_param = nu_scaler_core.PyWindowByPid(pid=pid)
                         print(f"[GUI] Using WindowByPid target (from core): {pid}")
