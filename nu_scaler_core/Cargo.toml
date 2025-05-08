@@ -13,7 +13,8 @@ anyhow = "1.0"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 log = "0.4"
 pollster = "0.3"
-pyo3 = { version = "0.21", features = ["extension-module", "numpy"] }
+# pyo3 must be optional if used with dep: in features
+pyo3 = { version = "0.21", features = ["extension-module", "numpy"], optional = true }
 wgpu = "0.20.0"
 raw-window-handle = "0.6"
 bytemuck = { version = "1.12", features = ["derive"] }
@@ -65,7 +66,8 @@ env_logger = "0.11"
 
 [features]
 default = ["python"]
-python = ["dep:pyo3", "dep:serde", "dep:serde_json"]
+# When python feature is enabled, enable pyo3 with its extension-module and numpy features
+python = ["pyo3/extension-module", "pyo3/numpy", "dep:serde", "dep:serde_json"]
 fsr3 = []
 
 # dlss = ["dep:dlss-sys"]
