@@ -2,6 +2,7 @@ import sys
 import os
 import numpy as np
 from PIL import Image
+import time # Import time module
 
 # Add the target/wheels directory to sys.path to find the wheel if not installed
 # Adjust the path based on your actual project structure and where the wheel is built
@@ -19,30 +20,29 @@ except ImportError as e:
     print(f"Looking in: {sys.path}")
     exit(1)
 
-def run_test():
-    print("Generating test images...")
-    # Generate two simple patterns
-    width, height = 64, 64
+def generate_test_images(width, height):
+    """Generates simple red and blue square test images."""
     img_a = np.zeros((height, width, 4), dtype=np.uint8)
-    img_a[16:48, 16:48] = [255, 0, 0, 255]      # red square
+    center_h, center_w = height // 2, width // 2
+    half_box_h, half_box_w = height // 4, width // 4
+    img_a[center_h - half_box_h : center_h + half_box_h, 
+          center_w - half_box_w : center_w + half_box_w] = [255, 0, 0, 255] # Red
+    
     img_b = np.zeros_like(img_a)
-    img_b[16:48, 16:48] = [0, 0, 255, 255]      # blue square
+    img_b[center_h - half_box_h : center_h + half_box_h, 
+          center_w - half_box_w : center_w + half_box_w] = [0, 0, 255, 255] # Blue
+    return img_a, img_b
 
-    print("Initializing WgpuFrameInterpolator...")
+def run_benchmark(interp, width, height, time_t=0.5):
+    """Generates images, runs interpolation, and measures time."""
+    print(f"\n--- Running Benchmark: {width}x{height} ---")
+    print("Generating test images...")
+    img_a, img_b = generate_test_images(width, height)
+    
+    print(f"Calling interpolate_py (time_t={time_t}) with bytes...")
+    
+    start_time = time.time()
     try:
-        # TODO: Update instantiation if WgpuFrameInterpolator::new needs args (like device/queue)
-        # For now, assuming a default constructor exists for basic testing.
-        # You might need to adapt this based on your lib.rs bindings.
-        interp = WgpuFrameInterpolator()
-    except Exception as e:
-        print(f"Error initializing WgpuFrameInterpolator: {e}")
-        print("Check if the constructor in Rust needs specific arguments.")
-        exit(1)
-
-    print(f"Calling interpolate_py (time_t=0.5) with bytes and dimensions {width}x{height}...")
-    time_t = 0.5 # This will be passed if the signature supports it, otherwise ignored by current Rust placeholder
-    try:
-        # Pass raw bytes plus dimensions. Time_t is keyword-only.
         out_bytes = interp.interpolate_py(
             img_a.tobytes(), 
             img_b.tobytes(), 
@@ -50,27 +50,67 @@ def run_test():
             height, 
             time_t=time_t
         )
+        # Ensure GPU commands are flushed and potentially waited for.
+        # Note: The current Rust implementation includes blocking readback, 
+        # so this time measurement includes GPU execution + readback.
     except Exception as e:
-        print(f"Error calling interpolate_py: {e}")
-        print("Check the method signature and expected arguments in your Python bindings.")
-        exit(1)
+        print(f"Error during interpolation benchmark: {e}")
+        return None, None # Indicate failure
+    end_time = time.time()
+    duration_ms = (end_time - start_time) * 1000
+    print(f"--> interpolate_py took: {duration_ms:.2f} ms")
 
     print("Rebuilding NumPy array from output bytes...")
     try:
-        # Rebuild array from bytes
         out_arr = np.frombuffer(out_bytes, dtype=np.uint8).reshape((height, width, 4))
     except Exception as e:
         print(f"Error rebuilding NumPy array from bytes: {e}")
-        print(f"Output bytes length: {len(out_bytes) if isinstance(out_bytes, bytes) else 'Not bytes'}")
+        return None, duration_ms # Return time but indicate array failure
+        
+    return out_arr, duration_ms
+
+def run_test():
+    print("Initializing WgpuFrameInterpolator...")
+    try:
+        interp = WgpuFrameInterpolator()
+    except Exception as e:
+        print(f"Error initializing WgpuFrameInterpolator: {e}")
         exit(1)
 
-    print("Saving output image interp_half.png...")
-    try:
-        Image.fromarray(out_arr, 'RGBA').save('interp_half.png')
-        print("--> Successfully wrote interp_half.png")
-    except Exception as e:
-        print(f"Error saving output image: {e}")
-        exit(1)
+    results = {}
+
+    # 64x64 Benchmark
+    out_64, time_64 = run_benchmark(interp, 64, 64)
+    if out_64 is not None:
+        results["64x64"] = time_64
+        # Save the 64x64 output for verification
+        print("Saving 64x64 output image interp_64.png...")
+        try:
+            Image.fromarray(out_64, 'RGBA').save('interp_64.png')
+            print("--> Successfully wrote interp_64.png")
+        except Exception as e:
+            print(f"Error saving 64x64 output image: {e}")
+    
+    # 720p Benchmark (1280x720)
+    _out_720, time_720 = run_benchmark(interp, 1280, 720)
+    if time_720 is not None:
+       results["1280x720"] = time_720
+       # Optional: Save 720p image if needed
+       # print("Saving 720p output image interp_720.png...")
+       # Image.fromarray(_out_720, 'RGBA').save('interp_720.png')
+
+    # 1080p Benchmark (1920x1080)
+    _out_1080, time_1080 = run_benchmark(interp, 1920, 1080)
+    if time_1080 is not None:
+       results["1920x1080"] = time_1080
+       # Optional: Save 1080p image if needed
+       # print("Saving 1080p output image interp_1080.png...")
+       # Image.fromarray(_out_1080, 'RGBA').save('interp_1080.png')
+
+    print("\n--- Benchmark Summary ---")
+    for res, timing in results.items():
+        print(f"{res}: {timing:.2f} ms")
+    print("-------------------------")
 
 if __name__ == "__main__":
     # Ensure necessary libraries are installed
