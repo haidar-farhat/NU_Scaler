@@ -25,6 +25,8 @@ use futures::executor::block_on; // Import block_on
 use wgpu::util::TextureDataOrder; // Added import
 use pyo3::prelude::*; // Add import
 use pollster; // Need this for blocking on async #[new]
+use pyo3::types::{PyBytes, PyByteArray};
+use pyo3::wrap_pyfunction;
 
 // Uniform structure for the warp/blend shader - MATCHING ORIGINAL SPEC (48 Bytes)
 #[repr(C)]
@@ -159,7 +161,24 @@ impl WgpuFrameInterpolator {
         }
     }
 
-    // We will add Python methods here later (like interpolate_py, etc.)
+    // Placeholder interpolate method for Python
+    // It currently ignores time_t and returns frame_a directly.
+    // Accepts PyBytes, returns PyBytes.
+    // TODO: Implement actual interpolation logic with proper texture handling.
+    #[pyo3(signature = (frame_a, frame_b, *, time_t=0.5))]
+    fn interpolate<'py>(
+        &self, 
+        py: Python<'py>,
+        frame_a: &PyBytes, 
+        _frame_b: &PyBytes, // Ignored for now
+        time_t: f32 // Ignored for now
+    ) -> PyResult<&'py PyBytes> 
+    {
+        println!("[WgpuFrameInterpolator] Python interpolate called (Placeholder - Returns frame_a)");
+        println!("  time_t: {}", time_t);
+        // Since the real pipeline is likely broken/disabled, just return frame_a
+        Ok(frame_a)
+    }
 }
 
 impl WgpuFrameInterpolator {
