@@ -39,32 +39,37 @@ def run_test():
         print("Check if the constructor in Rust needs specific arguments.")
         exit(1)
 
-    print("Calling interpolate_py (time_t=0.5)...")
-    time_t = 0.5
+    print(f"Calling interpolate_py (time_t=0.5) with bytes and dimensions {width}x{height}...")
+    time_t = 0.5 # This will be passed if the signature supports it, otherwise ignored by current Rust placeholder
     try:
-        # TODO: Verify the expected input/output types for the Python binding
-        # Assuming it takes numpy arrays [height, width, 4] RGBA uint8
-        # and returns a similar numpy array.
-        out = interp.interpolate_py(img_a, img_b, time_t=time_t)
+        # Pass raw bytes plus dimensions. Time_t is keyword-only.
+        out_bytes = interp.interpolate_py(
+            img_a.tobytes(), 
+            img_b.tobytes(), 
+            width, 
+            height, 
+            time_t=time_t
+        )
     except Exception as e:
         print(f"Error calling interpolate_py: {e}")
         print("Check the method signature and expected arguments in your Python bindings.")
         exit(1)
 
+    print("Rebuilding NumPy array from output bytes...")
+    try:
+        # Rebuild array from bytes
+        out_arr = np.frombuffer(out_bytes, dtype=np.uint8).reshape((height, width, 4))
+    except Exception as e:
+        print(f"Error rebuilding NumPy array from bytes: {e}")
+        print(f"Output bytes length: {len(out_bytes) if isinstance(out_bytes, bytes) else 'Not bytes'}")
+        exit(1)
+
     print("Saving output image interp_half.png...")
     try:
-        # Ensure output is a valid numpy array for Image.fromarray
-        if not isinstance(out, np.ndarray) or out.shape != (height, width, 4) or out.dtype != np.uint8:
-            print(f"Warning: Output from interpolate_py is not the expected numpy array format.")
-            print(f"Got type: {type(out)}, shape: {getattr(out, 'shape', 'N/A')}, dtype: {getattr(out, 'dtype', 'N/A')}")
-            # Attempt conversion if possible, otherwise save raw representation?
-            # For now, we'll just try to save it.
-        
-        Image.fromarray(out, 'RGBA').save('interp_half.png')
+        Image.fromarray(out_arr, 'RGBA').save('interp_half.png')
         print("--> Successfully wrote interp_half.png")
     except Exception as e:
         print(f"Error saving output image: {e}")
-        print("Check if the output 'out' has the correct format/type.")
         exit(1)
 
 if __name__ == "__main__":
