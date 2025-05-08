@@ -126,7 +126,7 @@ impl WgpuFrameInterpolator {
     pub fn new(device: Arc<Device>, queue: Arc<Queue>) -> Result<Self> {
         let warp_blend_shader_module = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("Warp/Blend Shader Module (Phase 1)"),
-            source: ShaderSource::Wgsl(include_str!("../shaders/warp_blend.wgsl").into()), // Corrected path
+            source: ShaderSource::Wgsl(include_str!("shaders/warp_blend.wgsl").into()), // Path: src/shaders/
         });
 
         let warp_blend_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -198,9 +198,9 @@ impl WgpuFrameInterpolator {
         });
 
         // --- Phase 2.1 Setup: Image Pyramid --- 
-        let blur_h_shader_module = device.create_shader_module(include_wgsl!("../shaders/gaussian_blur_h.wgsl"));
-        let blur_v_shader_module = device.create_shader_module(include_wgsl!("../shaders/gaussian_blur_v.wgsl"));
-        let downsample_shader_module = device.create_shader_module(include_wgsl!("../shaders/downsample.wgsl"));
+        let blur_h_shader_module = device.create_shader_module(include_wgsl!("shaders/gaussian_blur_h.wgsl")); // Path: src/shaders/
+        let blur_v_shader_module = device.create_shader_module(include_wgsl!("shaders/gaussian_blur_v.wgsl")); // Path: src/shaders/
+        let downsample_shader_module = device.create_shader_module(include_wgsl!("shaders/downsample.wgsl")); // Path: src/shaders/
 
         // Shared Bind Group Layout for blur and downsample passes
         let pyramid_pass_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
