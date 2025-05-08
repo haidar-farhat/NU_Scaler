@@ -48,7 +48,6 @@ windows = { version = "0.56", features = [
     "Win32_Graphics_Dxgi_Common",
     "Win32_System_WinRT",
     "Win32_System_WinRT_Graphics_Capture",
-    "core", # Added for windows::core::Interface used in gpu/memory.rs
 ] }
 
 
