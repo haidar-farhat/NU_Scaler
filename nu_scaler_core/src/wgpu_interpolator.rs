@@ -66,14 +66,14 @@ pub struct WgpuFrameInterpolator {
     shared_sampler: Sampler,
     blur_temp_texture: Option<Texture>,
     blur_temp_texture_view: Option<TextureView>,
-    pyramid_a_textures: Vec<Texture>,
-    pyramid_a_views: Vec<TextureView>,
-    pyramid_b_textures: Vec<Texture>,
-    pyramid_b_views: Vec<TextureView>,
-    downsample_a_textures: Vec<Texture>,
-    downsample_a_views: Vec<TextureView>,
-    downsample_b_textures: Vec<Texture>,
-    downsample_b_views: Vec<TextureView>,
+    pyramid_a_textures: Vec<Option<Texture>>,
+    pyramid_a_views: Vec<Option<TextureView>>,
+    pyramid_b_textures: Vec<Option<Texture>>,
+    pyramid_b_views: Vec<Option<TextureView>>,
+    downsample_a_textures: Vec<Option<Texture>>,
+    downsample_a_views: Vec<Option<TextureView>>,
+    downsample_b_textures: Vec<Option<Texture>>,
+    downsample_b_views: Vec<Option<TextureView>>,
 }
 
 impl WgpuFrameInterpolator {
@@ -345,24 +345,24 @@ impl WgpuFrameInterpolator {
         Ok(())
     }
 
-    // Helper to create or resize a texture
+    // Helper to create or resize a texture stored in an Option
     fn ensure_texture(
         device: &Device, 
-        current_texture: &mut Option<Texture>,
+        current_texture_opt: &mut Option<Texture>,
         width: u32,
         height: u32,
         format: TextureFormat,
         usage: TextureUsages,
         label: &str
     ) -> bool { // Returns true if texture was created/resized
-        let needs_recreation = match current_texture {
+        let needs_recreation = match current_texture_opt {
             Some(tex) => tex.width() != width || tex.height() != height || tex.format() != format || !tex.usage().contains(usage),
             None => true,
         };
 
         if needs_recreation {
             println!("Recreating texture: {}", label);
-            *current_texture = Some(device.create_texture(&TextureDescriptor {
+            *current_texture_opt = Some(device.create_texture(&TextureDescriptor {
                 label: Some(label),
                 size: Extent3d { width, height, depth_or_array_layers: 1 },
                 mip_level_count: 1,
@@ -389,22 +389,24 @@ impl WgpuFrameInterpolator {
         let (base_width, base_height) = (frame_texture.width(), frame_texture.height());
         let format = frame_texture.format(); // Should be Rgba32Float
         let usage = TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING | TextureUsages::COPY_DST | TextureUsages::COPY_SRC;
+        let view_desc = TextureViewDescriptor::default();
 
         let label_prefix = if is_frame_a { "PyramidA" } else { "PyramidB" };
 
+        // Select the correct vectors
         let pyramid_textures = if is_frame_a { &mut self.pyramid_a_textures } else { &mut self.pyramid_b_textures };
         let pyramid_views = if is_frame_a { &mut self.pyramid_a_views } else { &mut self.pyramid_b_views };
         let downsample_textures = if is_frame_a { &mut self.downsample_a_textures } else { &mut self.downsample_b_textures };
         let downsample_views = if is_frame_a { &mut self.downsample_a_views } else { &mut self.downsample_b_views };
 
-        // Resize texture vectors if levels changed or they are empty
-        if pyramid_textures.len() != levels as usize {
+        // Resize vectors if levels changed or they are empty
+        let num_levels = levels as usize;
+        if pyramid_textures.len() != num_levels {
             println!("Resizing pyramid texture storage for {} levels", levels);
-            pyramid_textures.resize_with(levels as usize, || self.device.create_texture(&TextureDescriptor { /* dummy */ label: Some("dummy"), size: Extent3d{width:1,height:1,depth_or_array_layers:1}, mip_level_count:1, sample_count:1, dimension: TextureDimension::D2, format, usage, view_formats:&[]}) );
-            pyramid_views.resize_with(levels as usize, || self.device.create_texture_view(&TextureDescriptor{/*dummy*/ label: Some("dummy"), size: Extent3d{width:1,height:1,depth_or_array_layers:1}, mip_level_count:1, sample_count:1, dimension: TextureDimension::D2, format, usage, view_formats:&[]}, &Default::default())); // Placeholder
-            downsample_textures.resize_with(levels as usize, || self.device.create_texture(&TextureDescriptor{/*dummy*/ label: Some("dummy"), size: Extent3d{width:1,height:1,depth_or_array_layers:1}, mip_level_count:1, sample_count:1, dimension: TextureDimension::D2, format, usage, view_formats:&[]}));
-            downsample_views.resize_with(levels as usize, || self.device.create_texture_view(&TextureDescriptor{/*dummy*/ label: Some("dummy"), size: Extent3d{width:1,height:1,depth_or_array_layers:1}, mip_level_count:1, sample_count:1, dimension: TextureDimension::D2, format, usage, view_formats:&[]}, &Default::default())); // Placeholder
-            // Force recreation of all textures below
+            pyramid_textures.resize_with(num_levels, || None);
+            pyramid_views.resize_with(num_levels, || None);
+            downsample_textures.resize_with(num_levels, || None);
+            downsample_views.resize_with(num_levels, || None);
         }
 
         let mut encoder = self.device.create_command_encoder(&CommandEncoderDescriptor {
@@ -414,7 +416,7 @@ impl WgpuFrameInterpolator {
         let mut current_width = base_width;
         let mut current_height = base_height;
         // Start with the original frame texture view
-        let mut last_input_view = frame_texture.create_view(&TextureViewDescriptor::default());
+        let mut last_input_view = frame_texture.create_view(&view_desc); 
         let blur_radius = 2; // For 5x5 kernel used in shaders
 
         for level in 0..levels {
@@ -422,27 +424,37 @@ impl WgpuFrameInterpolator {
             let next_width = (current_width + 1) / 2;
             let next_height = (current_height + 1) / 2;
             
+            if current_width == 0 || current_height == 0 || next_width == 0 || next_height == 0 {
+                 println!("{} Pyramid generation stopped at level {} due to zero dimension.", label_prefix, level);
+                 pyramid_textures.truncate(level_u);
+                 pyramid_views.truncate(level_u);
+                 downsample_textures.truncate(level_u);
+                 downsample_views.truncate(level_u);
+                 break;
+            }
+
             println!("Building {} Level {}: {}x{} -> {}x{}", label_prefix, level, current_width, current_height, next_width, next_height);
 
             // --- Ensure Textures Exist --- 
-            // Horizontal blur output buffer
-            Self::ensure_texture(&self.device, &mut self.blur_temp_texture, current_width, current_height, format, usage, &format!("{} Blur Temp Level {}", label_prefix, level));
-            let blur_temp_view = self.blur_temp_texture.as_ref().unwrap().create_view(&TextureViewDescriptor::default());
+            Self::ensure_texture(&self.device, &mut self.blur_temp_texture, current_width, current_height, format, usage, &format!("{} Blur Temp", label_prefix));
+            self.blur_temp_texture_view = Some(self.blur_temp_texture.as_ref().unwrap().create_view(&view_desc));
+            let blur_temp_view_ref = self.blur_temp_texture_view.as_ref().unwrap();
             
-            // Final blurred output for this level
             Self::ensure_texture(&self.device, &mut pyramid_textures[level_u], current_width, current_height, format, usage, &format!("{} Pyramid Level {}", label_prefix, level));
-            pyramid_views[level_u] = pyramid_textures[level_u].create_view(&TextureViewDescriptor::default());
+            pyramid_views[level_u] = Some(pyramid_textures[level_u].as_ref().unwrap().create_view(&view_desc));
+            let pyramid_view_ref = pyramid_views[level_u].as_ref().unwrap();
 
-            // Downsampled output (input for next level)
-            // Only create if not the last level, but create view reference anyway
-            let downsample_output_view = if level < levels - 1 {
+            // Downsampled output - only really needed if not the last level
+            let downsample_view_ref = if level < levels - 1 {
                  Self::ensure_texture(&self.device, &mut downsample_textures[level_u], next_width, next_height, format, usage, &format!("{} Downsample Level {}", label_prefix, level));
-                 downsample_views[level_u] = downsample_textures[level_u].create_view(&TextureViewDescriptor::default());
-                 &downsample_views[level_u]
+                 downsample_views[level_u] = Some(downsample_textures[level_u].as_ref().unwrap().create_view(&view_desc));
+                 downsample_views[level_u].as_ref().unwrap()
             } else {
-                 // Create a dummy view if needed, or handle differently. Let's use the last pyramid view as a placeholder.
-                 // This texture isn't actually used as output on the last level's downsample pass if we don't need it further.
-                 &pyramid_views[level_u] 
+                 // Use the last pyramid view as a dummy if no more levels, avoid creating unused texture.
+                 // However, the binding needs a view. Let's ensure the texture exists even if unused.
+                 Self::ensure_texture(&self.device, &mut downsample_textures[level_u], next_width.max(1), next_height.max(1), format, usage, &format!("{} Downsample Level {} (Last)", label_prefix, level));
+                 downsample_views[level_u] = Some(downsample_textures[level_u].as_ref().unwrap().create_view(&view_desc));
+                 downsample_views[level_u].as_ref().unwrap()
             };
             
             // --- Create Uniform Buffers & Bind Groups --- 
@@ -451,7 +463,7 @@ impl WgpuFrameInterpolator {
             let bind_group_h = self.device.create_bind_group(&BindGroupDescriptor { label: Some(&format!("{} Blur H BG L{}", label_prefix, level)), layout: &self.pyramid_pass_bind_group_layout, entries: &[
                 BindGroupEntry { binding: 0, resource: uniform_buffer_h.as_entire_binding() },
                 BindGroupEntry { binding: 1, resource: BindingResource::TextureView(&last_input_view) }, // Input
-                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(&blur_temp_view) }, // Output
+                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(blur_temp_view_ref) }, // Output
                 BindGroupEntry { binding: 3, resource: BindingResource::Sampler(&self.shared_sampler) },
             ]});
 
@@ -459,8 +471,8 @@ impl WgpuFrameInterpolator {
             let uniform_buffer_v = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(&format!("{} Blur V Uniforms L{}", label_prefix, level)), contents: bytemuck::bytes_of(&params_v), usage: BufferUsages::UNIFORM });
             let bind_group_v = self.device.create_bind_group(&BindGroupDescriptor { label: Some(&format!("{} Blur V BG L{}", label_prefix, level)), layout: &self.pyramid_pass_bind_group_layout, entries: &[
                 BindGroupEntry { binding: 0, resource: uniform_buffer_v.as_entire_binding() },
-                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(&blur_temp_view) }, // Input (from H pass)
-                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(&pyramid_views[level_u]) }, // Output (final for level)
+                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(blur_temp_view_ref) }, // Input (from H pass)
+                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(pyramid_view_ref) }, // Output (final for level)
                 BindGroupEntry { binding: 3, resource: BindingResource::Sampler(&self.shared_sampler) },
             ]});
 
@@ -468,8 +480,8 @@ impl WgpuFrameInterpolator {
             let uniform_buffer_ds = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(&format!("{} DS Uniforms L{}", label_prefix, level)), contents: bytemuck::bytes_of(&params_ds), usage: BufferUsages::UNIFORM });
             let bind_group_ds = self.device.create_bind_group(&BindGroupDescriptor { label: Some(&format!("{} DS BG L{}", label_prefix, level)), layout: &self.pyramid_pass_bind_group_layout, entries: &[
                 BindGroupEntry { binding: 0, resource: uniform_buffer_ds.as_entire_binding() },
-                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(&pyramid_views[level_u]) }, // Input (blurred)
-                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(downsample_output_view) }, // Output (for next level)
+                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(pyramid_view_ref) }, // Input (blurred)
+                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(downsample_view_ref) }, // Output (for next level)
                 BindGroupEntry { binding: 3, resource: BindingResource::Sampler(&self.shared_sampler) },
             ]});
 
@@ -481,46 +493,33 @@ impl WgpuFrameInterpolator {
                 });
                 let wg_size = 16;
                 
+                let dispatch_x_curr = (current_width + wg_size - 1) / wg_size;
+                let dispatch_y_curr = (current_height + wg_size - 1) / wg_size;
+                let dispatch_x_next = (next_width + wg_size - 1) / wg_size;
+                let dispatch_y_next = (next_height + wg_size - 1) / wg_size;
+                
                 // Horizontal Blur
-                let dispatch_x_h = (current_width + wg_size - 1) / wg_size;
-                let dispatch_y_h = (current_height + wg_size - 1) / wg_size;
                 compute_pass.set_pipeline(&self.blur_h_pipeline);
                 compute_pass.set_bind_group(0, &bind_group_h, &[]);
-                compute_pass.dispatch_workgroups(dispatch_x_h, dispatch_y_h, 1);
+                compute_pass.dispatch_workgroups(dispatch_x_curr, dispatch_y_curr, 1);
 
                 // Vertical Blur
-                let dispatch_x_v = (current_width + wg_size - 1) / wg_size;
-                let dispatch_y_v = (current_height + wg_size - 1) / wg_size;
                 compute_pass.set_pipeline(&self.blur_v_pipeline);
                 compute_pass.set_bind_group(0, &bind_group_v, &[]);
-                compute_pass.dispatch_workgroups(dispatch_x_v, dispatch_y_v, 1);
+                compute_pass.dispatch_workgroups(dispatch_x_curr, dispatch_y_curr, 1);
 
-                // Downsample (only if not last level - avoid unnecessary work? Or maybe always run to get smallest blurred?) 
-                // The optical flow might need the *blurred* version of the smallest level, not the downsampled one.
-                // Let's downsample always, the optical flow can use pyramid_views[levels-1]
-                let dispatch_x_ds = (next_width + wg_size - 1) / wg_size;
-                let dispatch_y_ds = (next_height + wg_size - 1) / wg_size;
+                // Downsample
                 compute_pass.set_pipeline(&self.downsample_pipeline);
                 compute_pass.set_bind_group(0, &bind_group_ds, &[]);
-                compute_pass.dispatch_workgroups(dispatch_x_ds, dispatch_y_ds, 1);
+                compute_pass.dispatch_workgroups(dispatch_x_next, dispatch_y_next, 1);
             }
             
             // Prepare for next level
             // The input for the next blur/downsample iteration is the downsampled output of this one.
-            last_input_view = downsample_views[level_u].clone(); // Clone the Arc/handle
+            last_input_view = downsample_views[level_u].as_ref().unwrap().clone(); // Create view from texture for next iter
+            
             current_width = next_width;
             current_height = next_height;
-            
-            // Break if dimensions get too small
-            if current_width <= 1 || current_height <= 1 {
-                println!("{} Pyramid generation stopped early at level {} due to small dimensions.", label_prefix, level);
-                // Adjust the actual number of levels stored if we break early
-                pyramid_textures.truncate(level_u + 1);
-                pyramid_views.truncate(level_u + 1);
-                downsample_textures.truncate(level_u + 1);
-                downsample_views.truncate(level_u + 1);
-                break;
-            }
         }
 
         queue.submit(Some(encoder.finish()));
@@ -867,8 +866,8 @@ mod tests {
         let mut expected_w = WIDTH;
         let mut expected_h = HEIGHT;
         for level in 0..LEVELS as usize {
-            assert_eq!(interpolator.pyramid_a_textures[level].width(), expected_w, "Level {} width mismatch", level);
-            assert_eq!(interpolator.pyramid_a_textures[level].height(), expected_h, "Level {} height mismatch", level);
+            assert_eq!(interpolator.pyramid_a_textures[level].as_ref().unwrap().width(), expected_w, "Level {} width mismatch", level);
+            assert_eq!(interpolator.pyramid_a_textures[level].as_ref().unwrap().height(), expected_h, "Level {} height mismatch", level);
             // Next level dimensions
             expected_w = (expected_w + 1) / 2;
             expected_h = (expected_h + 1) / 2;
@@ -880,7 +879,7 @@ mod tests {
         // For now, we'll rely on the dimension checks and assume the shaders work if they compiled.
         /*
         let level0_bytes = pollster::block_on(
-            read_texture_to_cpu(&device, &queue, &interpolator.pyramid_a_textures[0], WIDTH, HEIGHT, BYTES_PER_PIXEL)
+            read_texture_to_cpu(&device, &queue, &interpolator.pyramid_a_textures[0].as_ref().unwrap(), WIDTH, HEIGHT, BYTES_PER_PIXEL)
         ).expect("Failed to read level 0 texture");
         // TODO: Add assertions on level0_bytes contents (e.g., check if center pixel is blurred average)
         */
