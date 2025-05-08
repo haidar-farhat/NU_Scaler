@@ -128,10 +128,10 @@ class AspectRatioPreview(QLabel):
             painter.drawText(overlay_rect, Qt.AlignTop | Qt.AlignRight, self._overlay_text)
 
 class UpscaleWorker(QObject):
-    finished = Signal(bytes, int, int, float)
+    finished = Signal(bytes, int, int, float, str, float)
     error = Signal(str)
 
-    def __init__(self, upscaler, frame, in_w, in_h, out_w, out_h, scale):
+    def __init__(self, upscaler, frame, in_w, in_h, out_w, out_h, scale, interpolation_status: str, interpolation_cpu_time_ms: float):
         super().__init__()
         self.upscaler = upscaler
         self.frame = frame
@@ -140,6 +140,8 @@ class UpscaleWorker(QObject):
         self.out_w = out_w
         self.out_h = out_h
         self.scale = scale
+        self.interpolation_status = interpolation_status
+        self.interpolation_cpu_time_ms = interpolation_cpu_time_ms
         print(f'[DEBUG] UpscaleWorker created: {id(self)}')
 
     @Slot()
@@ -153,7 +155,8 @@ class UpscaleWorker(QObject):
             result = self.upscaler.upscale(self.frame)
             print("[DEBUG] UpscaleWorker: After upscale")
             t1 = time.perf_counter()
-            self.finished.emit(result, self.out_w, self.out_h, t1 - t0)
+            upscale_gpu_time_ms = (t1 - t0) * 1000
+            self.finished.emit(result, self.out_w, self.out_h, upscale_gpu_time_ms, self.interpolation_status, self.interpolation_cpu_time_ms)
         except Exception as e:
             print(f"[DEBUG] UpscaleWorker: Exception: {e}")
             self.error.emit(str(e))
@@ -333,6 +336,7 @@ class LiveFeedScreen(QWidget):
         self.method_box.addItems(methods)
         self.quality_box = QComboBox()
         self.quality_box.addItems(["ultra", "quality", "balanced", "performance"])
+        self.quality_box.setToolTip("Select the upscaling quality.")
         self.scale_slider = QSlider(Qt.Horizontal)
         self.scale_slider.setRange(10, 40)
         self.scale_slider.setValue(20)
@@ -639,41 +643,50 @@ class LiveFeedScreen(QWidget):
 
             # --- Frame Interpolation Logic START ---
             frame_to_process = current_captured_frame_bytes
-            # w_to_process, h_to_process remain in_w, in_h as interpolation doesn't change dimensions
+            interpolation_status_for_frame = "Captured (Interp Off)" # Default status
+            interpolation_cpu_time_ms_for_frame = 0.0
 
-            if self.interpolation_enabled and self.interpolator and self.prev_frame_data:
-                prev_frame_bytes, prev_w, prev_h = self.prev_frame_data
-                if prev_w == in_w and prev_h == in_h:
-                    try:
-                        # print(f"[DEBUG] Interpolating: prev ({len(prev_frame_bytes)}B) -> current ({len(current_captured_frame_bytes)}B)")
-                        interp_start_time = time.perf_counter()
-                        interpolated_frame_bytes = self.interpolator.interpolate_py(
-                            prev_frame_bytes, 
-                            current_captured_frame_bytes, 
-                            in_w, 
-                            in_h, 
-                            time_t=0.5
-                        )
-                        interp_duration_ms = (time.perf_counter() - interp_start_time) * 1000
-                        if interpolated_frame_bytes:
-                            frame_to_process = interpolated_frame_bytes
-                            # self.log_signal.emit(f"Frame Interpolated ({interp_duration_ms:.1f}ms)") # Can be too spammy
-                            # print(f"[DEBUG] Frame interpolated successfully in {interp_duration_ms:.1f} ms.")
-                        else:
-                            self.log_signal.emit("Frame Interpolation: interpolate_py returned None")
-                            print("[DEBUG] Frame interpolation: interpolate_py returned None")
-                    except Exception as e:
-                        error_msg = f"Frame Interpolation Error: {e}"
-                        print(f"[DEBUG] {error_msg}")
-                        self.log_signal.emit(error_msg)
-                        traceback.print_exc()
-                        # Fallback to current frame if interpolation fails
+            if self.interpolation_enabled and self.interpolator:
+                if self.prev_frame_data:
+                    prev_frame_bytes, prev_w, prev_h = self.prev_frame_data
+                    if prev_w == in_w and prev_h == in_h:
+                        try:
+                            interp_start_time = time.perf_counter()
+                            interpolated_frame_bytes = self.interpolator.interpolate_py(
+                                prev_frame_bytes, 
+                                current_captured_frame_bytes, 
+                                in_w, 
+                                in_h, 
+                                time_t=0.5
+                            )
+                            interpolation_cpu_time_ms_for_frame = (time.perf_counter() - interp_start_time) * 1000
+                            if interpolated_frame_bytes:
+                                frame_to_process = interpolated_frame_bytes
+                                interpolation_status_for_frame = "Interpolated"
+                            else:
+                                self.log_signal.emit("Frame Interpolation: Call returned None")
+                                print("[DEBUG] Frame interpolation: interpolate_py returned None")
+                                interpolation_status_for_frame = "Captured (Interp Failed)"
+                        except Exception as e:
+                            error_msg = f"Frame Interpolation Error: {e}"
+                            print(f"[DEBUG] {error_msg}")
+                            self.log_signal.emit(error_msg)
+                            traceback.print_exc()
+                            interpolation_status_for_frame = "Captured (Interp Error)"
+                            # Fallback to current_captured_frame_bytes (already set as frame_to_process)
+                    else:
+                        print("[DEBUG] Frame interpolation skipped (dimension mismatch).")
+                        self.log_signal.emit("Frame Interpolation: Skipped (dimension mismatch)")
+                        interpolation_status_for_frame = "Captured (Interp Skipped - Dim Mismatch)"
+                        self.prev_frame_data = None # Reset due to stream change
                 else:
-                    # self.log_signal.emit("Frame Interpolation: Skipped (dimension mismatch)") # Can be too spammy
-                    print("[DEBUG] Frame interpolation skipped due to dimension mismatch with previous frame.")
-                    self.prev_frame_data = None # Reset due to stream change
+                    interpolation_status_for_frame = "Captured (Interp Skipped - No Prev Frame)"
+                    # self.log_signal.emit("Frame Interpolation: Skipped (no previous frame yet)") # Can be spammy
+            elif self.interpolator and not self.interpolation_enabled:
+                 interpolation_status_for_frame = "Captured (Interp Off)"
+            elif not self.interpolator:
+                interpolation_status_for_frame = "Captured (Interpolator N/A)"
             
-            # Update previous frame data with the current *captured* frame for the next iteration
             self.prev_frame_data = (current_captured_frame_bytes, in_w, in_h)
             # --- Frame Interpolation Logic END ---
 
@@ -711,7 +724,7 @@ class LiveFeedScreen(QWidget):
             # print(f"[DEBUG] Starting upscale worker at {time.strftime('%H:%M:%S')}")
             self._upscale_thread = QThread()
             # Pass frame_to_process (original or interpolated) to the worker
-            self._upscale_worker = UpscaleWorker(self.upscaler, frame_to_process, in_w, in_h, out_w, out_h, scale)
+            self._upscale_worker = UpscaleWorker(self.upscaler, frame_to_process, in_w, in_h, out_w, out_h, scale, interpolation_status_for_frame, interpolation_cpu_time_ms_for_frame)
             self._upscale_worker.moveToThread(self._upscale_thread)
             self._upscale_thread.started.connect(self._upscale_worker.run)
             self._upscale_worker.finished.connect(self.on_upscale_finished)
@@ -730,29 +743,54 @@ class LiveFeedScreen(QWidget):
         self._upscale_thread = None
         self._upscale_worker = None
 
-    def on_upscale_finished(self, out_bytes, out_w, out_h, elapsed):
-        print(f'[DEBUG] on_upscale_finished: {id(self)}')
-        print(f"[DEBUG] Upscale finished in {elapsed*1000:.2f} ms at {time.strftime('%H:%M:%S')}")
+    def on_upscale_finished(self, out_bytes, out_w, out_h, upscale_gpu_time_ms, interpolation_status, interpolation_cpu_time_ms):
+        # Note: `elapsed` from worker is already in ms, renamed to upscale_gpu_time_ms
+        # print(f'[DEBUG] on_upscale_finished: {id(self)}')
+        # print(f"[DEBUG] Upscale finished in {upscale_gpu_time_ms:.2f} ms at {time.strftime('%H:%M:%S')}")
+        # print(f"[DEBUG] Interpolation status: {interpolation_status}, CPU time: {interpolation_cpu_time_ms:.2f} ms")
         if out_bytes:
             try:
                 qimg = QImage(out_bytes, out_w, out_h, QImage.Format_RGBA8888)
                 pixmap = QPixmap.fromImage(qimg)
                 self.output_preview.set_pixmap(pixmap)
-                inst_fps = 1.0 / elapsed if elapsed > 0 else 0.0
+                
+                # FPS calculation remains based on the upscaler's output rate for now
+                inst_fps = 1000.0 / upscale_gpu_time_ms if upscale_gpu_time_ms > 0 else 0.0
                 self.fps = 0.95 * self.fps + 0.05 * inst_fps if self.fps > 0 else inst_fps
+                
                 vram_str = self.memory_stats_label.text()
-                overlay = (f"Input: {out_w//self.upscale_scale:.0f}×{out_h//self.upscale_scale:.0f}\n"
-                           f"Upscaled: {out_w}×{out_h}\n"
-                           f"FPS: {self.fps:.1f}\n"
-                           f"{vram_str}\n"
-                           f"Frame Time: {elapsed*1000:.1f} ms")
-                self.output_preview.set_overlay(overlay)
-                self.status_bar.setText(f"Frame Time: {elapsed * 1000:.1f} ms   FPS: {self.fps:.1f}   Resolution: {out_w//self.upscale_scale:.0f}×{out_h//self.upscale_scale:.0f} → {out_w}×{out_h}")
-                self.profiler_signal.emit(elapsed * 1000, self.fps, out_w//self.upscale_scale, out_h//self.upscale_scale)
-                if self.fps < 30:
-                    self.warning_signal.emit(f"Warning: Low FPS ({self.fps:.1f})", True)
+                
+                overlay_lines = [
+                    f"Input: {out_w//self.upscale_scale:.0f}×{out_h//self.upscale_scale:.0f}",
+                    f"Upscaled: {out_w}×{out_h}",
+                    f"FPS: {self.fps:.1f}",
+                    f"{vram_str}",
+                    f"Upscale GPU Time: {upscale_gpu_time_ms:.1f} ms"
+                ]
+
+                if self.interpolation_enabled and self.interpolator:
+                    overlay_lines.append(f"Frame Source: {interpolation_status}")
+                    if interpolation_status == "Interpolated" and interpolation_cpu_time_ms > 0:
+                        overlay_lines.append(f"Interp CPU Time: {interpolation_cpu_time_ms:.1f} ms")
                 else:
-                    self.warning_signal.emit("", False)
+                    overlay_lines.append("Frame Source: Captured (Interp Off)") # Or use interpolation_status if more detailed
+
+                overlay = "\n".join(overlay_lines)
+                self.output_preview.set_overlay(overlay)
+                
+                status_bar_text = (
+                    f"Upscale: {upscale_gpu_time_ms:.1f}ms | "
+                    f"FPS: {self.fps:.1f} | "
+                    f"Res: {out_w//self.upscale_scale:.0f}×{out_h//self.upscale_scale:.0f} → {out_w}×{out_h}"
+                )
+                if self.interpolation_enabled and self.interpolator and interpolation_status == "Interpolated" and interpolation_cpu_time_ms > 0:
+                    status_bar_text += f" | Interp CPU: {interpolation_cpu_time_ms:.1f}ms"
+                elif self.interpolation_enabled and self.interpolator:
+                    status_bar_text += f" | Interp: {interpolation_status}" 
+
+                self.status_bar.setText(status_bar_text)
+                self.profiler_signal.emit(upscale_gpu_time_ms, self.fps, out_w//self.upscale_scale, out_h//self.upscale_scale)
+                
                 self.last_frame_time = time.perf_counter()
             except Exception as e:
                 print(f"[ERROR] Failed to update output preview: {e}")
