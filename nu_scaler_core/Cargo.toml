@@ -3,74 +3,49 @@ name = "nu_scaler_core"
 version = "0.1.0"
 edition = "2021"
 
-[lib]
-name = "nu_scaler"
-crate-type = ["cdylib", "rlib"]
-
-[features]
-default = ["python"]
-python = []
-fsr3 = ["dep:fsr3-sys"]
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 anyhow = "1.0"
-pyo3 = { version = "0.21.0", features = ["extension-module"] }
-wgpu = "0.19"
-scrap = "0.5"
-windows = { version = "0.56", features = [
-    "Foundation",
-    "Foundation_Metadata",
-    "Graphics",
-    "Graphics_Capture",
-    "Graphics_DirectX",
-    "Graphics_DirectX_Direct3D11",
-    "Win32_Foundation", 
-    "Win32_Graphics_Gdi",
-    "Win32_UI_WindowsAndMessaging",
-    "Win32_System_Com",
-    "Win32_Graphics_Direct3D",
-    "Win32_Graphics_Direct3D11",
-    "Win32_Graphics_Dxgi",
-    "Win32_Graphics_Dxgi_Common",
-    "Win32_System_WinRT",
-    "Win32_System_WinRT_Graphics_Capture",
-] }
-windows-capture = "1.4"
-image = { version = "0.25", features = ["png", "jpeg"] }
-x11 = { version = "2.21", optional = true }
-bytemuck = { version = "1.12", features = ["derive"] }
-pollster = "0.3"
-once_cell = "1.19"
-rayon = "1.8"
-uuid = { version = "1.6", features = ["v4"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 log = "0.4"
-# Official DLSS integration
-# dlss-sys = { version = "0.1.0", path = "./dlss-sys" }
-# Official FSR3 integration
-fsr3-sys = { version = "0.1.0", path = "./fsr3-sys", optional = true }
-thiserror = "1.0"
-
-# Dependencies for Optical Flow Frame Interpolation
-optical-flow-lk = "0.1.0"
-imageproc = "0.24.0" # Compatible with image 0.25
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-
-# Added for texture readback helper
-futures-intrusive = "0.5"
-
-# Added for bytemuck support in tests/uniforms
+pollster = "0.3"
+pyo3 = { version = "0.21", features = ["extension-module"], optional = true }
+wgpu = "0.19"
+raw-window-handle = "0.6"
 bytemuck = { version = "1.12", features = ["derive"] }
-# Added for block_on in tests
 futures = { version = "0.3", features = ["executor"] } 
-
-# Needed for buffer mapping in test readback helper
 futures-intrusive = "0.5.0"
+thiserror = "1.0" # Was used in gpu/mod.rs
+num_cpus = "1.13"
+rayon = "1.5"
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", optional = true }
+# Required for GpuDetector -> windows-sys
+windows-sys = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_SystemInformation",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+
+# Optional dependencies from previous state (may need review)
+# dlss-sys = { path = "../dlss-sys", optional = true }
+# optical-flow-lk = { git = "https://github.com/opencv-rust/optical-flow-lk", optional = true }
+# imageproc = { version = "0.23", optional = true } # For CPU interpolator (disabled)
+
+[dev-dependencies]
+# Add test dependencies here
+
+[features]
+default = ["python"]
+python = ["dep:pyo3", "dep:serde", "dep:serde_json"]
+fsr3 = []
+
+# dlss = ["dep:dlss-sys"]
+
+# cpu_interpolation = ["dep:optical-flow-lk", "dep:imageproc", "dep:serde", "dep:serde_json"]
 
 [build-dependencies]
-# ... existing build dependencies ...
-
-[package.metadata.post-build]
-# After building, run this script to copy the .pyd to your venv site-packages
-# Usage: cargo build --release && pwsh ../post_build.ps1
-script = "../post_build.ps1"
+# Add build dependencies here
