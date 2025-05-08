@@ -80,16 +80,9 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         // Access the frame buffer directly
         match frame.buffer() {
             Ok(buffer) => {
-                // Get direct access to the inner buffer's data and length.
-                // FrameBuffer is a tuple struct wrapping capture_core::Buffer.
-                // The data from capture_core::Buffer is expected to be BGRA.
-                let inner_buffer = buffer.0; // Access the inner capture_core::Buffer<'a>
-                let data_ptr = inner_buffer.data(); // *const u8
-                let length = inner_buffer.length(); // usize
-
-                let frame_data_to_send = unsafe {
-                    std::slice::from_raw_parts(data_ptr, length).to_vec()
-                };
+                // FrameBuffer has a public .buffer() method that returns &[u8] (BGRA format).
+                let bgra_byte_slice: &[u8] = buffer.buffer();
+                let frame_data_to_send = bgra_byte_slice.to_vec();
 
                 // Send the raw frame data (BGRA)
                 match self.frame_sender.lock() {
