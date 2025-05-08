@@ -244,6 +244,7 @@ class LiveFeedScreen(QWidget):
         self._last_in_w = None
         self._last_in_h = None
         self._last_scale = None
+        self.fullscreen_display_window = None # For dedicated fullscreen output
         print('[DEBUG] LiveFeedScreen: Before init_ui')
         self.init_ui()
         print('[DEBUG] LiveFeedScreen: After init_ui')
@@ -351,7 +352,7 @@ class LiveFeedScreen(QWidget):
         self.output_preview = AspectRatioPreview()
         self.output_preview.setMinimumSize(320, 180)
         self.output_preview.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.output_preview.set_parent_window(self.window())
+        self.output_preview.doubleClicked.connect(self.handle_dedicated_fullscreen_toggle) # Connect to new handler
         right_layout.addWidget(self.output_label)
         right_layout.addWidget(self.output_preview, 1)
         # Upscaling controls
@@ -549,6 +550,10 @@ class LiveFeedScreen(QWidget):
         threading.Timer(2, watchdog, args=("2s after stop_capture",)).start()
         threading.Timer(5, watchdog, args=("5s after stop_capture",)).start()
         threading.Timer(10, watchdog, args=("10s after stop_capture",)).start()
+
+        if self.fullscreen_display_window:
+            self.fullscreen_display_window.close() # Ensure fullscreen window is closed
+            # self.fullscreen_display_window = None # Can be set to None here or when it signals closed
 
     def toggle_advanced_upscaling(self, state):
         try:
@@ -838,6 +843,12 @@ class LiveFeedScreen(QWidget):
                 self.profiler_signal.emit(upscale_gpu_time_ms, self.fps, out_w//self.upscale_scale, out_h//self.upscale_scale)
                 
                 self.last_frame_time = time.perf_counter()
+
+                # Update dedicated fullscreen window if it's active
+                if self.fullscreen_display_window and self.fullscreen_display_window.isVisible():
+                    self.fullscreen_display_window.set_pixmap(pixmap)
+                    self.fullscreen_display_window.set_overlay(overlay)
+
             except Exception as e:
                 print(f"[ERROR] Failed to update output preview: {e}")
         # The timer will continue to fire at the set interval
@@ -858,6 +869,43 @@ class LiveFeedScreen(QWidget):
             self.start_capture()
         elif self.stop_btn.isEnabled():
             self.stop_capture()
+
+    def handle_dedicated_fullscreen_toggle(self):
+        if self.fullscreen_display_window and self.fullscreen_display_window.isVisible():
+            self.fullscreen_display_window.hide()
+            # Restore embedded preview if it was changed
+            self.output_preview.set_overlay(self.fullscreen_display_window.get_current_overlay_text()) # Restore overlay
+            self.output_preview.set_pixmap(self.fullscreen_display_window.get_current_pixmap()) # Restore pixmap
+            if hasattr(self.output_preview, '_original_text_when_fullscreen'):
+                del self.output_preview._original_text_when_fullscreen # Clean up temporary attribute
+
+        else:
+            if not self.fullscreen_display_window:
+                self.fullscreen_display_window = FullScreenDisplayWindow()
+                # Optional: connect signals from fullscreen_display_window if needed, e.g., its closeEvent
+                # self.fullscreen_display_window.destroyed.connect(self.on_fullscreen_window_destroyed)
+
+            # Get current content from the embedded preview to show in fullscreen
+            # (Assumes AspectRatioPreview has _pixmap and _overlay_text attributes or getters)
+            current_pixmap = self.output_preview._pixmap 
+            current_overlay_text = self.output_preview._overlay_text
+
+            if current_pixmap and not current_pixmap.isNull():
+                self.fullscreen_display_window.set_pixmap(current_pixmap)
+            else: # If no valid pixmap, show a blank or default one
+                self.fullscreen_display_window.set_pixmap(QPixmap())
+            self.fullscreen_display_window.set_overlay(current_overlay_text)
+            self.fullscreen_display_window.showFullScreen()
+
+            # Optionally, change the embedded preview's appearance
+            self.output_preview._original_text_when_fullscreen = current_overlay_text # Store for restoration
+            self.output_preview.set_pixmap(QPixmap()) # Clear embedded pixmap
+            self.output_preview.set_overlay("Output in dedicated window\n(Double-click here or Esc in window to exit)")
+
+    # def on_fullscreen_window_destroyed(self):
+    #     self.fullscreen_display_window = None
+    #     # Potentially restore main GUI's output_preview state if it was altered
+    #     print("[DEBUG] Fullscreen display window destroyed")
 
     def toggle_interpolation(self, checked):
         self.interpolation_enabled = checked
