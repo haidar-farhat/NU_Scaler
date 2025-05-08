@@ -445,70 +445,31 @@ impl WgpuFrameInterpolator {
 
         // --- Phase 2.3 Setup: Hierarchical Flow Refinement --- 
 
-        // Flow Upsample Shader, BGL, and Pipeline
-        // Using NO STRUCT shader string for diagnostics
+        // Flow Upsample Shader, BGL, and Pipeline (already using NO STRUCT workaround)
         let flow_upsample_shader_string = r#"
 @compute @workgroup_size(1, 1, 1) fn main() {
   // Does absolutely nothing, has no struct
 }
 "#;
-
-        let flow_upsample_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Flow Upsample Shader (No Struct)"), // Modified label
+        let _flow_upsample_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Flow Upsample Shader (No Struct)"),
             source: wgpu::ShaderSource::Wgsl(flow_upsample_shader_string.into()),
         });
-
-        // Keep BGL and Pipeline as None since the shader is useless
         let flow_upsample_bgl = None;
         let flow_upsample_pipeline = None;
 
-        // Flow Refine Shader, BGL, and Pipeline (Keep this enabled for now)
-        let refine_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Flow Refine Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/flow_refine.wgsl").into()),
+        // Flow Refine Shader, BGL, and Pipeline (APPLYING NO STRUCT WORKAROUND HERE)
+        let flow_refine_shader_string_no_struct = r#"
+@compute @workgroup_size(1, 1, 1) fn main() {
+  // Does absolutely nothing, has no struct (for flow_refine)
+}
+"#;
+        let _refine_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Flow Refine Shader (No Struct)"),
+            source: wgpu::ShaderSource::Wgsl(flow_refine_shader_string_no_struct.into()), // Use the new string
         });
-        let flow_refine_bgl = Some(device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: Some("Flow Refine BGL"),
-            entries: &[
-                // Binding 0: RefineHSUniforms
-                BindGroupLayoutEntry {
-                    binding: 0, visibility: ShaderStages::COMPUTE, 
-                    ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: Some(NonZeroU64::new(std::mem::size_of::<RefineHSUniforms>() as u64).unwrap()) }, 
-                    count: None },
-                // Binding 1: I1_tex (Pyramid level - Rgba32Float, shader uses .r for luminance)
-                BindGroupLayoutEntry {
-                    binding: 1, visibility: ShaderStages::COMPUTE, 
-                    ty: BindingType::Texture { sample_type: TextureSampleType::Float { filterable: false }, view_dimension: TextureViewDimension::D2, multisampled: false }, // filterable:false as shader uses textureLoad
-                    count: None },
-                // Binding 2: I2_tex (Pyramid level - Rgba32Float)
-                BindGroupLayoutEntry {
-                    binding: 2, visibility: ShaderStages::COMPUTE, 
-                    ty: BindingType::Texture { sample_type: TextureSampleType::Float { filterable: false }, view_dimension: TextureViewDimension::D2, multisampled: false }, // filterable:false as shader uses textureLoad
-                    count: None },
-                // Binding 3: flow_in_tex (Upsampled flow - Rg32Float, shader uses textureLoad via texture_2d<vec2<f32>>)
-                BindGroupLayoutEntry {
-                    binding: 3, visibility: ShaderStages::COMPUTE, 
-                    ty: BindingType::Texture { sample_type: TextureSampleType::Float { filterable: false }, view_dimension: TextureViewDimension::D2, multisampled: false }, // filterable:false to match textureLoad. Shader specifies texture_2d<vec2<f32>> which is unusual for load.
-                    count: None },
-                // Binding 4: flow_out_tex (Storage Rg32Float)
-                BindGroupLayoutEntry {
-                    binding: 4, visibility: ShaderStages::COMPUTE, 
-                    ty: BindingType::StorageTexture { access: StorageTextureAccess::WriteOnly, format: TextureFormat::Rg32Float, view_dimension: TextureViewDimension::D2 }, 
-                    count: None },
-            ],
-        }));
-        let flow_refine_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
-            label: Some("Flow Refine Pipeline Layout"),
-            bind_group_layouts: &[&flow_refine_bgl.as_ref().unwrap()],
-            push_constant_ranges: &[],
-        });
-        let flow_refine_pipeline = Some(device.create_compute_pipeline(&ComputePipelineDescriptor {
-            label: Some("Flow Refine Pipeline"),
-            layout: Some(&flow_refine_pipeline_layout),
-            module: &refine_shader_module,
-            entry_point: "main",
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-        }));
+        let flow_refine_bgl = None; // Set to None
+        let flow_refine_pipeline = None; // Set to None
 
         Ok(Self {
             device,
@@ -537,10 +498,10 @@ impl WgpuFrameInterpolator {
             flow_sampler,
             final_flow_texture: None,
             final_flow_view: None,
-            flow_upsample_bgl: flow_upsample_bgl,
-            flow_upsample_pipeline: flow_upsample_pipeline,
-            flow_refine_bgl: flow_refine_bgl,
-            flow_refine_pipeline: flow_refine_pipeline,
+            flow_upsample_bgl, // Will be None
+            flow_upsample_pipeline, // Will be None
+            flow_refine_bgl, // Will be None
+            flow_refine_pipeline, // Will be None
         })
     }
 
