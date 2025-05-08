@@ -60,14 +60,14 @@ struct PyramidPassParams {
     _pad1: [u32; 2], // Padding
 }
 
-// New uniform struct for Coarse Horn-Schunck, matching horn_schunck.wgsl's Params
+// Updated CoarseHSParams to match WGSL alignment suggestion
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct CoarseHSParams {
-    size: [u32; 2],   // Corresponds to vec2<u32> in WGSL (texture dimensions)
-    lambda: f32,      // Corresponds to f32 lambda (smoothness weight, e.g., alpha_sq)
-    _padding: u32,    // Padding to ensure 16-byte alignment for the struct.
-} // Total 8 (size) + 4 (lambda) + 4 (padding) = 16 bytes.
+    size: [u32; 2],   // 8 bytes
+    lambda: f32,      // 4 bytes
+    _padding: f32,    // 4 bytes -> total 16 bytes
+}
 
 // Uniforms for flow_upsample.wgsl
 #[repr(C)]
@@ -750,7 +750,7 @@ impl WgpuFrameInterpolator {
         let next_frame_tex_view = self.pyramid_b_views[level].as_ref().expect("Next frame view missing");
 
         // Create uniforms
-        let uniforms = CoarseHSParams { size: [width, height], lambda: alpha_sq, _padding: 0 };
+        let uniforms = CoarseHSParams { size: [width, height], lambda: alpha_sq, _padding: 0.0 };
         let uniform_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Coarse Horn-Schunck Uniform Buffer"),
             contents: bytemuck::bytes_of(&uniforms),
