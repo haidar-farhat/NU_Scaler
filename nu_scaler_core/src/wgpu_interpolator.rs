@@ -24,7 +24,9 @@ struct InterpolationUniforms {
     // WGSL's _pad1: vec3<f32> will start at offset 32 due to align(16).
     // So, Rust struct needs 12 bytes of padding here.
     _rust_pad_to_align_vec3: [f32; 3], // offset 20, size 12 -> next at 32
-    _pad1: [f32; 3],      // offset 32, size 12. Total size 44. Padded to 48 for bytemuck.
+    _pad1_wgsl_equivalent: [f32; 3],      // offset 32, size 12. Current total 44.
+    // Final padding to make Rust struct 48 bytes, matching WGSL struct total size
+    _final_struct_padding: [f32; 1], // offset 44, size 4 -> Total 48 bytes.
 }
 
 impl InterpolationUniforms {
@@ -34,7 +36,8 @@ impl InterpolationUniforms {
             _pad0: [0; 2],
             time_t,
             _rust_pad_to_align_vec3: [0.0; 3],
-            _pad1: [0.0; 3],
+            _pad1_wgsl_equivalent: [0.0; 3], // Renamed for clarity
+            _final_struct_padding: [0.0; 1], // Added final padding
         }
     }
 }
