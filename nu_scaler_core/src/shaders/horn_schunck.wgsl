@@ -4,7 +4,7 @@
 struct Params {
     size: vec2<u32>,   // Size of this pyramid level texture
     lambda: f32,       // Smoothness weight (α² in some formulations)
-    _pad0: vec3<u32>,  // Padding
+    _padding: f32,     // Padding
 };
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -12,7 +12,6 @@ struct Params {
 @group(0) @binding(2) var i2_tex: texture_2d<f32>; // Frame B, coarsest level (e.g., Rgba32Float)
 @group(0) @binding(3) var flow_in_tex: texture_2d<f32>; // Previous iteration flow (Rg32Float)
 @group(0) @binding(4) var flow_out_tex: texture_storage_2d<rg32float, write>; // Updated flow output
-@group(0) @binding(5) var nearest_sampler: sampler; // Sampler (likely nearest for derivatives/flow)
 
 // Helper to convert RGBA to Luminance (simple average for now)
 fn luminance(color: vec4<f32>) -> f32 {
