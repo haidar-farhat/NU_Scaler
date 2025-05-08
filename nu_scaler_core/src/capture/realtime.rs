@@ -342,11 +342,11 @@ impl RealTimeCapture for ScreenCapture {
                         loop {
                             match rx.try_recv() {
                                 Ok(Some(frame_tuple)) => {
-                                    // Got a frame, store it (overwriting previous one in this batch)
+                                    println!("[ScreenCapture::get_frame] WGC Handler: Received frame from channel. Size: {}x{}", frame_tuple.1, frame_tuple.2); // DEBUG PRINT
                                     last_frame_data = Some(frame_tuple);
                                 }
                                 Ok(None) => {
-                                    // Got the stop signal (None sentinel)
+                                    println!("[ScreenCapture::get_frame] WGC Handler: Received STOP signal (None) from channel."); // DEBUG PRINT
                                     self.debug_print("Received stop signal (None sentinel) from WGC handler.");
                                     last_frame_data = None; // Ensure we don't return a frame if stop was received
                                     self.stop(); // Stop capture immediately
@@ -354,10 +354,11 @@ impl RealTimeCapture for ScreenCapture {
                                 }
                                 Err(mpsc::TryRecvError::Empty) => {
                                     // Channel is empty, stop draining
+                                    println!("[ScreenCapture::get_frame] WGC Handler: Channel empty."); // DEBUG PRINT
                                     break;
                                 }
                                 Err(mpsc::TryRecvError::Disconnected) => {
-                                    // Channel disconnected, stop capture and loop
+                                    println!("[ScreenCapture::get_frame] WGC Handler: Channel DISCONNECTED."); // DEBUG PRINT
                                     self.debug_print("WGC channel disconnected.");
                                     last_frame_data = None; // Ensure no frame is returned
                                     self.stop();
