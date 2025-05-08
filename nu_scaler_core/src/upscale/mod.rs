@@ -24,12 +24,12 @@ use wgpu::{
 };
 
 // Add new module declarations
-pub mod dlss;
+// pub mod dlss;
 #[cfg(feature = "fsr3")]
 mod fsr;
 
 // Re-export the new implementations
-pub use dlss::DlssUpscaler;
+// pub use dlss::DlssUpscaler;
 #[cfg(feature = "fsr3")]
 pub use fsr::FsrUpscaler;
 
@@ -104,7 +104,11 @@ impl UpscalerFactory {
                 println!("[UpscalerFactory] FSR technology requested but 'fsr3' feature is not enabled. Falling back to Wgpu/Nearest.");
                 Box::new(WgpuUpscaler::new(quality, UpscaleAlgorithm::Nearest))
             }
-            UpscalingTechnology::DLSS => Box::new(DlssUpscaler::new(quality)),
+            // UpscalingTechnology::DLSS => Box::new(DlssUpscaler::new(quality)),
+            UpscalingTechnology::DLSS => {
+                println!("[UpscalerFactory] DLSS technology requested but is temporarily disabled. Falling back to Wgpu/Nearest.");
+                Box::new(WgpuUpscaler::new(quality, UpscaleAlgorithm::Nearest))
+            }
             UpscalingTechnology::Wgpu => {
                 Box::new(WgpuUpscaler::new(quality, UpscaleAlgorithm::Bilinear))
             }
@@ -126,6 +130,7 @@ impl UpscalerFactory {
         }
 
         // Try DLSS next, or if FSR feature is off and it fell through
+        /*
         if let Some(dlss) = upscaler.as_any_mut().downcast_mut::<DlssUpscaler>() {
             dlss.set_device_queue(device, queue);
             Ok(())
@@ -137,6 +142,8 @@ impl UpscalerFactory {
             // If WgpuUpscaler needs shared resources set this way, its logic would need to be added here.
             Ok(())
         }
+        */
+        Ok(())
     }
 }
 
