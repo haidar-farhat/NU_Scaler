@@ -1043,57 +1043,102 @@ impl WgpuFrameInterpolator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::teinture_wgpu::{create_device_queue, ComparableTexture, create_texture_with_data, TextureDataOrder};
+    // Use GpuDetector and its helpers
+    use crate::gpu::detector::GpuDetector;
+    // Keep helpers for texture creation/comparison if they are defined elsewhere or within this test module
+    // NOTE: This path still might be incorrect if teinture_wgpu is not under utils!
+    use crate::utils::teinture_wgpu::{ComparableTexture, create_texture_with_data, TextureDataOrder};
     use wgpu::{Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureViewDescriptor};
-    use futures::executor::block_on; // Import if futures crate is added
+    use futures::executor::block_on; // Import block_on
+
+    // Helper function to initialize GPU resources for tests
+    fn setup_gpu_test_resources() -> (Arc<Device>, Arc<Queue>) {
+        let mut detector = GpuDetector::new();
+        // We assume detect_gpus() works or handle its error if necessary
+        detector.detect_gpus().expect("Failed to detect GPUs for test"); 
+        block_on(detector.create_device_queue()).expect("Failed to create device/queue for test")
+    }
 
     #[test]
     fn test_warp_blend_zero_flow() {
-        let (_device_unarc, _queue_unarc, _instance, _adapter) = block_on(create_device_queue());
-        let device: Arc<Device> = std::sync::Arc::new(_device_unarc); // Explicit type
-        let queue: Arc<Queue> = std::sync::Arc::new(_queue_unarc);   // Explicit type
-        // ... (rest of test setup) ...
+        let (device, queue) = setup_gpu_test_resources(); // Use helper
+        let mut interpolator = WgpuFrameInterpolator::new(device.clone(), queue.clone()).expect("Failed to create interpolator");
+
+        let width = 256;
+        let height = 256;
+
+        let black_image_data: Vec<u8> = vec![0; (width * height * 4) as usize];
+        let white_image_data: Vec<u8> = vec![255; (width * height * 4) as usize];
+
         let prev_frame_desc = TextureDescriptor {
-            // ... (other fields) ...
+            label: Some("Prev Frame Test"),
+            size: Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1, sample_count: 1, dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba8UnormSrgb,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
             view_formats: &[], // Added
         };
+        let prev_frame = create_texture_with_data(&device, &queue, &prev_frame_desc, TextureDataOrder::LayerMajor, &black_image_data);
+
         let next_frame_desc = TextureDescriptor {
-            // ... (other fields) ...
-            view_formats: &[], // Added
+            label: Some("Next Frame Test"),
+            // ... same as prev_frame_desc
+            ..prev_frame_desc // This will inherit view_formats: &[] too
         };
+        let next_frame = create_texture_with_data(&device, &queue, &next_frame_desc, TextureDataOrder::LayerMajor, &white_image_data);
+        
+        let zero_flow_data: Vec<f32> = vec![0.0; (width * height * 2) as usize];
         let motion_vectors_desc = TextureDescriptor {
-            // ... (other fields) ...
+            label: Some("Zero Flow Test"),
+            size: Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1, sample_count: 1, dimension: TextureDimension::D2,
+            format: TextureFormat::Rg32Float,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
             view_formats: &[], // Added
         };
+        let motion_vectors = create_texture_with_data(
+            &device, &queue, &motion_vectors_desc, 
+            TextureDataOrder::LayerMajor, bytemuck::cast_slice(&zero_flow_data)
+        );
+
         let output_texture_desc = TextureDescriptor {
-            // ... (other fields) ...
+            label: Some("Output Texture Test"),
+            size: Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1, sample_count: 1, dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba8UnormSrgb, // Match pipeline target? Or maybe the interpolate method writes directly?
+            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::COPY_SRC | TextureUsages::STORAGE_BINDING, // STORAGE_BINDING if interpolate writes to it
             view_formats: &[], // Added
         };
-        // ... (rest of test, fix interpolate calls later) ...
+        let output_texture = device.create_texture(&output_texture_desc);
+        let output_texture_view = output_texture.create_view(&TextureViewDescriptor::default());
+
+        // TODO: Fix interpolate call signature
+        // interpolator.interpolate(...);
+        
+        // ... (Read back and verify) ...
     }
 
     #[test]
     fn test_build_pyramid() {
-        let (_device_unarc, _queue_unarc, _instance, _adapter) = block_on(create_device_queue());
-        let device: Arc<Device> = std::sync::Arc::new(_device_unarc); // Explicit type
-        let queue: Arc<Queue> = std::sync::Arc::new(_queue_unarc);   // Explicit type
+        let (device, queue) = setup_gpu_test_resources(); // Use helper
         let mut interpolator = WgpuFrameInterpolator::new(device.clone(), queue.clone()).expect("Failed to create interpolator");
         let width = 256u32;
         let height = 256u32;
-        let num_levels = 4u32; // Keep as u32 for call
+        let num_levels = 4u32;
         let dummy_image_data: Vec<u8> = (0..(width * height * 4)).map(|i| (i % 256) as u8).collect();
         let input_texture_desc = TextureDescriptor {
             label: Some("Pyramid Input Test"),
             size: Extent3d { width, height, depth_or_array_layers: 1 },
             mip_level_count: 1, sample_count: 1, dimension: TextureDimension::D2,
             format: TextureFormat::Rgba8UnormSrgb,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST | TextureUsages::STORAGE_BINDING,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
             view_formats: &[], // Added
         };
         let input_texture = create_texture_with_data(&device, &queue, &input_texture_desc, TextureDataOrder::LayerMajor, &dummy_image_data);
-        // Call build_pyramid (Fix args later)
+
+        // TODO: Fix build_pyramid call signature
         // interpolator.build_pyramid(&queue, &input_texture, num_levels, true).expect("Build pyramid A failed");
-        // Assertions
+
         assert_eq!(interpolator.pyramid_a_textures.len(), num_levels as usize);
         assert_eq!(interpolator.pyramid_a_views.len(), num_levels as usize);
         for i in 0..(num_levels as usize) {
@@ -1109,12 +1154,11 @@ mod tests {
 
     #[test]
     fn test_compute_coarse_flow_zeros() {
-        let (_device_unarc, _queue_unarc, _instance, _adapter) = block_on(create_device_queue());
-        let device: Arc<Device> = std::sync::Arc::new(_device_unarc); // Explicit type
-        let queue: Arc<Queue> = std::sync::Arc::new(_queue_unarc);   // Explicit type
+        let (device, queue) = setup_gpu_test_resources(); // Use helper
         let mut interpolator = WgpuFrameInterpolator::new(device.clone(), queue.clone()).expect("Failed to create interpolator");
         let width = 64u32;
         let height = 64u32;
+        let num_pyramid_levels = 3usize;
         let black_image_data: Vec<u8> = vec![0; (width * height * 4) as usize];
         let prev_frame_texture = create_texture_with_data(
             &device, &queue,
@@ -1122,7 +1166,7 @@ mod tests {
                 label: Some("Prev Frame (Black) for HS Test"),
                 size: Extent3d { width, height, depth_or_array_layers: 1 },
                 mip_level_count: 1, sample_count: 1, dimension: TextureDimension::D2,
-                format: TextureFormat::Rgba8UnormSrgb, 
+                format: TextureFormat::Rgba8UnormSrgb,
                 usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
                 view_formats: &[], // Added
             },
@@ -1140,29 +1184,40 @@ mod tests {
             },
             TextureDataOrder::LayerMajor, &black_image_data,
         );
-        let num_pyramid_levels = 3;
-        // Call build_pyramid (Fix args later)
+        // TODO: Fix build_pyramid call signature
         // interpolator.build_pyramid(&queue, &prev_frame_texture, num_pyramid_levels as u32, true).expect("Build pyramid A failed");
         // interpolator.build_pyramid(&queue, &next_frame_texture, num_pyramid_levels as u32, false).expect("Build pyramid B failed");
-        // ... (rest of test) ...
+        let coarsest_level_idx = num_pyramid_levels - 1;
+        interpolator.compute_coarse_flow(coarsest_level_idx, 0, 0.02f32.powi(2));
+        let level_width = width / (2u32.pow(coarsest_level_idx as u32));
+        let level_height = height / (2u32.pow(coarsest_level_idx as u32));
+        assert!(interpolator.flow_textures[0].is_some());
+        // ... (rest of assertions and second call to compute_coarse_flow)
     }
 
     #[test]
     fn test_refine_flow_uniform_shift() {
-        let (_device_unarc, _queue_unarc, _instance, _adapter) = block_on(create_device_queue());
-        let device: Arc<Device> = std::sync::Arc::new(_device_unarc); // Explicit type
-        let queue: Arc<Queue> = std::sync::Arc::new(_queue_unarc);   // Explicit type
+        let (device, queue) = setup_gpu_test_resources(); // Use helper
         let mut interpolator = WgpuFrameInterpolator::new(device.clone(), queue.clone()).expect("Failed to create interpolator");
-        // ... (test setup) ...
+        let width = 32u32;
+        let height = 32u32;
+        let num_pyramid_levels = 3usize;
+        // ... (frame data setup) ...
         let texture_desc_common = TextureDescriptor {
-            // ... (fields) ...
+            size: Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1, sample_count: 1, dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba8UnormSrgb,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+            label: None,
             view_formats: &[], // Added
         };
         // ... (create textures) ...
-        // Call build_pyramid (Fix args later)
+        // TODO: Fix build_pyramid call signature
         // interpolator.build_pyramid(&queue, &frame_a_texture, num_pyramid_levels as u32, true).expect("Build pyramid A failed");
         // interpolator.build_pyramid(&queue, &frame_b_texture, num_pyramid_levels as u32, false).expect("Build pyramid B failed");
-        // ... (rest of test) ...
+        // ... (compute coarse flow) ...
+        // ... (call refine_flow_hierarchy) ...
+        // ... (read back and verify flow) ...
     }
 
     // ... (read_texture_rg32float_to_vec_f32 helper) ...
