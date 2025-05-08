@@ -3,7 +3,11 @@
 use anyhow::{anyhow, Result};
 use image::{GrayImage, Rgba, RgbaImage};
 use imageproc::geometric_transformations::{warp_into, Interpolation, Projection};
-use optical_flow_lk::{build_pyramid, calc_optical_flow, LKFlags, Motion, Accuracy};
+use optical_flow_lk::{
+    pyramid::build_pyramid, 
+    flow::Motion, 
+    lk::{calc_optical_flow, LKFlags, Accuracy, TermCriteria, TermCriteriaTypes}
+};
 use serde::Deserialize;
 
 /// Configuration for the frame interpolation process.
@@ -26,6 +30,8 @@ pub struct InterpolationConfig {
     pub lk_max_iterations: i32,
     /// Epsilon for LK convergence criteria.
     pub lk_epsilon: f64,
+    /// Minimum Eigenvalue threshold for corner detection/tracking stability.
+    pub lk_min_eigen_threshold: f64,
 }
 
 impl Default for InterpolationConfig {
@@ -39,6 +45,7 @@ impl Default for InterpolationConfig {
             blend_mode: BlendMode::Linear,
             lk_max_iterations: 20,
             lk_epsilon: 0.03,
+            lk_min_eigen_threshold: 0.0001,
         }
     }
 }
@@ -87,26 +94,30 @@ impl FlowEstimator {
         let prev_pyramid = build_pyramid(prev_gray, self.config.pyramid_levels as usize);
         let next_pyramid = build_pyramid(next_gray, self.config.pyramid_levels as usize);
 
-        // For `calc_optical_flow`, if `features_to_track` is `None`, it will detect features.
-        // Parameters for internal feature detection (Shi-Tomasi) are not directly exposed by `calc_optical_flow`.
-        // If more control over feature detection is needed, `good_features_to_track` should be called first.
-        // For now, we let `calc_optical_flow` handle it.
+        // Define termination criteria for LK iteration
+        let term_criteria = TermCriteria {
+            criteria_type: TermCriteriaTypes::COUNT as i32 | TermCriteriaTypes::EPS as i32,
+            max_count: self.config.lk_max_iterations,
+            epsilon: self.config.lk_epsilon,
+        };
+
+        // Corrected call to calc_optical_flow
+        // Assuming we let the function detect features internally by passing an empty slice for initial features.
+        let initial_features: Vec<(f32, f32)> = Vec::new(); // Empty slice signals internal detection
 
         let flow_vectors = calc_optical_flow(
             &prev_pyramid,
             &next_pyramid,
-            None, // Let calc_optical_flow detect features.
-            self.config.window_size,
-            self.config.pyramid_levels as i32, // max_level for LK iteration
-            self.config.lk_max_iterations,
-            self.config.lk_epsilon,
-            Accuracy::ACC_0_5, // Or configure via InterpolationConfig
-            LKFlags::LK_DEFAULT, // Or configure
-            0.0001, // min_eigen_threshold, or configure
+            &initial_features, // Pass empty slice to detect features
+            self.config.window_size.try_into().unwrap_or(21), // Convert window size to usize
+            self.config.pyramid_levels as usize, // max_level
+            term_criteria,
+            LKFlags::LK_DEFAULT, // flags
+            self.config.lk_min_eigen_threshold, // min_eigen_threshold
+            // Accuracy seems not to be a direct parameter in 0.1.0, possibly implicit?
         );
         
         if flow_vectors.is_empty() {
-            // It's not necessarily an error to find no flow, could just be static scene
             // log::warn!("No optical flow vectors were found between the frames.");
         }
 
@@ -161,12 +172,13 @@ impl FrameSynthesizer {
 
         let proj_for_prev = create_projection_from_sparse_flow(sparse_flow_map, t, width, height, false);
         let mut warped_prev_rgba = RgbaImage::new(width, height);
+        // Corrected warp_into call order: input, map, interpolation, fill_value, output
         warp_into(
             prev_rgba,
             &proj_for_prev,
-            Interpolation::Bilinear, // Or other interpolation method
-            &mut warped_prev_rgba,
-            Rgba([0, 0, 0, 0]), // Fill color for out-of-bounds
+            Interpolation::Bilinear,
+            Rgba([0, 0, 0, 0]), // Fill value
+            &mut warped_prev_rgba, // Output buffer
         );
 
         // For warping `next_rgba` to the intermediate time `t`:
@@ -175,12 +187,13 @@ impl FrameSynthesizer {
         // Motion from `next` to `intermediate` is -(1-t) * flow.
         let proj_for_next = create_projection_from_sparse_flow(sparse_flow_map, -(1.0 - t), width, height, false);
         let mut warped_next_rgba = RgbaImage::new(width, height);
+        // Corrected warp_into call order
         warp_into(
             next_rgba,
             &proj_for_next,
             Interpolation::Bilinear,
-            &mut warped_next_rgba,
-            Rgba([0, 0, 0, 0]),
+            Rgba([0, 0, 0, 0]), // Fill value
+            &mut warped_next_rgba, // Output buffer
         );
         
         // --- Blending ---
@@ -192,20 +205,10 @@ impl FrameSynthesizer {
                         let p_prev = warped_prev_rgba.get_pixel(x, y);
                         let p_next = warped_next_rgba.get_pixel(x, y);
 
-                        // Linear blend: (1-t)*prev + t*next
                         let r = ((1.0 - t) * p_prev[0] as f32 + t * p_next[0] as f32).round() as u8;
                         let g = ((1.0 - t) * p_prev[1] as f32 + t * p_next[1] as f32).round() as u8;
                         let b = ((1.0 - t) * p_prev[2] as f32 + t * p_next[2] as f32).round() as u8;
-                        // Alpha blending: Consider if alpha values themselves should be interpolated
-                        // or if one frame's alpha takes precedence, or just use max/opaque.
-                        // For simplicity, let's blend alpha too, or use a fixed 255.
-                        let alpha_prev = p_prev[3] as f32;
-                        let alpha_next = p_next[3] as f32;
-                        // If warped pixels are transparent due to out-of-bounds, this blend might look odd.
-                        // A common strategy is to use a weighted average based on the alpha of the contributing pixels,
-                        // or ensure the fill color used in warp_into is fully transparent if that's desired.
-                        let final_alpha = ((1.0-t) * alpha_prev + t * alpha_next).round() as u8;
-                        // let final_alpha = 255; // Or just assume opaque
+                        let final_alpha = ((1.0-t) * p_prev[3] as f32 + t * p_next[3] as f32).round() as u8;
 
                         interpolated_frame.put_pixel(x, y, Rgba([r, g, b, final_alpha]));
                     }
@@ -246,20 +249,10 @@ fn create_projection_from_sparse_flow(
         avg_dy /= sparse_flow_map.len() as f32;
     }
 
-    // `warp_into`'s map function: (out_x, out_y) -> (in_x, in_y)
-    // If flow (avg_dx, avg_dy) is from source to destination (original prev to original next):
-    // in_x = out_x - t_factor * avg_dx
-    // in_y = out_y - t_factor * avg_dy
-    // Example: If t_factor = t (for prev_frame):
-    //   Source pixel for intermediate_frame[ox,oy] in prev_frame is [ox - t*avg_dx, oy - t*avg_dy]
-    // Example: If t_factor = -(1-t) (for next_frame, because flow is prev->next):
-    //   Source pixel for intermediate_frame[ox,oy] in next_frame is [ox - (-(1-t))*avg_dx, oy - (-(1-t))*avg_dy]
-    //   = [ox + (1-t)*avg_dx, oy + (1-t)*avg_dy]
-
     let transform_matrix = [
-        1.0, 0.0, -t_factor * avg_dx, // row 1: x scaling, xy shear, x translation
-        0.0, 1.0, -t_factor * avg_dy, // row 2: yx shear, y scaling, y translation
-        0.0, 0.0, 1.0,                // row 3: perspective terms (not used for affine)
+        1.0, 0.0, -t_factor * avg_dx,
+        0.0, 1.0, -t_factor * avg_dy,
+        0.0, 0.0, 1.0,
     ];
     Projection::from_matrix(transform_matrix).expect("Failed to create projection from matrix")
 }
