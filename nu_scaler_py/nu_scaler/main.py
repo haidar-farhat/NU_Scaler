@@ -895,20 +895,23 @@ class LiveFeedScreen(QWidget):
             return None
 
     def update_frame(self):
-        print("[TRACE] update_frame ENTERED") # Ensure this prints
         # print("[TRACE] update_frame called") # Optional: Uncomment for very verbose tracing
         try:
+            print("[TRACE] update_frame ENTERED try block") # Moved inside try
             if not self.capture:
-                # print("[TRACE] update_frame: No capture object, returning.")
+                print("[DEBUG] update_frame: No capture object, returning early.") # Added detail
                 return
             
-            # print("[TRACE] update_frame: Calling get_frame()...")
+            print("[DEBUG] update_frame: Attempting self.capture.get_frame()...") # Added before call
             frame_result = self.capture.get_frame()
+            print(f"[DEBUG] update_frame: self.capture.get_frame() returned: {type(frame_result)}") # Added after call
+
             if frame_result is None:
-                # print("[TRACE] update_frame: get_frame() returned None, returning.")
+                # print("[TRACE] update_frame: get_frame() returned None, returning.") # Keep commented unless needed
                 return # No frame yet
             
-            print(f"[DEBUG] update_frame: Got frame_result.") # DEBUG PRINT
+            # This print is now redundant if the one above works
+            # print(f"[DEBUG] update_frame: Got frame_result.") 
 
             # --- Base FPS Calculation START ---
             now_for_base_fps = time.perf_counter()
@@ -1040,9 +1043,18 @@ class LiveFeedScreen(QWidget):
             self._upscale_thread.start()
             print(f"[DEBUG] update_frame: Upscale thread started.") # DEBUG PRINT
         except Exception as e:
-            print(f"[EXCEPTION] update_frame: {e}")
+            # Enhanced exception printing
+            print(f"[EXCEPTION] An error occurred within update_frame loop:")
+            print(f"[EXCEPTION] Type: {type(e).__name__}")
+            print(f"[EXCEPTION] Error: {e}")
+            print(f"[EXCEPTION] Traceback:")
             import traceback
-            traceback.print_exc()
+            traceback.print_exc() # Print full traceback to console
+            # Optionally, emit to log signal as well
+            if hasattr(self, 'log_signal') and self.log_signal:
+                self.log_signal.emit(f"Error in update_frame: {e}")
+            # Decide if we should stop capture on error, or just log and continue?
+            # self.stop_capture() # Uncomment to stop capture automatically on update_frame error
 
     def _clear_upscale_thread(self):
         self._upscale_thread = None
