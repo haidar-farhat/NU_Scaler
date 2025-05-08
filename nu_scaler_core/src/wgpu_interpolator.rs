@@ -27,9 +27,7 @@ use pyo3::prelude::*; // Add import
 use pollster; // Need this for blocking on async #[new]
 use pyo3::types::PyBytes;
 use pyo3::wrap_pyfunction;
-use pyo3::numpy::{PyArrayDyn, PyReadonlyArrayDyn, ToPyArray};
 use std::num::NonZeroU32;
-use wgpu::util::DeviceExt; // For create_buffer_init
 
 // Uniform structure for the warp/blend shader - MATCHING ORIGINAL SPEC (48 Bytes)
 #[repr(C)]
