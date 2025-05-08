@@ -16,6 +16,7 @@ use wgpu::{
     RenderPipeline, VertexState, FragmentState, ColorWrites, PrimitiveState, PrimitiveTopology,
     MultisampleState, TextureSampleType, TextureAspect,
     include_wgsl,
+    QuerySet, QueryType, BufferDescriptor,
 };
 use wgpu::util::DeviceExt;
 use log::{debug, info, warn};
@@ -125,6 +126,10 @@ pub struct WgpuFrameInterpolator {
     flow_upsample_pipeline: Option<ComputePipeline>,
     flow_refine_bgl: Option<BindGroupLayout>,
     flow_refine_pipeline: Option<ComputePipeline>,
+    // New fields for timestamp queries
+    timestamp_query_set: Option<QuerySet>,
+    timestamp_query_buffer: Option<wgpu::Buffer>, // Buffer for resolving queries
+    last_gpu_duration_ns: Arc<std::sync::Mutex<Option<u64>>>, // Store last duration (needs Arc+Mutex for potential future async use & interior mutability)
 }
 
 #[pymethods] // Add this block
@@ -362,6 +367,35 @@ impl WgpuFrameInterpolator {
 
 impl WgpuFrameInterpolator {
     pub fn new(device: Arc<Device>, queue: Arc<Queue>) -> Result<Self> {
+        // Check for timestamp query support
+        let features = device.features();
+        let supports_timestamps = features.contains(wgpu::Features::TIMESTAMP_QUERY);
+        if !supports_timestamps {
+            warn!("Device does not support TIMESTAMP_QUERY feature. GPU timings will be disabled.");
+        }
+
+        // Create QuerySet and Buffer if supported
+        let timestamp_query_set = if supports_timestamps {
+            Some(device.create_query_set(&wgpu::QuerySetDescriptor {
+                label: Some("Timestamp QuerySet"),
+                count: 2, // Start and End timestamps
+                ty: QueryType::Timestamp,
+            }))
+        } else {
+            None
+        };
+
+        let timestamp_query_buffer = if supports_timestamps {
+            Some(device.create_buffer(&BufferDescriptor {
+                label: Some("Timestamp Query Resolve Buffer"),
+                size: 16, // 2 timestamps * 8 bytes/timestamp (u64)
+                usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            }))
+        } else {
+            None
+        };
+
         let warp_blend_shader_module = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("Warp/Blend Shader Module (Phase 1)"),
             source: ShaderSource::Wgsl(include_str!("shaders/warp_blend.wgsl").into()), // Path: src/shaders/
@@ -681,6 +715,10 @@ impl WgpuFrameInterpolator {
             flow_upsample_pipeline, // Will be None
             flow_refine_bgl, // Will be None
             flow_refine_pipeline, // Will be None
+            // Assign new fields
+            timestamp_query_set,
+            timestamp_query_buffer,
+            last_gpu_duration_ns: Arc::new(std::sync::Mutex::new(None)),
         })
     }
 
