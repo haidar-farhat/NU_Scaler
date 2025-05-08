@@ -313,14 +313,14 @@ class LiveFeedScreen(QWidget):
         controls = QGroupBox("Capture Controls")
         form = QFormLayout(controls)
         self.source_box = QComboBox()
-        self.source_box.addItems(["Screen", "Window", "Region"])
+        self.source_box.addItems(["Screen", "Window", "Process", "Region"])
         self.backend_box = QComboBox()
         self.backend_box.addItems(["Auto", "Win32", "X11", "Wayland"])
-        self.window_box = QComboBox()
-        self.window_box.setEnabled(False)
+        self.target_box = QComboBox()
+        self.target_box.setEnabled(False)
         self.source_box.currentTextChanged.connect(self.update_source_ui)
-        self.refresh_btn = QPushButton("Refresh Windows")
-        self.refresh_btn.clicked.connect(self.refresh_windows)
+        self.refresh_targets_btn = QPushButton("Refresh Targets")
+        self.refresh_targets_btn.clicked.connect(self.refresh_targets)
         self.start_btn = QPushButton("Start")
         self.start_btn.clicked.connect(self.start_capture)
         self.stop_btn = QPushButton("Stop")
@@ -328,8 +328,8 @@ class LiveFeedScreen(QWidget):
         self.stop_btn.setEnabled(False)
         form.addRow("Input Source:", self.source_box)
         form.addRow("Backend:", self.backend_box)
-        form.addRow("Window:", self.window_box)
-        form.addRow(self.refresh_btn)
+        form.addRow("Target:", self.target_box)
+        form.addRow(self.refresh_targets_btn)
         form.addRow(self.start_btn, self.stop_btn)
 
         # Interpolation Checkbox - CORRECT PLACEMENT
@@ -386,7 +386,7 @@ class LiveFeedScreen(QWidget):
         right_layout.addWidget(self.status_bar)
         layout.addWidget(left_panel)
         layout.addWidget(right_panel, 1)
-        self.refresh_windows()
+        self.refresh_targets()
         self.update_scale_label()
         self.advanced_check = QCheckBox("Advanced GPU Optimization", self)
         self.advanced_check.setChecked(self.advanced_upscaling)
@@ -409,34 +409,76 @@ class LiveFeedScreen(QWidget):
         # TODO: Integrate with settings dialog/config
 
     def update_source_ui(self, text):
-        if text == "Window":
-            self.window_box.setEnabled(True)
+        self.target_box.clear()
+        if text == "Window" or text == "Process":
+            self.target_box.setEnabled(True)
+            self.refresh_targets_btn.setEnabled(True)
+            self.refresh_targets()
+        elif text == "Screen":
+            self.target_box.setEnabled(False)
+            self.refresh_targets_btn.setEnabled(False)
+            self.target_box.addItem("N/A - Captures primary screen")
+        elif text == "Region":
+            self.target_box.setEnabled(False)
+            self.refresh_targets_btn.setEnabled(False)
+            self.target_box.addItem("N/A - Uses fixed region coordinates")
         else:
-            self.window_box.setEnabled(False)
+            self.target_box.setEnabled(False)
+            self.refresh_targets_btn.setEnabled(False)
+            self.target_box.addItem("N/A")
 
-    def refresh_windows(self):
-        print("[GUI] Refreshing windows list...")
-        self.window_box.clear()
-        if nu_scaler_core is not None:
-            try:
-                # Make sure we have a PyScreenCapture class
-                if hasattr(nu_scaler_core, 'PyScreenCapture') and hasattr(nu_scaler_core.PyScreenCapture, 'list_windows'):
+    def refresh_targets(self):
+        current_source_type = self.source_box.currentText()
+        self.target_box.clear()
+        print(f"[GUI] Refreshing targets for source type: {current_source_type}")
+
+        if current_source_type == "Window":
+            if nu_scaler_core is not None and hasattr(nu_scaler_core, 'PyScreenCapture') and hasattr(nu_scaler_core.PyScreenCapture, 'list_windows'):
+                try:
                     windows = nu_scaler_core.PyScreenCapture.list_windows()
                     print(f"[GUI] Received windows: {windows}")
                     if windows:
-                        self.window_box.addItems(windows)
+                        self.target_box.addItems(windows)
                     else:
-                        self.window_box.addItem("No windows found")
+                        self.target_box.addItem("No windows found")
+                        self.target_box.setEnabled(False)
+                except Exception as e:
+                    print(f"[GUI] Error listing windows: {e}")
+                    traceback.print_exc()
+                    self.target_box.addItem(f"Error listing windows")
+                    self.log_signal.emit(f"Error listing windows: {e}")
+            else:
+                msg = "Window listing: Rust core or method missing"
+                print(f"[GUI] {msg}")
+                self.target_box.addItem(msg)
+                self.target_box.setEnabled(False)
+        
+        elif current_source_type == "Process":
+            try:
+                processes = []
+                for proc in psutil.process_iter(['pid', 'name', 'exe', 'username']):
+                    try:
+                        proc_name = proc.info['name'] or "N/A"
+                        if proc_name and proc.info.get('exe'):
+                           processes.append(f"{proc_name} (PID: {proc.info['pid']})")
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                        continue
+                
+                if processes:
+                    self.target_box.addItems(sorted(processes))
                 else:
-                    print("[GUI] PyScreenCapture.list_windows method not available")
-                    self.window_box.addItem("API method missing")
+                    self.target_box.addItem("No suitable processes found")
+                    self.target_box.setEnabled(False)
             except Exception as e:
-                print(f"[GUI] Error listing windows: {e}")
+                error_msg = f"Error listing processes: {e}"
+                print(f"[GUI] {error_msg}")
                 traceback.print_exc()
-                self.window_box.addItem(f"Error: {str(e)[:30]}...")
-        else:
-            print("[GUI] Rust core not available for listing windows.")
-            self.window_box.addItem("Rust core missing")
+                self.target_box.addItem(error_msg)
+                self.log_signal.emit(error_msg)
+                self.target_box.setEnabled(False)
+        
+        else: # Screen or Region
+            self.target_box.setEnabled(False)
 
     def update_scale_label(self):
         val = self.scale_slider.value() / 10.0
@@ -445,114 +487,141 @@ class LiveFeedScreen(QWidget):
     def start_capture(self):
         print("[GUI] Start capture requested.")
         if nu_scaler_core is None:
-            print("[GUI] Rust core not available for capture.")
+            self.log_signal.emit("Error: Rust core (nu_scaler_core) not available for capture.")
             self.status_bar.setText("Rust core missing")
             return
         try:
-            # Determine target based on GUI selection
             source = self.source_box.currentText()
-            window_title = self.window_box.currentText() if source == "Window" else None
-            print(f"[GUI] Source: {source}, Window Title: {window_title}")
-            # --- Remove Forced FullScreen --- 
-            # print("[GUI - DEBUG] Forcing FullScreen capture mode.")
-            # source = "Screen" # Override
-            # window_title = None # Override
-            # --- End Remove Forced FullScreen ---
+            target_selection = self.target_box.currentText()
+            print(f"[GUI] Source: {source}, Target Selection: '{target_selection}'")
+
+            capture_target_type = None
+            capture_target_param = None
 
             if source == "Screen":
-                target = nu_scaler_core.PyCaptureTarget.FullScreen
-                window = None
-                region = None
-                print("[GUI] Using FullScreen target.")
-            elif source == "Window" and window_title and window_title != "No windows found" and window_title != "Error listing windows":
-                target = nu_scaler_core.PyCaptureTarget.WindowByTitle
-                window = nu_scaler_core.PyWindowByTitle(title=window_title)
-                region = None
-                print(f"[GUI] Using WindowByTitle target: {window_title}")
-            elif source == "Region": # Fixed region for demo
-                target = nu_scaler_core.PyCaptureTarget.Region
-                window = None
-                region = nu_scaler_core.PyRegion(x=100, y=100, width=640, height=480)
-                print(f"[GUI] Using Region target: {region.x},{region.y} {region.width}x{region.height}")
+                if hasattr(nu_scaler_core, "PyCaptureTarget") and "FullScreen" in nu_scaler_core.PyCaptureTarget.__members__:
+                    capture_target_type = nu_scaler_core.PyCaptureTarget.FullScreen
+                    print("[GUI] Using FullScreen target.")
+                else:
+                    self.log_signal.emit("Error: FullScreen capture target not available in nu_scaler_core.")
+                    self.status_bar.setText("FullScreen target missing in core")
+                    return
+
+            elif source == "Window":
+                if not target_selection or target_selection.startswith("No windows found") or target_selection.startswith("Error") or target_selection.startswith("Window listing:"):
+                    self.log_signal.emit("Window capture: No valid window selected.")
+                    self.status_bar.setText("Invalid window selection")
+                    return
+                if hasattr(nu_scaler_core, "PyCaptureTarget") and "WindowByTitle" in nu_scaler_core.PyCaptureTarget.__members__ and hasattr(nu_scaler_core, "PyWindowByTitle"):
+                    capture_target_type = nu_scaler_core.PyCaptureTarget.WindowByTitle
+                    capture_target_param = nu_scaler_core.PyWindowByTitle(title=target_selection)
+                    print(f"[GUI] Using WindowByTitle target: {target_selection}")
+                else:
+                    self.log_signal.emit("Error: WindowByTitle capture not available in nu_scaler_core.")
+                    self.status_bar.setText("WindowByTitle target missing")
+                    return
+            
+            elif source == "Process":
+                if not target_selection or target_selection.startswith("No suitable processes found") or target_selection.startswith("Error"):
+                    self.log_signal.emit("Process capture: No valid process selected.")
+                    self.status_bar.setText("Invalid process selection")
+                    return
+                try:
+                    pid_str = target_selection[target_selection.rfind("(PID: ") + 6:-1]
+                    pid = int(pid_str)
+                    
+                    if hasattr(nu_scaler_core, "PyCaptureTarget") and "WindowByPid" in nu_scaler_core.PyCaptureTarget.__members__ and hasattr(nu_scaler_core, "PyWindowByPid"):
+                        capture_target_type = nu_scaler_core.PyCaptureTarget.WindowByPid
+                        capture_target_param = nu_scaler_core.PyWindowByPid(pid=pid)
+                        print(f"[GUI] Using WindowByPid target: {pid}")
+                        self.log_signal.emit(f"Attempting capture for PID {pid} using WindowByPid.")
+                    else:
+                        self.log_signal.emit(f"Error: nu_scaler_core does not support WindowByPid. Process capture for PID {pid} aborted.")
+                        self.status_bar.setText("Process capture by PID not supported by core.")
+                        print(f"[GUI] Error: nu_scaler_core does not support WindowByPid. Cannot capture process {pid}.")
+                        return
+                except ValueError:
+                    self.log_signal.emit(f"Error: Could not parse PID from selection '{target_selection}'.")
+                    self.status_bar.setText("Invalid process selection (PID parsing failed)")
+                    return
+            
+            elif source == "Region":
+                if hasattr(nu_scaler_core, "PyCaptureTarget") and "Region" in nu_scaler_core.PyCaptureTarget.__members__ and hasattr(nu_scaler_core, "PyRegion"):
+                    capture_target_type = nu_scaler_core.PyCaptureTarget.Region
+                    capture_target_param = nu_scaler_core.PyRegion(x=100, y=100, width=800, height=600)
+                    print(f"[GUI] Using Region target: x={capture_target_param.x}, y={capture_target_param.y}, w={capture_target_param.width}, h={capture_target_param.height}")
+                else:
+                    self.log_signal.emit("Error: Region capture not available/configured in nu_scaler_core.")
+                    self.status_bar.setText("Region target missing/misconfigured")
+                    return
             else:
-                print("[GUI] Invalid capture configuration.")
-                self.status_bar.setText("Invalid capture config")
+                self.log_signal.emit(f"Error: Unknown capture source '{source}'.")
+                self.status_bar.setText(f"Unknown source: {source}")
                 return
 
-            print("[GUI] Calling capture.start()...")
+            if capture_target_type is None:
+                self.log_signal.emit("Error: Capture target type was not set.")
+                self.status_bar.setText("Capture target type not set.")
+                return
+
+            if self.capture:
+                self.stop_capture(silent=True)
+
+            print(f"[GUI] Initializing PyScreenCapture for target type: {capture_target_type}")
             self.capture = nu_scaler_core.PyScreenCapture()
-            self.capture.start(target, window, region)
+            
+            print(f"[GUI] Calling self.capture.start(target_type={capture_target_type}, target_param={capture_target_param})")
+            self.capture.start(capture_target_type, target_param)
             print("[GUI] capture.start() returned.")
 
-            # Remove the delay
-            # print("[GUI] Waiting 2 seconds before starting frame timer...")
-            # time.sleep(2.0)
-            # print("[GUI] Starting frame timer.")
-
-            self.upscaler_initialized = False # Reset upscaler state
-            self.upscaler = None
-            self.timer.start()  # Start the timer (throttled)
+            self.upscaler_initialized = False
+            self.upscaler = None 
+            self.timer.start() 
             self.start_btn.setEnabled(False)
             self.stop_btn.setEnabled(True)
-            self.status_bar.setText("Capture started")
+            self.source_box.setEnabled(False)
+            self.target_box.setEnabled(False)
+            self.refresh_targets_btn.setEnabled(False)
+            self.status_bar.setText(f"Capture started ({source})")
+            self.log_signal.emit(f"Capture started. Source: {source}, Target: {target_selection if capture_target_param else 'N/A'}")
             print("[GUI] Capture timer started.")
-        except Exception as e:
-            print(f"[GUI] Error starting capture: {e}")
-            self.status_bar.setText(f"Error starting capture: {e}")
-            self.log_signal.emit(f"Error starting capture: {e}")
 
-    def stop_capture(self):
-        import threading as _threading
-        import gc
-        import psutil
-        print('[DEBUG] stop_capture: called')
-        print(f'[DEBUG] stop_capture: active threads before: {_threading.active_count()}')
-        if self.capture:
-            try:
-                self.capture.stop()
-                print('[DEBUG] stop_capture: capture stopped')
-            except Exception as e:
-                print(f'[DEBUG] stop_capture: error stopping capture: {e}')
-            self.capture = None
+        except ImportError:
+             self.log_signal.emit("Fatal Error: nu_scaler_core module is not available. Cannot start capture.")
+             self.status_bar.setText("ERROR: nu_scaler_core MISSING!")
+             print("[GUI] FATAL: nu_scaler_core not imported.")
+        except AttributeError as ae:
+            error_message = f"Core AttributeError: {ae}. Functions in nu_scaler_core might be missing or named differently."
+            print(f"[GUI] {error_message}")
+            self.log_signal.emit(error_message)
+            self.status_bar.setText("Core library error (Attribute)")
+            traceback.print_exc()
+        except Exception as e:
+            error_message = f"Error starting capture: {e}"
+            print(f"[GUI] {error_message}")
+            self.log_signal.emit(error_message)
+            self.status_bar.setText(f"Error starting capture")
+            traceback.print_exc()
+            self.start_btn.setEnabled(True)
+            self.stop_btn.setEnabled(False)
+            self.source_box.setEnabled(True)
+            self.update_source_ui(self.source_box.currentText()) 
+
+    def stop_capture(self, silent=False):
+        if not silent:
+            self.status_bar.setText("Capture stopped")
+        
+        self.source_box.setEnabled(True)
+        self.update_source_ui(self.source_box.currentText())
         self.timer.stop()
-        print('[DEBUG] stop_capture: timer stopped')
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
-        self.status_bar.setText("Capture stopped")
-        # Clean up worker and thread
-        if hasattr(self, '_upscale_thread') and self._upscale_thread is not None:
-            print(f'[DEBUG] stop_capture: upscale thread state: {self._upscale_thread.isRunning()}')
-            self._upscale_thread.quit()
-            self._upscale_thread.wait(2000)
-            print('[DEBUG] stop_capture: upscale thread quit and waited')
-            self._upscale_thread = None
-        if hasattr(self, '_upscale_worker') and self._upscale_worker is not None:
-            print('[DEBUG] stop_capture: deleting upscale worker')
-            self._upscale_worker = None
-        print(f'[DEBUG] stop_capture: active threads after: {_threading.active_count()}')
-        # Explicitly delete upscaler and capture
-        if hasattr(self, 'upscaler') and self.upscaler is not None:
-            print('[DEBUG] stop_capture: deleting upscaler')
-            del self.upscaler
-            self.upscaler = None
-        if hasattr(self, 'capture') and self.capture is not None:
-            print('[DEBUG] stop_capture: deleting capture')
-            del self.capture
-            self.capture = None
-        gc.collect()
-        print(f'[DEBUG] stop_capture: gc collected, objects: {len(gc.get_objects())}')
-        print(f'[DEBUG] stop_capture: OS handle count: {psutil.Process().num_handles()}')
-        # Delayed watchdogs
-        import threading
-        def watchdog(msg):
-            print(f'[WATCHDOG] {msg}')
-        threading.Timer(2, watchdog, args=("2s after stop_capture",)).start()
-        threading.Timer(5, watchdog, args=("5s after stop_capture",)).start()
-        threading.Timer(10, watchdog, args=("10s after stop_capture",)).start()
-
-        if self.fullscreen_display_window:
-            self.fullscreen_display_window.close() # Ensure fullscreen window is closed
-            # self.fullscreen_display_window = None # Can be set to None here or when it signals closed
+        self.target_box.setEnabled(True)
+        self.refresh_targets_btn.setEnabled(True)
+        self.upscaler = None
+        self.capture = None
+        self.timer.start()
+        self.log_signal.emit("Capture stopped")
 
     def toggle_advanced_upscaling(self, state):
         try:
@@ -881,11 +950,7 @@ class LiveFeedScreen(QWidget):
         else:
             if not self.fullscreen_display_window:
                 self.fullscreen_display_window = FullScreenDisplayWindow()
-                # Optional: connect signals from fullscreen_display_window if needed, e.g., its closeEvent
-                # self.fullscreen_display_window.destroyed.connect(self.on_fullscreen_window_destroyed)
-
             # Get current content from the embedded preview to show in fullscreen
-            # (Assumes AspectRatioPreview has _pixmap and _overlay_text attributes or getters)
             current_pixmap = self.output_preview._pixmap 
             current_overlay_text = self.output_preview._overlay_text
 
@@ -900,11 +965,6 @@ class LiveFeedScreen(QWidget):
             self.output_preview._original_text_when_fullscreen = current_overlay_text # Store for restoration
             self.output_preview.set_pixmap(QPixmap()) # Clear embedded pixmap
             self.output_preview.set_overlay("Output in dedicated window\n(Double-click here or Esc in window to exit)")
-
-    # def on_fullscreen_window_destroyed(self):
-    #     self.fullscreen_display_window = None
-    #     # Potentially restore main GUI's output_preview state if it was altered
-    #     print("[DEBUG] Fullscreen display window destroyed")
 
     def toggle_interpolation(self, checked):
         self.interpolation_enabled = checked
@@ -1027,7 +1087,7 @@ class SettingsScreen(QWidget):
 
     def refresh_devices(self):
         if self.live_feed_screen:
-            self.live_feed_screen.refresh_windows()
+            self.live_feed_screen.refresh_targets()
 
     def start_pipeline(self):
         if self.live_feed_screen:
