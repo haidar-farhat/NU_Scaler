@@ -69,14 +69,12 @@ struct CoarseHSParams {
     _padding: f32,    // 4 bytes -> total 16 bytes
 }
 
-// Uniforms for flow_upsample.wgsl
+// Uniforms for flow_upsample.wgsl (restored to vec2<u32> style)
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct UpsampleUniforms { // Using u32 fields workaround
-    src_width: u32,
-    src_height: u32,
-    dst_width: u32,
-    dst_height: u32,
+struct UpsampleUniforms {
+    src_size: [u32; 2],
+    dst_size: [u32; 2],
 }
 
 // Uniforms for flow_refine.wgsl
@@ -388,11 +386,18 @@ impl WgpuFrameInterpolator {
         // --- Phase 2.3 Setup: Hierarchical Flow Refinement --- 
 
         // Flow Upsample Shader, BGL, and Pipeline
-        // Using MINIMAL hardcoded string for diagnostics
+        // Restoring full shader content (vec2<u32> version)
         let flow_upsample_shader_string = r#"
-        struct TestUniforms {
-          a: u32;
+        // nu_scaler_core/src/shaders/flow_upsample.wgsl (intended version)
+        // Bilinearly upsamples a flow field.
+
+        struct UpsampleUniforms {
+          src_size: vec2<u32>;
+          dst_size: vec2<u32>;
         }
+
+        @group(0) @binding(0) var<uniform> u: UpsampleUniforms;
+
         @group(0) @binding(0) var<uniform> u: TestUniforms;
         @compute @workgroup_size(1, 1, 1) fn main() {
           // Minimal dummy compute shader
