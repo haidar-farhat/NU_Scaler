@@ -398,22 +398,66 @@ impl WgpuFrameInterpolator {
 
         @group(0) @binding(0) var<uniform> u: UpsampleUniforms;
 
-        @group(0) @binding(0) var<uniform> u: TestUniforms;
-        @compute @workgroup_size(1, 1, 1) fn main() {
-          // Minimal dummy compute shader
-          let _ = u.a; 
+        @group(0) @binding(1) var src_flow_tex: texture_2d<f32>; // Input flow (e.g., RG32Float)
+        @group(0) @binding(2) var bilinear_sampler: sampler;
+        @group(0) @binding(3) var dst_flow_tex: texture_storage_2d<rg32float, write>; // Output flow
+
+        @compute @workgroup_size(16, 16, 1) // Or other appropriate size
+        fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+          // Boundary check against destination texture size
+          if (id.x >= u.dst_size.x || id.y >= u.dst_size.y) {
+            return;
+          }
+
+          // Calculate UV coordinates for sampling the source texture.
+          let dst_normalized_uv = (vec2<f32>(id.xy) + 0.5) / vec2<f32>(u.dst_size);
+
+          let sampled_flow_vec4 = textureSampleLevel(src_flow_tex, bilinear_sampler, dst_normalized_uv, 0.0);
+          let flow_vec2 = sampled_flow_vec4.xy; // Assuming flow is in .rg channels
+
+          textureStore(dst_flow_tex, vec2<i32>(id.xy), vec4<f32>(flow_vec2.x, flow_vec2.y, 0.0, 1.0));
         }
         "#;
 
         let flow_upsample_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Flow Upsample Shader"), // Label remains the same for error tracking
+            label: Some("Flow Upsample Shader"),
             source: wgpu::ShaderSource::Wgsl(flow_upsample_shader_string.into()),
         });
 
-        // NOTE: The BGL and Pipeline creation that follows this will now be INCORRECT
-        // because the shader bindings/uniforms have changed drastically.
-        // We expect compilation errors related to *that* mismatch, but hopefully
-        // the WGSL PARSING error itself goes away.
+        // Restore BGL and Pipeline for the upsample shader
+        let flow_upsample_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("Flow Upsample BGL"),
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0, visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: Some(NonZeroU64::new(std::mem::size_of::<UpsampleUniforms>() as u64).unwrap()) },
+                    count: None },
+                BindGroupLayoutEntry {
+                    binding: 1, visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture { sample_type: TextureSampleType::Float { filterable: true }, view_dimension: TextureViewDimension::D2, multisampled: false },
+                    count: None },
+                BindGroupLayoutEntry {
+                    binding: 2, visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None },
+                BindGroupLayoutEntry {
+                    binding: 3, visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::StorageTexture { access: StorageTextureAccess::WriteOnly, format: TextureFormat::Rg32Float, view_dimension: TextureViewDimension::D2 },
+                    count: None },
+            ],
+        });
+        let flow_upsample_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+            label: Some("Flow Upsample Pipeline Layout"),
+            bind_group_layouts: &[&flow_upsample_bgl],
+            push_constant_ranges: &[],
+        });
+        let flow_upsample_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("Flow Upsample Pipeline"),
+            layout: Some(&flow_upsample_pipeline_layout),
+            module: &flow_upsample_shader_module,
+            entry_point: "main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        });
 
         // Flow Refine Shader, BGL, and Pipeline
         let refine_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -490,8 +534,8 @@ impl WgpuFrameInterpolator {
             flow_sampler,
             final_flow_texture: None,
             final_flow_view: None,
-            flow_upsample_bgl: None,
-            flow_upsample_pipeline: None,
+            flow_upsample_bgl: Some(flow_upsample_bgl),
+            flow_upsample_pipeline: Some(flow_upsample_pipeline),
             flow_refine_bgl: Some(flow_refine_bgl),
             flow_refine_pipeline: Some(flow_refine_pipeline),
         })
@@ -906,7 +950,7 @@ impl WgpuFrameInterpolator {
 
             // 1. Upsample Flow
             // Using u32 fields workaround for instantiation:
-            let upsample_uniforms_data = UpsampleUniforms { src_width: src_w, src_height: src_h, dst_width: dst_w, dst_height: dst_h }; 
+            let upsample_uniforms_data = UpsampleUniforms { src_size: [src_w, src_h], dst_size: [dst_w, dst_h] };
             let upsample_uniform_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(&format!("Upsample Uniforms L{}->L{}", coarser_level_idx, finer_level_idx)),
                 contents: bytemuck::bytes_of(&upsample_uniforms_data),
