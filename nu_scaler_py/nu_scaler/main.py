@@ -633,7 +633,47 @@ class LiveFeedScreen(QWidget):
                 return # No frame yet
 
             frame_bytes_obj, in_w, in_h = frame_result
-            frame = frame_bytes_obj
+            current_captured_frame_bytes = frame_bytes_obj # Keep original for prev_frame_data
+
+            # --- Frame Interpolation Logic START ---
+            frame_to_process = current_captured_frame_bytes
+            # w_to_process, h_to_process remain in_w, in_h as interpolation doesn't change dimensions
+
+            if self.interpolation_enabled and self.interpolator and self.prev_frame_data:
+                prev_frame_bytes, prev_w, prev_h = self.prev_frame_data
+                if prev_w == in_w and prev_h == in_h:
+                    try:
+                        # print(f"[DEBUG] Interpolating: prev ({len(prev_frame_bytes)}B) -> current ({len(current_captured_frame_bytes)}B)")
+                        interp_start_time = time.perf_counter()
+                        interpolated_frame_bytes = self.interpolator.interpolate_py(
+                            prev_frame_bytes, 
+                            current_captured_frame_bytes, 
+                            in_w, 
+                            in_h, 
+                            time_t=0.5
+                        )
+                        interp_duration_ms = (time.perf_counter() - interp_start_time) * 1000
+                        if interpolated_frame_bytes:
+                            frame_to_process = interpolated_frame_bytes
+                            # self.log_signal.emit(f"Frame Interpolated ({interp_duration_ms:.1f}ms)") # Can be too spammy
+                            # print(f"[DEBUG] Frame interpolated successfully in {interp_duration_ms:.1f} ms.")
+                        else:
+                            self.log_signal.emit("Frame Interpolation: interpolate_py returned None")
+                            print("[DEBUG] Frame interpolation: interpolate_py returned None")
+                    except Exception as e:
+                        error_msg = f"Frame Interpolation Error: {e}"
+                        print(f"[DEBUG] {error_msg}")
+                        self.log_signal.emit(error_msg)
+                        traceback.print_exc()
+                        # Fallback to current frame if interpolation fails
+                else:
+                    # self.log_signal.emit("Frame Interpolation: Skipped (dimension mismatch)") # Can be too spammy
+                    print("[DEBUG] Frame interpolation skipped due to dimension mismatch with previous frame.")
+                    self.prev_frame_data = None # Reset due to stream change
+            
+            # Update previous frame data with the current *captured* frame for the next iteration
+            self.prev_frame_data = (current_captured_frame_bytes, in_w, in_h)
+            # --- Frame Interpolation Logic END ---
 
             # Only re-initialize upscaler if input size or scale changes
             scale = self.scale_slider.value() / 10.0
@@ -666,9 +706,10 @@ class LiveFeedScreen(QWidget):
             out_h = int(in_h * scale)
 
             # Start worker thread for upscaling
-            print(f"[DEBUG] Starting upscale worker at {time.strftime('%H:%M:%S')}")
+            # print(f"[DEBUG] Starting upscale worker at {time.strftime('%H:%M:%S')}")
             self._upscale_thread = QThread()
-            self._upscale_worker = UpscaleWorker(self.upscaler, frame, in_w, in_h, out_w, out_h, scale)
+            # Pass frame_to_process (original or interpolated) to the worker
+            self._upscale_worker = UpscaleWorker(self.upscaler, frame_to_process, in_w, in_h, out_w, out_h, scale)
             self._upscale_worker.moveToThread(self._upscale_thread)
             self._upscale_thread.started.connect(self._upscale_worker.run)
             self._upscale_worker.finished.connect(self.on_upscale_finished)
