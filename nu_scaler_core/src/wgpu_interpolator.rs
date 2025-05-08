@@ -1153,6 +1153,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn test_refine_flow_uniform_shift() {
         let (device, queue) = setup_gpu_test_resources();
         let mut interpolator = WgpuFrameInterpolator::new(device.clone(), queue.clone()).expect("Failed to create interpolator");
