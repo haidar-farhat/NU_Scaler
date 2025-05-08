@@ -1,16 +1,11 @@
 // nu_scaler_core/src/shaders/flow_upsample.wgsl
 // Bilinearly upsamples a flow field.
 
-// Original struct commented out for testing:
-// struct UpsampleUniforms {
-//   src_size: vec2<u32>;
-//   dst_size: vec2<u32>;
-//   // No padding needed as vec2<u32> is 8 bytes, total 16 bytes.
-// }
-
-// Minimal struct for testing:
+// [[block]] struct UpsampleUniforms { // WGSL doesn't use [[block]] for top-level structs
 struct UpsampleUniforms {
-  dummy: u32;
+  src_size: vec2<u32>;
+  dst_size: vec2<u32>;
+  // No padding needed as vec2<u32> is 8 bytes, total 16 bytes.
 }
 
 @group(0) @binding(0) var<uniform> u: UpsampleUniforms;
@@ -27,12 +22,12 @@ struct UpsampleUniforms {
 // [[stage(compute), workgroup_size(16,16)]] // WGSL uses @compute @workgroup_size(16,16,1)
 @compute @workgroup_size(16, 16, 1)
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
-  if (id.x >= u.dummy || id.y >= u.dummy) {
+  if (id.x >= u.dst_size.x || id.y >= u.dst_size.y) { 
     return; 
   }
   
   // Calculate the center of the destination pixel in normalized UV coordinates for sampling.
-  let dst_pixel_center_uv = (vec2<f32>(id.xy) + 0.5) / vec2<f32>(u.dummy, u.dummy);
+  let dst_pixel_center_uv = (vec2<f32>(id.xy) + 0.5) / vec2<f32>(u.dst_size);
   
   // The user's original mapping was:
   // let uv = vec2<f32>(id.xy) + 0.5;
@@ -49,7 +44,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   // Let dst_coord = id.xy
   // Normalized position in dst: (dst_coord + 0.5) / dst_size
   // This normalized position is the same normalized position in src we want to sample from.
-  let src_sample_uv = (vec2<f32>(id.xy) + 0.5) / vec2<f32>(u.dummy, u.dummy);
+  let src_sample_uv = (vec2<f32>(id.xy) + 0.5) / vec2<f32>(u.dst_size);
 
   // Sample bilinearly using the provided sampler and normalized coordinates.
   // textureSampleLevel returns vec4<f32> for texture_2d<f32> (like Rg32Float).
