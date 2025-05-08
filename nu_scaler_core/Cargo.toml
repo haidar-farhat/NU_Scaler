@@ -5,12 +5,15 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 anyhow = "1.0"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 log = "0.4"
 pollster = "0.3"
-pyo3 = { version = "0.21", features = ["extension-module", "numpy"], optional = true }
+pyo3 = { version = "0.21", features = ["extension-module", "numpy"] }
 wgpu = "0.20.0"
 raw-window-handle = "0.6"
 bytemuck = { version = "1.12", features = ["derive"] }
@@ -58,10 +61,11 @@ windows = { version = "0.56", features = [
 
 [dev-dependencies]
 # Add test dependencies here
+env_logger = "0.11"
 
 [features]
 default = ["python"]
-python = ["pyo3/extension-module", "pyo3/numpy", "dep:serde", "dep:serde_json"]
+python = ["dep:pyo3", "dep:serde", "dep:serde_json"]
 fsr3 = []
 
 # dlss = ["dep:dlss-sys"]
