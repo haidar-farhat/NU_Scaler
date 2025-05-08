@@ -11,7 +11,7 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 log = "0.4"
 pollster = "0.3"
 pyo3 = { version = "0.21", features = ["extension-module"], optional = true }
-wgpu = "0.19"
+wgpu = "0.20.0"
 raw-window-handle = "0.6"
 bytemuck = { version = "1.12", features = ["derive"] }
 futures = { version = "0.3", features = ["executor"] } 
