@@ -381,9 +381,11 @@ impl WgpuFrameInterpolator {
         // --- Phase 2.3 Setup: Hierarchical Flow Refinement --- 
 
         // Flow Upsample Shader, BGL, and Pipeline
-        let upsample_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Flow Upsample Shader"),
+        let flow_upsample_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Flow Upsample Shader"), // This is the label from the error!
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/flow_upsample.wgsl").into()),
+            // OR using include_wgsl! :
+            // source: include_wgsl!("shaders/flow_upsample.wgsl"),
         });
         let flow_upsample_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("Flow Upsample BGL"),
