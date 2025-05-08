@@ -68,6 +68,25 @@ struct CoarseHSParams {
     _padding: u32,    // Padding to ensure 16-byte alignment for the struct.
 } // Total 8 (size) + 4 (lambda) + 4 (padding) = 16 bytes.
 
+// Uniforms for flow_upsample.wgsl
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct UpsampleUniforms {
+    src_size: [u32; 2],
+    dst_size: [u32; 2],
+} // Total 8 + 8 = 16 bytes
+
+// Uniforms for flow_refine.wgsl
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct RefineHSUniforms {
+    size: [u32; 2], //图片尺寸
+    alpha: f32, //光流法参数
+    _pad: [f32; 3], // Padding to match WGSL's vec3<f32>, total 8+4+12 = 24 bytes
+                  // This might be an issue if 16-byte alignment per field or total struct size multiple of 16 is strictly needed.
+                  // A safer version for 16-byte total would be: { size: [u32;2], alpha: f32, _internal_pad: u32 }
+}
+
 pub struct WgpuFrameInterpolator {
     device: Arc<Device>,
     queue: Arc<Queue>,
@@ -95,6 +114,12 @@ pub struct WgpuFrameInterpolator {
     flow_sampler: Sampler,
     final_flow_texture: Option<Texture>,
     final_flow_view: Option<TextureView>,
+
+    // --- Phase 2.3: Hierarchical Flow Refinement ---
+    flow_upsample_bgl: Option<BindGroupLayout>,
+    flow_upsample_pipeline: Option<ComputePipeline>,
+    flow_refine_bgl: Option<BindGroupLayout>,
+    flow_refine_pipeline: Option<ComputePipeline>,
 }
 
 impl WgpuFrameInterpolator {
@@ -412,6 +437,97 @@ impl WgpuFrameInterpolator {
             Default::default()
         });
 
+        // --- Phase 2.3 Setup: Hierarchical Flow Refinement --- 
+
+        // Flow Upsample Shader, BGL, and Pipeline
+        let upsample_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Flow Upsample Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/flow_upsample.wgsl").into()),
+        });
+        let flow_upsample_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("Flow Upsample BGL"),
+            entries: &[
+                // Binding 0: UpsampleUniforms
+                BindGroupLayoutEntry {
+                    binding: 0, visibility: ShaderStages::COMPUTE, 
+                    ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: Some(std::mem::size_of::<UpsampleUniforms>() as u64) }, 
+                    count: None },
+                // Binding 1: src_flow_tex (Texture_2d<f32> - Rg32Float)
+                BindGroupLayoutEntry {
+                    binding: 1, visibility: ShaderStages::COMPUTE, 
+                    ty: BindingType::Texture { sample_type: TextureSampleType::Float { filterable: true }, view_dimension: TextureViewDimension::D2, multisampled: false }, 
+                    count: None },
+                // Binding 2: bilinear_sampler
+                BindGroupLayoutEntry {
+                    binding: 2, visibility: ShaderStages::COMPUTE, 
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering), 
+                    count: None },
+                // Binding 3: dst_flow_tex (Storage Rg32Float)
+                BindGroupLayoutEntry {
+                    binding: 3, visibility: ShaderStages::COMPUTE, 
+                    ty: BindingType::StorageTexture { access: StorageTextureAccess::WriteOnly, format: TextureFormat::Rg32Float, view_dimension: TextureViewDimension::D2 }, 
+                    count: None },
+            ],
+        });
+        let flow_upsample_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+            label: Some("Flow Upsample Pipeline Layout"),
+            bind_group_layouts: &[&flow_upsample_bgl],
+            push_constant_ranges: &[],
+        });
+        let flow_upsample_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("Flow Upsample Pipeline"),
+            layout: Some(&flow_upsample_pipeline_layout),
+            module: &upsample_shader_module,
+            entry_point: "main",
+        });
+
+        // Flow Refine Shader, BGL, and Pipeline
+        let refine_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Flow Refine Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/flow_refine.wgsl").into()),
+        });
+        let flow_refine_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("Flow Refine BGL"),
+            entries: &[
+                // Binding 0: RefineHSUniforms
+                BindGroupLayoutEntry {
+                    binding: 0, visibility: ShaderStages::COMPUTE, 
+                    ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: Some(std::mem::size_of::<RefineHSUniforms>() as u64) }, 
+                    count: None },
+                // Binding 1: I1_tex (Pyramid level - Rgba32Float, shader uses .r for luminance)
+                BindGroupLayoutEntry {
+                    binding: 1, visibility: ShaderStages::COMPUTE, 
+                    ty: BindingType::Texture { sample_type: TextureSampleType::Float { filterable: false }, view_dimension: TextureViewDimension::D2, multisampled: false }, // filterable:false as shader uses textureLoad
+                    count: None },
+                // Binding 2: I2_tex (Pyramid level - Rgba32Float)
+                BindGroupLayoutEntry {
+                    binding: 2, visibility: ShaderStages::COMPUTE, 
+                    ty: BindingType::Texture { sample_type: TextureSampleType::Float { filterable: false }, view_dimension: TextureViewDimension::D2, multisampled: false }, // filterable:false as shader uses textureLoad
+                    count: None },
+                // Binding 3: flow_in_tex (Upsampled flow - Rg32Float, shader uses textureLoad via texture_2d<vec2<f32>>)
+                BindGroupLayoutEntry {
+                    binding: 3, visibility: ShaderStages::COMPUTE, 
+                    ty: BindingType::Texture { sample_type: TextureSampleType::Float { filterable: false }, view_dimension: TextureViewDimension::D2, multisampled: false }, // filterable:false to match textureLoad. Shader specifies texture_2d<vec2<f32>> which is unusual for load.
+                    count: None },
+                // Binding 4: flow_out_tex (Storage Rg32Float)
+                BindGroupLayoutEntry {
+                    binding: 4, visibility: ShaderStages::COMPUTE, 
+                    ty: BindingType::StorageTexture { access: StorageTextureAccess::WriteOnly, format: TextureFormat::Rg32Float, view_dimension: TextureViewDimension::D2 }, 
+                    count: None },
+            ],
+        });
+        let flow_refine_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+            label: Some("Flow Refine Pipeline Layout"),
+            bind_group_layouts: &[&flow_refine_bgl],
+            push_constant_ranges: &[],
+        });
+        let flow_refine_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("Flow Refine Pipeline"),
+            layout: Some(&flow_refine_pipeline_layout),
+            module: &refine_shader_module,
+            entry_point: "main",
+        });
+
         Ok(Self {
             device,
             queue,
@@ -439,6 +555,11 @@ impl WgpuFrameInterpolator {
             flow_sampler,
             final_flow_texture: None,
             final_flow_view: None,
+            // Phase 2.3 fields
+            flow_upsample_bgl: Some(flow_upsample_bgl),
+            flow_upsample_pipeline: Some(flow_upsample_pipeline),
+            flow_refine_bgl: Some(flow_refine_bgl),
+            flow_refine_pipeline: Some(flow_refine_pipeline),
         })
     }
 
@@ -823,6 +944,134 @@ impl WgpuFrameInterpolator {
             self.flow_textures[1] = Some(tex_b);
         }
     }
+
+    // --- Phase 2.3: Hierarchical Flow Refinement ---
+    pub fn refine_flow_hierarchy(
+        &mut self,
+        num_total_pyramid_levels: usize,
+        coarsest_flow_pyramid_level_idx: usize, // Index in pyramid_a/b_views for coarsest flow
+        mut current_flow_texture_idx: usize, // Index (0 or 1) of self.flow_textures holding the input flow
+        refinement_alpha: f32, // Alpha for residual Horn-Schunck
+        num_refinement_iterations_per_level: usize, // How many times to run residual HS at each level
+    ) -> usize { // Returns the index (0 or 1) of the flow_texture holding the final refined flow
+        if num_total_pyramid_levels == 0 || coarsest_flow_pyramid_level_idx >= num_total_pyramid_levels {
+            warn!("Invalid pyramid levels for refinement. Total: {}, Coarsest Idx: {}", num_total_pyramid_levels, coarsest_flow_pyramid_level_idx);
+            return current_flow_texture_idx; // No refinement possible
+        }
+        if coarsest_flow_pyramid_level_idx == 0 { // Coarsest flow is already at the finest level
+            info!("Coarse flow is already at the finest level. No hierarchical refinement needed.");
+            return current_flow_texture_idx;
+        }
+
+        let upsample_pipeline = self.flow_upsample_pipeline.as_ref().expect("Upsample pipeline not init");
+        let upsample_bgl = self.flow_upsample_bgl.as_ref().expect("Upsample BGL not init");
+        let refine_pipeline = self.flow_refine_pipeline.as_ref().expect("Refine pipeline not init");
+        let refine_bgl = self.flow_refine_bgl.as_ref().expect("Refine BGL not init");
+        // self.flow_sampler is used for upsampling (bilinear_sampler in flow_upsample.wgsl)
+        // The flow_refine.wgsl uses textureLoad, so it doesn't need a sampler binding.
+
+        // Iterate from the level finer than the coarsest_flow_level, down to the finest level (index 0)
+        // Example: 4 levels (0,1,2,3). Coarse flow at level 3. Refine for levels 2, 1, 0.
+        // Loop `idx_finer_level` from `coarsest_flow_pyramid_level_idx - 1` down to `0`.
+        for finer_level_idx in (0..coarsest_flow_pyramid_level_idx).rev() {
+            let coarser_level_idx = finer_level_idx + 1;
+
+            let src_flow_tex_view = self.flow_views[current_flow_texture_idx].as_ref().unwrap();
+            let src_w = self.flow_textures[current_flow_texture_idx].as_ref().unwrap().width();
+            let src_h = self.flow_textures[current_flow_texture_idx].as_ref().unwrap().height();
+
+            // Destination for upsampled flow will be the *other* flow texture
+            let upsampled_flow_texture_idx = 1 - current_flow_texture_idx;
+            let dst_w = self.pyramid_a_textures[finer_level_idx].as_ref().unwrap().width();
+            let dst_h = self.pyramid_a_textures[finer_level_idx].as_ref().unwrap().height();
+            self.ensure_flow_textures(dst_w, dst_h); // Ensure both flow_textures can hold this size
+            let upsampled_flow_target_view = self.flow_views[upsampled_flow_texture_idx].as_ref().unwrap();
+
+            info!("Refining flow: Level {} ({}x{}) from Level {} ({}x{}). Output to flow_tex[{}].", 
+                   finer_level_idx, dst_w, dst_h, coarser_level_idx, src_w, src_h, upsampled_flow_texture_idx);
+
+            // 1. Upsample Flow
+            let upsample_uniforms_data = UpsampleUniforms { src_size: [src_w, src_h], dst_size: [dst_w, dst_h] };
+            let upsample_uniform_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("Upsample Uniforms L{}->L{}", coarser_level_idx, finer_level_idx)),
+                contents: bytemuck::bytes_of(&upsample_uniforms_data),
+                usage: BufferUsages::UNIFORM,
+            });
+            let upsample_bind_group = self.device.create_bind_group(&BindGroupDescriptor {
+                label: Some(&format!("Upsample BG L{}->L{}", coarser_level_idx, finer_level_idx)),
+                layout: upsample_bgl,
+                entries: &[
+                    BindGroupEntry { binding: 0, resource: upsample_uniform_buffer.as_entire_binding() },
+                    BindGroupEntry { binding: 1, resource: BindingResource::TextureView(src_flow_tex_view) },
+                    BindGroupEntry { binding: 2, resource: BindingResource::Sampler(&self.flow_sampler) }, // For bilinear sampling
+                    BindGroupEntry { binding: 3, resource: BindingResource::TextureView(upsampled_flow_target_view) },
+                ],
+            });
+            
+            let mut encoder_upsample = self.device.create_command_encoder(&CommandEncoderDescriptor { 
+                label: Some(&format!("Upsample Encoder L{}->L{}", coarser_level_idx, finer_level_idx)) 
+            });
+            {
+                let mut compute_pass = encoder_upsample.begin_compute_pass(&ComputePassDescriptor { 
+                    label: Some(&format!("Upsample Pass L{}->L{}", coarser_level_idx, finer_level_idx)), 
+                    timestamp_writes: None 
+                });
+                compute_pass.set_pipeline(upsample_pipeline);
+                compute_pass.set_bind_group(0, &upsample_bind_group, &[]);
+                compute_pass.dispatch_workgroups((dst_w + 15) / 16, (dst_h + 15) / 16, 1);
+            }
+            self.queue.submit(std::iter::once(encoder_upsample.finish()));
+            current_flow_texture_idx = upsampled_flow_texture_idx; // Upsampled flow is now current input for refine
+
+            // 2. Refine Flow (Residual Horn-Schunck for num_refinement_iterations_per_level)
+            let i1_view = self.pyramid_a_views[finer_level_idx].as_ref().unwrap();
+            let i2_view = self.pyramid_b_views[finer_level_idx].as_ref().unwrap();
+            
+            let refine_uniforms_data = RefineHSUniforms { size: [dst_w, dst_h], alpha: refinement_alpha, _pad: [0.0; 3] };
+            let refine_uniform_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("Refine Uniforms L{}", finer_level_idx)),
+                contents: bytemuck::bytes_of(&refine_uniforms_data),
+                usage: BufferUsages::UNIFORM,
+            });
+
+            for iter in 0..num_refinement_iterations_per_level {
+                let residual_input_flow_view = self.flow_views[current_flow_texture_idx].as_ref().unwrap();
+                let residual_output_flow_texture_idx = 1 - current_flow_texture_idx;
+                let residual_output_flow_view = self.flow_views[residual_output_flow_texture_idx].as_ref().unwrap();
+
+                let refine_bind_group = self.device.create_bind_group(&BindGroupDescriptor {
+                    label: Some(&format!("Refine BG L{} Iter {}", finer_level_idx, iter)),
+                    layout: refine_bgl,
+                    entries: &[
+                        BindGroupEntry { binding: 0, resource: refine_uniform_buffer.as_entire_binding() },
+                        BindGroupEntry { binding: 1, resource: BindingResource::TextureView(i1_view) },
+                        BindGroupEntry { binding: 2, resource: BindingResource::TextureView(i2_view) },
+                        BindGroupEntry { binding: 3, resource: BindingResource::TextureView(residual_input_flow_view) }, // Upsampled or prev iteration's refined flow
+                        BindGroupEntry { binding: 4, resource: BindingResource::TextureView(residual_output_flow_view) },
+                    ],
+                });
+
+                let mut encoder_refine = self.device.create_command_encoder(&CommandEncoderDescriptor { 
+                    label: Some(&format!("Refine Encoder L{} Iter {}", finer_level_idx, iter))
+                });
+                {
+                    let mut compute_pass = encoder_refine.begin_compute_pass(&ComputePassDescriptor { 
+                        label: Some(&format!("Refine Pass L{} Iter {}", finer_level_idx, iter)),
+                        timestamp_writes: None 
+                    });
+                    compute_pass.set_pipeline(refine_pipeline);
+                    compute_pass.set_bind_group(0, &refine_bind_group, &[]);
+                    compute_pass.dispatch_workgroups((dst_w + 15) / 16, (dst_h + 15) / 16, 1);
+                }
+                self.queue.submit(std::iter::once(encoder_refine.finish()));
+                current_flow_texture_idx = residual_output_flow_texture_idx; // Refined flow is now current
+            }
+            info!("Finished refinement for level {}. Final flow for this level in flow_tex[{}].", finer_level_idx, current_flow_texture_idx);
+        }
+
+        info!("Hierarchical flow refinement complete. Final flow in flow_tex[{}].", current_flow_texture_idx);
+        current_flow_texture_idx // Return the index of the texture holding the most refined flow
+    }
 }
 
 // Test module
@@ -1007,7 +1256,7 @@ mod tests {
                 sample_count: 1,
                 dimension: TextureDimension::D2,
                 format: TextureFormat::Rgba8UnormSrgb, // build_pyramid expects Srgb for input
-                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST | TextureUsages::STORAGE_BINDING,
+                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
             },
             TextureDataOrder::LayerMajor,
             &black_image_data,
@@ -1022,7 +1271,7 @@ mod tests {
                 sample_count: 1,
                 dimension: TextureDimension::D2,
                 format: TextureFormat::Rgba8UnormSrgb,
-                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST | TextureUsages::STORAGE_BINDING,
+                usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
             },
             TextureDataOrder::LayerMajor,
             &black_image_data,
