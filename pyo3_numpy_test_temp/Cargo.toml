@@ -7,5 +7,7 @@ edition = "2021"
 name = "pyo3_numpy_test"
 crate-type = ["cdylib"]
 
+[workspace]
+
 [dependencies]
-pyo3 = { version = "0.21", features = ["extension-module", "numpy"] } 
+pyo3 = { version = "0.21", features = ["extension-module", "numpy"] }
