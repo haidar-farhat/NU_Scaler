@@ -363,11 +363,21 @@ mod tests {
             .await
             .expect("Failed to find an appropriate adapter");
 
+        // Define required features - IMPORTANT: Request FLOAT32_FILTERABLE
+        let required_features = wgpu::Features::FLOAT32_FILTERABLE;
+        // Check if the adapter supports the feature (optional but good practice)
+        let supported_features = adapter.features();
+        if !supported_features.contains(required_features) {
+            panic!("Adapter does not support FLOAT32_FILTERABLE feature, required for tests.");
+            // Or skip the test: return Err("FLOAT32_FILTERABLE not supported")... but test needs to return Result
+        }
+
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: Some("Test Device"),
-                    required_features: wgpu::Features::empty(),
+                    // required_features: wgpu::Features::empty(), // OLD
+                    required_features, // NEW: Request the feature
                     required_limits: wgpu::Limits::default().using_resolution(adapter.limits()),
                 },
                 None,
