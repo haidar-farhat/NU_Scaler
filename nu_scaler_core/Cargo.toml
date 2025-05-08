@@ -28,6 +28,28 @@ windows-sys = { version = "0.52", features = [
     "Win32_System_SystemInformation",
     "Win32_UI_WindowsAndMessaging",
 ] }
+# Added missing dependencies from error messages
+scrap = "0.5"
+windows-capture = "1.4"
+windows = { version = "0.56", features = [
+    "Foundation",
+    "Foundation_Metadata",
+    "Graphics",
+    "Graphics_Capture",
+    "Graphics_DirectX",
+    "Graphics_DirectX_Direct3D11",
+    "Win32_Foundation", 
+    "Win32_Graphics_Gdi",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Com",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_System_WinRT",
+    "Win32_System_WinRT_Graphics_Capture",
+    "core", # Added for windows::core::Interface used in gpu/memory.rs
+] }
 
 
 # Optional dependencies from previous state (may need review)
