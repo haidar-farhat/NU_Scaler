@@ -12,6 +12,12 @@ import traceback
 import threading
 import psutil
 import os
+# Import pygetwindow for PID-based window finding
+try:
+    import pygetwindow
+except ImportError:
+    pygetwindow = None
+    print("[main.py] pygetwindow library not found. Process capture fallback to window title may not work.")
 
 # Import the Rust extension as 'nu_scaler'
 try:
@@ -530,15 +536,55 @@ class LiveFeedScreen(QWidget):
                     pid_str = target_selection[target_selection.rfind("(PID: ") + 6:-1]
                     pid = int(pid_str)
                     
+                    # Ideal scenario: Core supports capturing by PID directly
                     if hasattr(nu_scaler_core, "PyCaptureTarget") and "WindowByPid" in nu_scaler_core.PyCaptureTarget.__members__ and hasattr(nu_scaler_core, "PyWindowByPid"):
                         capture_target_type = nu_scaler_core.PyCaptureTarget.WindowByPid
                         capture_target_param = nu_scaler_core.PyWindowByPid(pid=pid)
-                        print(f"[GUI] Using WindowByPid target: {pid}")
-                        self.log_signal.emit(f"Attempting capture for PID {pid} using WindowByPid.")
+                        print(f"[GUI] Using WindowByPid target (from core): {pid}")
+                        self.log_signal.emit(f"Attempting capture for PID {pid} using core WindowByPid.")
+                    elif pygetwindow is not None: # Fallback: Use pygetwindow to find window title from PID
+                        print(f"[GUI] Attempting PID to Window Title fallback for PID: {pid} using pygetwindow.")
+                        self.log_signal.emit(f"Core WindowByPid not found. Trying Python fallback for PID {pid}.")
+                        
+                        found_window = None
+                        try:
+                            candidate_windows = pygetwindow.getWindowsWithPid(pid)
+                            if candidate_windows:
+                                # Try to find a suitable window: visible and has a title.
+                                # More sophisticated selection could be added here (e.g., largest, active).
+                                for w in candidate_windows:
+                                    if w.visible and w.title: # Basic check for a main-like window
+                                        found_window = w
+                                        break 
+                                # If no visible window with title, take the first one if any
+                                if not found_window and candidate_windows:
+                                     found_window = candidate_windows[0]
+
+
+                            if found_window and found_window.title:
+                                if hasattr(nu_scaler_core, "PyCaptureTarget") and "WindowByTitle" in nu_scaler_core.PyCaptureTarget.__members__ and hasattr(nu_scaler_core, "PyWindowByTitle"):
+                                    capture_target_type = nu_scaler_core.PyCaptureTarget.WindowByTitle
+                                    capture_target_param = nu_scaler_core.PyWindowByTitle(title=found_window.title)
+                                    print(f"[GUI] Fallback: Capturing PID {pid} via window title '{found_window.title}'")
+                                    self.log_signal.emit(f"Fallback: Capturing PID {pid} using found window title: '{found_window.title}'")
+                                else:
+                                    self.log_signal.emit(f"Error: WindowByTitle capture not available in nu_scaler_core for PID {pid} fallback.")
+                                    self.status_bar.setText("WindowByTitle target missing for PID fallback")
+                                    return
+                            else:
+                                self.log_signal.emit(f"Could not find a suitable window for PID {pid} using pygetwindow.")
+                                self.status_bar.setText(f"No capturable window found for PID {pid}")
+                                return
+                        except Exception as e_gw:
+                            self.log_signal.emit(f"Error using pygetwindow for PID {pid}: {e_gw}")
+                            self.status_bar.setText(f"Error finding window for PID {pid}")
+                            traceback.print_exc()
+                            return
                     else:
-                        self.log_signal.emit(f"Error: nu_scaler_core does not support WindowByPid. Process capture for PID {pid} aborted.")
-                        self.status_bar.setText("Process capture by PID not supported by core.")
-                        print(f"[GUI] Error: nu_scaler_core does not support WindowByPid. Cannot capture process {pid}.")
+                        # pygetwindow not available, and core WindowByPid not available
+                        self.log_signal.emit(f"Error: nu_scaler_core does not support WindowByPid, and pygetwindow is not available. Process capture for PID {pid} aborted.")
+                        self.status_bar.setText("Process capture: Core & pygetwindow missing.")
+                        print(f"[GUI] Error: Cannot capture process {pid}. Core does not support WindowByPid and pygetwindow is missing.")
                         return
                 except ValueError:
                     self.log_signal.emit(f"Error: Could not parse PID from selection '{target_selection}'.")
