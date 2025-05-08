@@ -122,43 +122,10 @@ pub struct WgpuFrameInterpolator {
 
 impl WgpuFrameInterpolator {
     pub fn new(device: Arc<Device>, queue: Arc<Queue>) -> Result<Self> {
-        // WGSL Shader source as per original user spec (Phase 1.1)
-        let warp_blend_shader_source = r#"
-            struct InterpolationUniforms {
-              size: vec2<u32>,
-              _pad0: vec2<u32>,
-              time_t: f32,
-              _pad1: vec3<f32>,
-            };
-
-            @group(0) @binding(0) var<uniform> u: InterpolationUniforms;
-            @group(0) @binding(1) var frame_a_tex: texture_2d<f32>;
-            @group(0) @binding(2) var frame_b_tex: texture_2d<f32>;
-            @group(0) @binding(3) var flow_tex: texture_2d<f32>;
-            @group(0) @binding(4) var out_tex: texture_storage_2d<rgba8unorm, write>;
-            @group(0) @binding(5) var image_sampler: sampler;
-            @group(0) @binding(6) var flow_sampler: sampler;
-
-            @compute @workgroup_size(16, 16, 1)
-            fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
-                if (global_id.x >= u.size.x || global_id.y >= u.size.y) {
-                    return;
-                }
-                let output_coord_i32 = vec2<i32>(i32(global_id.x), i32(global_id.y));
-                let current_pixel_center_uv = (vec2<f32>(global_id.xy) + 0.5) / vec2<f32>(u.size);
-                let flow_pixel_delta = textureSampleLevel(flow_tex, flow_sampler, current_pixel_center_uv, 0.0).xy;
-                let uv0 = ((vec2<f32>(global_id.xy) + 0.5) - u.time_t * flow_pixel_delta) / vec2<f32>(u.size);
-                let uv1 = ((vec2<f32>(global_id.xy) + 0.5) + (1.0 - u.time_t) * flow_pixel_delta) / vec2<f32>(u.size);
-                let c0 = textureSampleLevel(frame_a_tex, image_sampler, uv0, 0.0);
-                let c1 = textureSampleLevel(frame_b_tex, image_sampler, uv1, 0.0);
-                let blended_color = mix(c0, c1, u.time_t);
-                textureStore(out_tex, output_coord_i32, blended_color);
-            }
-        "#;
-
+        // Corrected shader paths (removed ../)
         let warp_blend_shader_module = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("Warp/Blend Shader Module (Phase 1)"),
-            source: ShaderSource::Wgsl(warp_blend_shader_source.into()),
+            source: ShaderSource::Wgsl(include_str!("shaders/warp_blend.wgsl").into()), // Path corrected
         });
 
         let warp_blend_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -168,7 +135,7 @@ impl WgpuFrameInterpolator {
                 BindGroupLayoutEntry {
                     binding: 0,
                     visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+                    ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, // No size needed? Assuming None is ok if buffer size is implicitly known or not validated strictly.
                     count: None,
                 },
                 // frame_a_tex (Revert to Float { filterable: true })
@@ -254,7 +221,7 @@ impl WgpuFrameInterpolator {
         });
 
         // --- Phase 2.1 Setup: Image Pyramid --- 
-        let blur_h_shader_module = device.create_shader_module(include_wgsl!("shaders/gaussian_blur_h.wgsl"));
+        let blur_h_shader_module = device.create_shader_module(include_wgsl!("shaders/gaussian_blur_h.wgsl")); // Keep include_wgsl! if it works, assuming path is relative to src dir
         let blur_v_shader_module = device.create_shader_module(include_wgsl!("shaders/gaussian_blur_v.wgsl"));
         let downsample_shader_module = device.create_shader_module(include_wgsl!("shaders/downsample.wgsl"));
 
@@ -266,7 +233,7 @@ impl WgpuFrameInterpolator {
                 BindGroupLayoutEntry {
                     binding: 0,
                     visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+                    ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: NonZeroU64::new(std::mem::size_of::<PyramidPassParams>() as u64) }, // Using NonZeroU64
                     count: None,
                 },
                 // src_tex: Input Texture
@@ -337,7 +304,7 @@ impl WgpuFrameInterpolator {
         // --- Phase 2.2 Setup: Horn-Schunck --- 
         let hs_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Horn-Schunck Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/horn_schunck.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/horn_schunck.wgsl").into()), // Path corrected
         });
 
         // Corrected Horn-Schunck BGL to match horn_schunck.wgsl
@@ -351,7 +318,7 @@ impl WgpuFrameInterpolator {
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: Some(std::mem::size_of::<CoarseHSParams>() as u64),
+                        min_binding_size: NonZeroU64::new(std::mem::size_of::<CoarseHSParams>() as u64),
                     },
                     count: None,
                 },
@@ -440,7 +407,7 @@ impl WgpuFrameInterpolator {
         // Flow Upsample Shader, BGL, and Pipeline
         let upsample_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Flow Upsample Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/flow_upsample.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/flow_upsample.wgsl").into()), // Path corrected
         });
         let flow_upsample_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("Flow Upsample BGL"),
