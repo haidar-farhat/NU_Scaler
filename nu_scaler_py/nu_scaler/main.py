@@ -64,6 +64,8 @@ class AspectRatioPreview(QLabel):
     QLabel-based widget for displaying a QPixmap with aspect-ratio-aware scaling and a modern overlay.
     Supports double-click to toggle full-screen. Overlay is always visible and customizable.
     """
+    doubleClicked = Signal() # Signal for when the widget is double-clicked
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAlignment(Qt.AlignCenter)
@@ -71,8 +73,6 @@ class AspectRatioPreview(QLabel):
         self.setStyleSheet("background: #181818; border: 1px solid #444;")
         self._pixmap = None
         self._overlay_text = ""
-        self._is_fullscreen = False
-        self._parent_window = None
         self.installEventFilter(self)
 
     def set_pixmap(self, pixmap: QPixmap):
@@ -85,25 +85,11 @@ class AspectRatioPreview(QLabel):
         self._overlay_text = text
         self.update()
 
-    def set_parent_window(self, window):
-        """Set the parent window for full-screen toggling."""
-        self._parent_window = window
-
     def eventFilter(self, obj, event):
         if event.type() == QEvent.MouseButtonDblClick:
-            self.toggle_fullscreen()
+            self.doubleClicked.emit() # Emit signal instead of calling toggle_fullscreen
             return True
         return super().eventFilter(obj, event)
-
-    def toggle_fullscreen(self):
-        if not self._parent_window:
-            return
-        if self._is_fullscreen:
-            self._parent_window.showNormal()
-            self._is_fullscreen = False
-        else:
-            self._parent_window.showFullScreen()
-            self._is_fullscreen = True
 
     def paintEvent(self, event):
         super().paintEvent(event)
@@ -126,6 +112,44 @@ class AspectRatioPreview(QLabel):
             font.setPointSize(12)
             painter.setFont(font)
             painter.drawText(overlay_rect, Qt.AlignTop | Qt.AlignRight, self._overlay_text)
+
+class FullScreenDisplayWindow(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("NuScaler - Full Screen Output")
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setStyleSheet("background-color: black;") # Ensure no gaps
+
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0,0,0,0)
+        self.preview_widget = AspectRatioPreview(self)
+        self._layout.addWidget(self.preview_widget)
+        self.setLayout(self._layout)
+
+        # Close on double click on its own preview widget
+        self.preview_widget.doubleClicked.connect(self.close)
+
+    def set_pixmap(self, pixmap: QPixmap):
+        if pixmap and not pixmap.isNull():
+            self.preview_widget.set_pixmap(pixmap)
+        else:
+            # Optionally, clear or set a placeholder if pixmap is None/Null
+            self.preview_widget.set_pixmap(QPixmap()) # Clear
+
+    def set_overlay(self, text: str):
+        self.preview_widget.set_overlay(text)
+
+    def keyPressEvent(self, event: QEvent): # QKeyEvent is more specific but QEvent works for key() check
+        if event.key() == Qt.Key_Escape:
+            self.close()
+        else:
+            super().keyPressEvent(event)
+
+    def get_current_pixmap(self): # Helper for LiveFeedScreen if needed
+        return self.preview_widget._pixmap
+
+    def get_current_overlay_text(self): # Helper for LiveFeedScreen if needed
+        return self.preview_widget._overlay_text
 
 class UpscaleWorker(QObject):
     finished = Signal(bytes, int, int, float, str, float)
