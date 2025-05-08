@@ -15,7 +15,7 @@ struct UpsampleUniforms {
 // If texture_2d<vec2<f32>> is a special type that allows sampling as vec2, it may work.
 // Assuming standard WGSL, this should be texture_2d<f32> and a sampler is also needed.
 @group(0) @binding(1) var src_flow_tex: texture_2d<f32>; // Changed from texture_2d<vec2<f32>>
-@group(0) @binding(2) varbilinear_sampler: sampler;
+@group(0) @binding(2) var bilinear_sampler: sampler;
 
 @group(0) @binding(3) var dst_flow_tex: texture_storage_2d<rg32float, write>; // Renamed from dst_flow for clarity
 
