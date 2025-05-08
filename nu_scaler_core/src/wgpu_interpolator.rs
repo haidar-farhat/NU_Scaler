@@ -736,16 +736,16 @@ impl WgpuFrameInterpolator {
         // ** Get immutable info before mutable borrow **
         let width = self.pyramid_a_textures[level].as_ref().unwrap().width();
         let height = self.pyramid_a_textures[level].as_ref().unwrap().height();
-        // Don't get pipeline, views, or bgl yet
-        let sampler_for_hs = &self.flow_sampler; // Borrow sampler
+        // Don't get pipeline, views, bgl, or sampler yet
 
         // ** Perform mutable borrow **
         self.ensure_flow_textures(width, height);
         // ** Mutable borrow ends **
         
-        // ** Get immutable pipeline, views & bgl AFTER mutable borrow **
+        // ** Get immutable stuff AFTER mutable borrow **
         let pipeline = self.horn_schunck_pipeline.as_ref().expect("HS pipeline missing");
         let bgl = &self.horn_schunck_bgl; // Borrow BGL
+        let sampler_for_hs = &self.flow_sampler; // Borrow sampler
         let prev_frame_tex_view = self.pyramid_a_views[level].as_ref().expect("Prev frame view missing");
         let next_frame_tex_view = self.pyramid_b_views[level].as_ref().expect("Next frame view missing");
 
@@ -882,7 +882,6 @@ impl WgpuFrameInterpolator {
         let upsample_bgl = self.flow_upsample_bgl.as_ref().expect("Upsample BGL not init");
         let refine_pipeline = self.flow_refine_pipeline.as_ref().expect("Refine pipeline not init");
         let refine_bgl = self.flow_refine_bgl.as_ref().expect("Refine BGL not init");
-        let flow_sampler = self.flow_sampler.clone();
 
         for finer_level_idx in (0..coarsest_flow_pyramid_level_idx).rev() {
             let coarser_level_idx = finer_level_idx + 1;
@@ -907,7 +906,6 @@ impl WgpuFrameInterpolator {
             let upsample_bgl = self.flow_upsample_bgl.as_ref().expect("Upsample BGL missing");
             let refine_pipeline = self.flow_refine_pipeline.as_ref().expect("Refine pipeline missing");
             let refine_bgl = self.flow_refine_bgl.as_ref().expect("Refine BGL missing");
-            let sampler_ref = &self.flow_sampler; // Borrow sampler - REMOVED clone()
 
             info!("Refining flow: Level {} ({}x{}) from Level {} ({}x{}). Output to flow_tex[{}].", 
                    finer_level_idx, dst_w, dst_h, coarser_level_idx, src_w, src_h, upsampled_flow_texture_idx);
@@ -925,7 +923,7 @@ impl WgpuFrameInterpolator {
                 entries: &[
                     BindGroupEntry { binding: 0, resource: upsample_uniform_buffer.as_entire_binding() },
                     BindGroupEntry { binding: 1, resource: BindingResource::TextureView(src_flow_tex_view) },
-                    BindGroupEntry { binding: 2, resource: BindingResource::Sampler(&self.flow_sampler) }, // For bilinear sampling
+                    BindGroupEntry { binding: 2, resource: BindingResource::Sampler(&self.flow_sampler) },
                     BindGroupEntry { binding: 3, resource: BindingResource::TextureView(upsampled_flow_target_view) },
                 ],
             });
@@ -1189,6 +1187,25 @@ mod tests {
 
     // Helper function to read an Rg32Float texture into a Vec<f32>
     fn read_texture_rg32float_to_vec_f32(device: &Device, queue: &Queue, texture: &Texture) -> Vec<f32> {
-        // ... (implementation) ...
+        // ... (setup buffer, encoder, copy) ...
+        let buffer_slice = readback_buffer.slice(..);
+        let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
+        buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+            sender.send(result).unwrap();
+        });
+        device.poll(wgpu::Maintain::Wait); // Wait for mapping
+        
+        let result = futures::executor::block_on(receiver.receive());
+        match result {
+            Some(Ok(())) => {
+                let data = buffer_slice.get_mapped_range();
+                let result_vec: Vec<f32> = bytemuck::cast_slice(&data).to_vec();
+                drop(data); // Unmap buffer before it's dropped
+                readback_buffer.unmap();
+                result_vec // Ensure this is the returned value
+            }
+            Some(Err(e)) => panic!("Failed to map buffer for texture readback: {:?}", e),
+            None => panic!("Channel closed before map_async result received"),
+        }
     }
 } 
