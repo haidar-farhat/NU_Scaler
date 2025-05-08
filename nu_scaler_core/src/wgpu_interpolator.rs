@@ -55,10 +55,10 @@ impl WgpuFrameInterpolator {
             @group(0) @binding(0) var<uniform> u: InterpolationUniforms;
             @group(0) @binding(1) var frame_a_tex: texture_2d<f32>;
             @group(0) @binding(2) var frame_b_tex: texture_2d<f32>;
-            @group(0) @binding(3) var flow_tex: texture_2d<vec2<f32>>; // Assuming rg32float sampled
+            @group(0) @binding(3) var flow_tex: texture_2d<f32>;
             @group(0) @binding(4) var out_tex: texture_storage_2d<rgba8unorm, write>;
             @group(0) @binding(5) var image_sampler: sampler;
-            @group(0) @binding(6) var flow_sampler: sampler; // Could be non-filtering
+            @group(0) @binding(6) var flow_sampler: sampler;
 
             @compute @workgroup_size(16, 16, 1)
             fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -69,7 +69,7 @@ impl WgpuFrameInterpolator {
                 let output_coord_i32 = vec2<i32>(i32(global_id.x), i32(global_id.y));
                 let current_pixel_center_uv = (vec2<f32>(global_id.xy) + 0.5) / vec2<f32>(u.size);
 
-                // Sample flow texture (flow vectors are typically stored as pixel displacements)
+                // Sample flow texture (sample returns vec4<f32>, we need .xy for rg32float)
                 let flow_pixel_delta = textureSampleLevel(flow_tex, flow_sampler, current_pixel_center_uv, 0.0).xy;
 
                 // Normalized UV coordinates for sampling frame_a and frame_b
