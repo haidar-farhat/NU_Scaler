@@ -82,11 +82,20 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
             Ok(buffer) => {
                 // NOTE: Assuming the buffer format is BGRA, which is expected by the
                 // conversion logic in `PyScreenCapture::get_frame` in lib.rs for window captures.
-                // Clone the data to ensure ownership for sending across the channel.
-                // Final attempt: Use iteration assuming FrameBuffer implements IntoIterator<Item=u8>.
-                let frame_data_to_send = buffer.into_iter().collect::<Vec<u8>>();
+                // THIS IS NOW BEING CHANGED. FrameBuffer derefs to &[RGBA]. We send Vec<u8> of RGBA.
+                
+                // FrameBuffer dereferences to &[RGBA]
+                let rgba_slice: &[RGBA] = &*buffer;
+                
+                // Convert &[RGBA] to Vec<u8> (maintaining RGBA byte order)
+                let frame_data_to_send = unsafe {
+                    std::slice::from_raw_parts(
+                        rgba_slice.as_ptr() as *const u8,
+                        rgba_slice.len() * std::mem::size_of::<RGBA>()
+                    ).to_vec()
+                };
 
-                // Send the raw frame data (BGRA expected)
+                // Send the raw frame data (now RGBA)
                 match self.frame_sender.lock() {
                     Ok(sender) => {
                         if sender.send(Some((frame_data_to_send, width, height))).is_err() {
