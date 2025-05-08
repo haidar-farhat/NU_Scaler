@@ -59,24 +59,14 @@ struct PyramidPassParams {
     _pad1: [u32; 2], // Padding
 }
 
-// HornSchunckUniforms is used by the current horn_schunck.wgsl and pipeline.
-// The old HornSchunckParams struct below is unused.
-// #[repr(C)]
-// #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-// struct HornSchunckParams {
-// size: [u32; 2],   // Texture dimensions
-// lambda: f32,       // Smoothness weight
-// _pad0: u32,        // Padding
-// }
-
+// New uniform struct for Coarse Horn-Schunck, matching horn_schunck.wgsl's Params
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct HornSchunckUniforms {
-    alpha_sq: f32,
-    delta_t: f32,
-    inverse_tex_size: [f32; 2], // Corresponds to vec2<f32> in WGSL
-    // Total 16 bytes, should be fine for alignment
-}
+struct CoarseHSParams {
+    size: [u32; 2],   // Corresponds to vec2<u32> in WGSL (texture dimensions)
+    lambda: f32,      // Corresponds to f32 lambda (smoothness weight, e.g., alpha_sq)
+    _padding: u32,    // Padding to ensure 16-byte alignment for the struct.
+} // Total 8 (size) + 4 (lambda) + 4 (padding) = 16 bytes.
 
 pub struct WgpuFrameInterpolator {
     device: Arc<Device>,
@@ -327,70 +317,70 @@ impl WgpuFrameInterpolator {
             source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/horn_schunck.wgsl").into()),
         });
 
-        // Horn-Schunck BGL and Pipeline
+        // Corrected Horn-Schunck BGL to match horn_schunck.wgsl
         let horn_schunck_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: Some("Horn-Schunck BGL"),
+            label: Some("Horn-Schunck BGL (Corrected)"),
             entries: &[
-                // prev_frame_level (I0 luminance, from Rgba32Float texture)
+                // Binding 0: uniforms (CoarseHSParams)
                 BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                // next_frame_level (I1 luminance, from Rgba32Float texture)
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                // prev_flow_level_uv (previous iteration's flow, Rg32Float texture)
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: true }, // Sampled in shader
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                // flow_sampler
-                BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Sampler(SamplerBindingType::Filtering), // Matches flow_sampler type
-                    count: None,
-                },
-                // uniforms (HornSchunckUniforms)
-                BindGroupLayoutEntry {
-                    binding: 4,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: Some(std::mem::size_of::<HornSchunckUniforms>() as u64),
+                        min_binding_size: Some(std::mem::size_of::<CoarseHSParams>() as u64),
                     },
                     count: None,
                 },
-                // out_flow_level_uv (current iteration's flow, Rg32Float storage texture)
+                // Binding 1: i1_tex (Prev Frame Level - Rgba32Float)
                 BindGroupLayoutEntry {
-                    binding: 5,
+                    binding: 1,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true }, // Shader uses textureLoad, filterable:false or UnfilterableFloat might be more precise if available/intended
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // Binding 2: i2_tex (Next Frame Level - Rgba32Float)
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // Binding 3: flow_in_tex (Previous Iteration Flow - Rg32Float)
+                BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true }, // Shader uses textureLoad
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // Binding 4: flow_out_tex (Output Flow - Storage Rg32Float)
+                BindGroupLayoutEntry {
+                    binding: 4,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::StorageTexture {
                         access: StorageTextureAccess::WriteOnly,
                         format: TextureFormat::Rg32Float,
                         view_dimension: TextureViewDimension::D2,
                     },
+                    count: None,
+                },
+                // Binding 5: nearest_sampler (Sampler for flow or images if shader were to sample them)
+                BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering), // Matches current flow_sampler type (Linear). Shader calls it nearest_sampler but doesn't seem to use it with textureSample.
                     count: None,
                 },
             ],
@@ -696,9 +686,9 @@ impl WgpuFrameInterpolator {
         &mut self,
         level: usize, // Coarsest pyramid level index
         num_iterations: usize,
-        alpha_sq: f32,
+        alpha_sq: f32, // This will be used as lambda in CoarseHSParams
     ) {
-        info!("Computing coarse flow for pyramid level {} with {} iterations, alpha_sq={}", level, num_iterations, alpha_sq);
+        info!("Computing coarse flow for pyramid level {} with {} iterations, lambda (alpha_sq)={}", level, num_iterations, alpha_sq);
 
         let prev_frame_tex_view = self.pyramid_a_views[level].as_ref().expect("Prev frame view (Pyramid A) for level not found");
         let next_frame_tex_view = self.pyramid_b_views[level].as_ref().expect("Next frame view (Pyramid B) for level not found");
@@ -708,13 +698,14 @@ impl WgpuFrameInterpolator {
 
         self.ensure_flow_textures(width, height);
 
-        let uniforms = HornSchunckUniforms {
-            alpha_sq,
-            delta_t: 1.0,
-            inverse_tex_size: [1.0 / width as f32, 1.0 / height as f32],
+        // Updated to use CoarseHSParams
+        let uniforms = CoarseHSParams {
+            size: [width, height],
+            lambda: alpha_sq, // Using alpha_sq as lambda, as per typical Horn-Schunck
+            _padding: 0,      // Explicitly set padding
         };
         let uniform_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Horn-Schunck Uniform Buffer"),
+            label: Some("Coarse Horn-Schunck Uniform Buffer"), // Updated label
             contents: bytemuck::bytes_of(&uniforms),
             usage: BufferUsages::UNIFORM,
         });
@@ -742,8 +733,8 @@ impl WgpuFrameInterpolator {
         );
         
         let pipeline = self.horn_schunck_pipeline.as_ref().expect("Horn-Schunck pipeline not initialized");
-        let bgl = self.horn_schunck_bgl;
-        let sampler = self.flow_sampler;
+        let bgl = self.horn_schunck_bgl; // This is the corrected BGL
+        let sampler_for_hs = self.flow_sampler; // Shader expects a sampler at binding 5, use existing flow_sampler
 
         for i in 0..num_iterations {
             let (current_input_flow_view_idx, current_output_flow_view_idx) = if i % 2 == 0 {
@@ -755,16 +746,17 @@ impl WgpuFrameInterpolator {
             let current_input_flow_view = self.flow_views[current_input_flow_view_idx].as_ref().unwrap();
             let current_output_flow_view = self.flow_views[current_output_flow_view_idx].as_ref().unwrap();
 
+            // Updated BindGroup to match new BGL structure
             let bind_group = self.device.create_bind_group(&BindGroupDescriptor {
                 label: Some(&format!("Horn-Schunck Bind Group Iter {}", i)),
-                layout: &bgl,
+                layout: &bgl, // Using the corrected BGL
                 entries: &[
-                    BindGroupEntry { binding: 0, resource: BindingResource::TextureView(prev_frame_tex_view) },
-                    BindGroupEntry { binding: 1, resource: BindingResource::TextureView(next_frame_tex_view) },
-                    BindGroupEntry { binding: 2, resource: BindingResource::TextureView(current_input_flow_view) },
-                    BindGroupEntry { binding: 3, resource: BindingResource::Sampler(sampler) },
-                    BindGroupEntry { binding: 4, resource: uniform_buffer.as_entire_binding() },
-                    BindGroupEntry { binding: 5, resource: BindingResource::TextureView(current_output_flow_view) },
+                    BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
+                    BindGroupEntry { binding: 1, resource: BindingResource::TextureView(prev_frame_tex_view) },
+                    BindGroupEntry { binding: 2, resource: BindingResource::TextureView(next_frame_tex_view) },
+                    BindGroupEntry { binding: 3, resource: BindingResource::TextureView(current_input_flow_view) },
+                    BindGroupEntry { binding: 4, resource: BindingResource::TextureView(current_output_flow_view) },
+                    BindGroupEntry { binding: 5, resource: BindingResource::Sampler(sampler_for_hs) },
                 ],
             });
 
