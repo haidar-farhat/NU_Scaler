@@ -735,7 +735,7 @@ impl WgpuUpscaler {
                     layout: Some(&pipeline_layout),
                     module: shader,
                     entry_point: "main",
-                    // compilation_options: removed previously
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
                 }),
             );
         }
