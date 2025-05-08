@@ -73,10 +73,8 @@ struct CoarseHSParams {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct UpsampleUniforms {
-    src_width: u32,
-    src_height: u32,
-    dst_width: u32,
-    dst_height: u32,
+    src_size: [u32; 2],
+    dst_size: [u32; 2],
 }
 
 // Uniforms for flow_refine.wgsl
@@ -388,10 +386,8 @@ impl WgpuFrameInterpolator {
         // Bilinearly upsamples a flow field.
 
         struct UpsampleUniforms {
-          src_width: u32;
-          src_height: u32;
-          dst_width: u32;
-          dst_height: u32;
+          src_size: vec2<u32>;
+          dst_size: vec2<u32>;
         }
 
         @group(0) @binding(0) var<uniform> u: UpsampleUniforms;
@@ -402,10 +398,10 @@ impl WgpuFrameInterpolator {
 
         @compute @workgroup_size(16, 16, 1)
         fn main(@builtin(global_invocation_id) id: vec3<u32>) {
-          if (id.x >= u.dst_width || id.y >= u.dst_height) {
+          if (id.x >= u.dst_size.x || id.y >= u.dst_size.y) {
             return;
           }
-          let dst_size_f32 = vec2<f32>(f32(u.dst_width), f32(u.dst_height));
+          let dst_size_f32 = vec2<f32>(u.dst_size);
           let normalized_uv = (vec2<f32>(id.xy) + 0.5) / dst_size_f32;
           let sampled_flow_vec4 = textureSampleLevel(src_flow_tex, bilinear_sampler, normalized_uv, 0.0);
           let flow_vec2 = sampled_flow_vec4.xy;
@@ -943,7 +939,7 @@ impl WgpuFrameInterpolator {
                    finer_level_idx, dst_w, dst_h, coarser_level_idx, src_w, src_h, upsampled_flow_texture_idx);
 
             // 1. Upsample Flow
-            let upsample_uniforms_data = UpsampleUniforms { src_width: src_w, src_height: src_h, dst_width: dst_w, dst_height: dst_h };
+            let upsample_uniforms_data = UpsampleUniforms { src_size: [src_w, src_h], dst_size: [dst_w, dst_h] };
             let upsample_uniform_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(&format!("Upsample Uniforms L{}->L{}", coarser_level_idx, finer_level_idx)),
                 contents: bytemuck::bytes_of(&upsample_uniforms_data),
