@@ -1,5 +1,27 @@
 import sys
 # Remove sys.path.insert for pyd_test
+
+# --- PyGetWindow Diagnostics ---
+print("--- PyGetWindow Import Diagnostics ---")
+try:
+    import pygetwindow
+    print(f"Successfully imported pygetwindow.")
+    print(f"pygetwindow version: {getattr(pygetwindow, '__version__', 'Not found')}")
+    print(f"pygetwindow file location: {getattr(pygetwindow, '__file__', 'Not found')}")
+    print(f"pygetwindow dir(): {dir(pygetwindow)}")
+    if hasattr(pygetwindow, 'getWindowsWithPid'):
+        print("getWindowsWithPid IS found in pygetwindow.")
+    else:
+        print("getWindowsWithPid IS NOT found in pygetwindow. THIS IS THE PROBLEM.")
+except ImportError as e_diag:
+    print(f"Failed to import pygetwindow: {e_diag}")
+    pygetwindow = None # Ensure it's None if import fails
+except Exception as e_diag_other:
+    print(f"An unexpected error occurred during pygetwindow diagnostics: {e_diag_other}")
+    pygetwindow = None
+print("--- End PyGetWindow Import Diagnostics ---")
+# --- End PyGetWindow Diagnostics ---
+
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QListWidget, QStackedWidget, QFrame,
     QPushButton, QComboBox, QSpinBox, QCheckBox, QSlider, QGroupBox, QFormLayout, QProgressBar, QFileDialog, QSizePolicy
