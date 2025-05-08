@@ -296,6 +296,13 @@ class LiveFeedScreen(QWidget):
         form.addRow("Window:", self.window_box)
         form.addRow(self.refresh_btn)
         form.addRow(self.start_btn, self.stop_btn)
+
+        # Interpolation Checkbox - CORRECT PLACEMENT
+        self.interpolation_checkbox = QCheckBox("Enable Frame Interpolation")
+        self.interpolation_checkbox.setChecked(self.interpolation_enabled)
+        self.interpolation_checkbox.toggled.connect(self.toggle_interpolation)
+        form.addRow(self.interpolation_checkbox) # Add to the form layout
+
         left_layout.addWidget(controls)
         left_layout.addStretch()
         # Right: Upscaled output and upscaling controls
@@ -364,11 +371,6 @@ class LiveFeedScreen(QWidget):
         self.start_stop_shortcut.activated.connect(self.toggle_start_stop)
         # Placeholder for hotkey customization in settings
         # TODO: Integrate with settings dialog/config
-        # Interpolation Checkbox
-        self.interpolation_checkbox = QCheckBox("Enable Frame Interpolation")
-        self.interpolation_checkbox.setChecked(self.interpolation_enabled)
-        self.interpolation_checkbox.toggled.connect(self.toggle_interpolation)
-        left_layout.addWidget(self.interpolation_checkbox)
 
     def update_source_ui(self, text):
         if text == "Window":
