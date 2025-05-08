@@ -895,12 +895,19 @@ class LiveFeedScreen(QWidget):
             return None
 
     def update_frame(self):
+        # print("[TRACE] update_frame called") # Optional: Uncomment for very verbose tracing
         try:
             if not self.capture:
+                # print("[TRACE] update_frame: No capture object, returning.")
                 return
+            
+            # print("[TRACE] update_frame: Calling get_frame()...")
             frame_result = self.capture.get_frame()
             if frame_result is None:
+                # print("[TRACE] update_frame: get_frame() returned None, returning.")
                 return # No frame yet
+            
+            print(f"[DEBUG] update_frame: Got frame_result.") # DEBUG PRINT
 
             # --- Base FPS Calculation START ---
             now_for_base_fps = time.perf_counter()
@@ -917,6 +924,7 @@ class LiveFeedScreen(QWidget):
             # --- Base FPS Calculation END ---
 
             frame_bytes_obj, in_w, in_h = frame_result
+            print(f"[DEBUG] update_frame: Frame details - Size={in_w}x{in_h}, Bytes type={type(frame_bytes_obj)}") # DEBUG PRINT
             current_captured_frame_bytes = frame_bytes_obj # Keep original for prev_frame_data
 
             # --- Frame Interpolation Logic START ---
@@ -967,42 +975,58 @@ class LiveFeedScreen(QWidget):
             
             self.prev_frame_data = (current_captured_frame_bytes, in_w, in_h)
             # --- Frame Interpolation Logic END ---
+            print(f"[DEBUG] update_frame: Interpolation status for frame: {interpolation_status_for_frame}") # DEBUG PRINT
 
             # Only re-initialize upscaler if input size or scale changes
             scale = self.scale_slider.value() / 10.0
             reinit_needed = False
+            print(f"[DEBUG] update_frame: Checking if upscaler re-init needed. Current state: Initialized={self.upscaler_initialized}, Upscaler Obj={self.upscaler is not None}") # DEBUG PRINT
             if not self.upscaler or not self.upscaler_initialized:
-                print(f"[DEBUG] Upscaler needs init: not initialized yet")
+                print(f"[DEBUG] update_frame: Re-init needed - Upscaler not initialized or None.") # DEBUG PRINT
                 reinit_needed = True
             elif (self._last_in_w != in_w or self._last_in_h != in_h):
-                print(f"[DEBUG] Upscaler needs re-init: input size changed {self._last_in_w}x{self._last_in_h} -> {in_w}x{in_h}")
+                print(f"[DEBUG] update_frame: Re-init needed - Input size changed ({self._last_in_w}x{self._last_in_h} -> {in_w}x{in_h})") # DEBUG PRINT
                 reinit_needed = True
             elif (self._last_scale != scale):
-                print(f"[DEBUG] Upscaler needs re-init: scale changed {self._last_scale} -> {scale}")
+                print(f"[DEBUG] update_frame: Re-init needed - Scale changed ({self._last_scale} -> {scale})") # DEBUG PRINT
                 reinit_needed = True
+            # Add check for method/quality changes as well?
+            # elif (self._last_method != self.method_box.currentText()) or (self._last_quality != self.quality_box.currentText()): 
+            #     print(f"[DEBUG] update_frame: Re-init needed - Method/Quality changed")
+            #     reinit_needed = True
+            else:
+                 print(f"[DEBUG] update_frame: Re-init NOT needed.") # DEBUG PRINT
 
             if reinit_needed:
                 self._last_in_w = in_w
                 self._last_in_h = in_h
                 self._last_scale = scale
-                if not self.init_upscaler(in_w, in_h, scale):
+                # self._last_method = self.method_box.currentText()
+                # self._last_quality = self.quality_box.currentText()
+                print(f"[DEBUG] update_frame: Calling init_upscaler({in_w}, {in_h}, {scale})") # DEBUG PRINT
+                upscaler_instance = self.init_upscaler(in_w, in_h, scale)
+                print(f"[DEBUG] update_frame: init_upscaler returned: {type(upscaler_instance)}") # DEBUG PRINT
+                if not upscaler_instance:
+                    print(f"[DEBUG] update_frame: init_upscaler failed, returning.") # DEBUG PRINT
                     return # Stop if upscaler failed to init
+                else:
+                    print(f"[DEBUG] update_frame: init_upscaler succeeded.") # DEBUG PRINT
 
             # Only start a new upscale if no worker is running
+            print(f"[DEBUG] update_frame: Checking existing upscale thread: {self._upscale_thread is not None}") # DEBUG PRINT
             if self._upscale_thread is not None:
-                print("[DEBUG] Skipping frame: upscale worker still running")
+                print("[DEBUG] update_frame: Skipping frame: upscale worker thread already exists and presumably running.") # DEBUG PRINT
                 return
 
-            # Calculate output dimensions
-            scale = self.upscale_scale
-            out_w = int(in_w * scale)
-            out_h = int(in_h * scale)
+            # Calculate output dimensions (using self.upscale_scale which might differ from slider during transition)
+            current_scale = self.upscale_scale 
+            out_w = int(in_w * current_scale)
+            out_h = int(in_h * current_scale)
+            print(f"[DEBUG] update_frame: Preparing UpscaleWorker for {in_w}x{in_h} -> {out_w}x{out_h} (Scale: {current_scale})") # DEBUG PRINT
 
             # Start worker thread for upscaling
-            # print(f"[DEBUG] Starting upscale worker at {time.strftime('%H:%M:%S')}")
             self._upscale_thread = QThread()
-            # Pass frame_to_process (original or interpolated) to the worker
-            self._upscale_worker = UpscaleWorker(self.upscaler, frame_to_process, in_w, in_h, out_w, out_h, scale, interpolation_status_for_frame, interpolation_cpu_time_ms_for_frame)
+            self._upscale_worker = UpscaleWorker(self.upscaler, frame_to_process, in_w, in_h, out_w, out_h, current_scale, interpolation_status_for_frame, interpolation_cpu_time_ms_for_frame)
             self._upscale_worker.moveToThread(self._upscale_thread)
             self._upscale_thread.started.connect(self._upscale_worker.run)
             self._upscale_worker.finished.connect(self.on_upscale_finished)
@@ -1011,7 +1035,9 @@ class LiveFeedScreen(QWidget):
             self._upscale_worker.finished.connect(self._upscale_worker.deleteLater)
             self._upscale_thread.finished.connect(self._upscale_thread.deleteLater)
             self._upscale_thread.finished.connect(self._clear_upscale_thread)
+            print(f"[DEBUG] update_frame: Starting upscale thread...") # DEBUG PRINT
             self._upscale_thread.start()
+            print(f"[DEBUG] update_frame: Upscale thread started.") # DEBUG PRINT
         except Exception as e:
             print(f"[EXCEPTION] update_frame: {e}")
             import traceback
