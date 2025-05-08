@@ -516,7 +516,8 @@ impl WgpuFrameInterpolator {
             
             // Prepare for next level
             // The input for the next blur/downsample iteration is the downsampled output of this one.
-            last_input_view = downsample_views[level_u].as_ref().unwrap().clone(); // Create view from texture for next iter
+            // Get the texture from the downsample vector and create a new view for the next loop iteration.
+            last_input_view = downsample_textures[level_u].as_ref().unwrap().create_view(&view_desc);
             
             current_width = next_width;
             current_height = next_height;
