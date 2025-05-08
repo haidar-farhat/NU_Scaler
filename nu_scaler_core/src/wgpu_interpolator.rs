@@ -27,6 +27,7 @@ use pyo3::prelude::*; // Add import
 use pollster; // Need this for blocking on async #[new]
 use pyo3::types::{PyBytes, PyByteArray};
 use pyo3::wrap_pyfunction;
+use pyo3::numpy::{PyArrayDyn, PyReadonlyArrayDyn, ToPyArray};
 
 // Uniform structure for the warp/blend shader - MATCHING ORIGINAL SPEC (48 Bytes)
 #[repr(C)]
@@ -161,23 +162,45 @@ impl WgpuFrameInterpolator {
         }
     }
 
-    // Renamed method to interpolate_py
-    // Added 'py lifetime to frame_a input
-    // Changed _frame_b back to frame_b (matching signature)
+    // Modified interpolate_py to accept NumPy arrays
     #[pyo3(signature = (frame_a, frame_b, *, time_t=0.5))]
     fn interpolate_py<'py>(
         &self,
         py: Python<'py>,
-        frame_a: &'py PyBytes, // Added 'py lifetime here
-        frame_b: &PyBytes, // Renamed from _frame_b
-        time_t: f32 // Ignored for now
-    ) -> PyResult<&'py PyBytes> // Return type already had 'py
+        frame_a: PyReadonlyArrayDyn<u8>, // Changed from &'py PyBytes
+        frame_b: PyReadonlyArrayDyn<u8>, // Changed from &PyBytes
+        time_t: f32
+    ) -> PyResult<Py<PyArrayDyn<u8>>> // Returning a new NumPy array
     {
-        println!("[WgpuFrameInterpolator] Python interpolate_py called (Placeholder - Returns frame_a)");
+        println!("[WgpuFrameInterpolator] Python interpolate_py called with NumPy arrays (Placeholder)");
         println!("  time_t: {}", time_t);
-        // Argument frame_b is now implicitly unused
-        let _ = frame_b; // Explicitly ignore frame_b for now to avoid warning
-        Ok(frame_a)
+        // TODO: Implement actual WGPU texture creation from frame_a, frame_b
+        // TODO: Implement actual warp/blend pass (or other minimal pass)
+        // TODO: Read back WGPU texture to a new NumPy array
+
+        // For now, just demonstrate returning frame_a data as a new array.
+        // This requires that frame_a is contiguous and we know its dimensions.
+        // The actual implementation will create a new buffer from GPU output.
+        
+        let frame_a_data = frame_a.as_array(); // This is a read-only view
+
+        // Example: If we knew dimensions and wanted to return a copy of frame_a
+        // let dims = frame_a_data.shape();
+        // let height = dims[0];
+        // let width = dims[1];
+        // let channels = dims[2]; // Assuming RGBA, so 4
+
+        // For the smoke test, let's assume the input is 64x64x4 and return a clone of frame_a.
+        // This is NOT how the final function will work, but it tests the NumPy binding.
+        if frame_a_data.shape() != [64, 64, 4] {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                format!("Placeholder expects 64x64x4 RGBA input, got {:?}", frame_a_data.shape())
+            ));
+        }
+        
+        // Create a new PyArray and copy data (this is just for placeholder)
+        let output_array = frame_a_data.to_owned();
+        Ok(output_array.to_pyarray_bound(py).into())
     }
 }
 
