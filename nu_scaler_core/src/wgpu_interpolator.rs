@@ -12,6 +12,7 @@ use wgpu::{
     BindGroupLayoutEntry, BufferUsages, BindGroupDescriptor, BindGroupEntry, BindingResource,
     CommandEncoderDescriptor, ComputePassDescriptor, Texture, TextureUsages, Extent3d,
     ImageCopyTexture, ImageDataLayout, Origin3d, Buffer,
+    include_wgsl, TextureDescriptor, TextureDimension,
 };
 
 // Uniform structure for the warp/blend shader - MATCHING ORIGINAL SPEC (48 Bytes)
@@ -42,10 +43,31 @@ impl InterpolationUniforms {
     }
 }
 
+// Uniform struct for Blur/Downsample shaders
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct PyramidPassParams {
+    in_size: [u32; 2],
+    out_size: [u32; 2],
+    radius: u32, // Only used by blur, ignored by downsample
+    _pad0: u32,
+    _pad1: [u32; 2], // Padding
+}
+
 pub struct WgpuFrameInterpolator {
     device: Arc<Device>,
     warp_blend_pipeline: ComputePipeline,
     warp_blend_bind_group_layout: BindGroupLayout,
+    blur_h_pipeline: ComputePipeline,
+    blur_v_pipeline: ComputePipeline,
+    downsample_pipeline: ComputePipeline,
+    pyramid_pass_bind_group_layout: BindGroupLayout,
+    blur_temp_texture: Option<Texture>,
+    blur_temp_texture_view: Option<TextureView>,
+    pyramid_a_textures: Vec<Texture>,
+    pyramid_a_views: Vec<TextureView>,
+    pyramid_b_textures: Vec<Texture>,
+    pyramid_b_views: Vec<TextureView>,
 }
 
 impl WgpuFrameInterpolator {
@@ -157,10 +179,89 @@ impl WgpuFrameInterpolator {
             entry_point: "main",
         });
 
+        // --- Phase 2.1 Setup: Image Pyramid --- 
+        let blur_h_shader_module = device.create_shader_module(include_wgsl!("shaders/gaussian_blur_h.wgsl"));
+        let blur_v_shader_module = device.create_shader_module(include_wgsl!("shaders/gaussian_blur_v.wgsl"));
+        let downsample_shader_module = device.create_shader_module(include_wgsl!("shaders/downsample.wgsl"));
+
+        // Shared Bind Group Layout for blur and downsample passes
+        let pyramid_pass_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("Pyramid Pass BGL (Blur/Downsample)"),
+            entries: &[
+                // params: PyramidPassParams (uniform buffer)
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+                    count: None,
+                },
+                // src_tex: Input Texture
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: TextureViewDimension::D2, multisampled: false }, // Assuming Rgba32Float input
+                    count: None,
+                },
+                // dst_tex: Output Texture (Storage)
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::COMPUTE,
+                    // IMPORTANT: Output format must match texture being written
+                    ty: BindingType::StorageTexture { access: StorageTextureAccess::WriteOnly, format: TextureFormat::Rgba32Float, view_dimension: TextureViewDimension::D2 },
+                    count: None,
+                },
+                // image_sampler (optional, might not be needed if using textureLoad)
+                 BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering), // Sampler might be useful for boundary clamp/mirror
+                    count: None,
+                },
+            ],
+        });
+
+        let pyramid_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+            label: Some("Pyramid Pipeline Layout"),
+            bind_group_layouts: &[&pyramid_pass_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        // Create compute pipelines
+        let blur_h_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("Blur Horizontal Pipeline"),
+            layout: Some(&pyramid_pipeline_layout),
+            module: &blur_h_shader_module,
+            entry_point: "main",
+        });
+
+        let blur_v_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("Blur Vertical Pipeline"),
+            layout: Some(&pyramid_pipeline_layout),
+            module: &blur_v_shader_module,
+            entry_point: "main",
+        });
+
+        let downsample_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("Downsample Pipeline"),
+            layout: Some(&pyramid_pipeline_layout),
+            module: &downsample_shader_module,
+            entry_point: "main",
+        });
+
         Ok(Self {
             device,
             warp_blend_pipeline,
             warp_blend_bind_group_layout,
+            blur_h_pipeline,
+            blur_v_pipeline,
+            downsample_pipeline,
+            pyramid_pass_bind_group_layout,
+            blur_temp_texture: None,
+            blur_temp_texture_view: None,
+            pyramid_a_textures: Vec::new(),
+            pyramid_a_views: Vec::new(),
+            pyramid_b_textures: Vec::new(),
+            pyramid_b_views: Vec::new(),
         })
     }
 
@@ -217,6 +318,87 @@ impl WgpuFrameInterpolator {
             compute_pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
         }
         
+        queue.submit(Some(encoder.finish()));
+        Ok(())
+    }
+
+    // --- Phase 2.1: Image Pyramid Generation --- 
+
+    // Placeholder - implementation details needed
+    pub fn build_pyramid(
+        &mut self, 
+        queue: &Queue, 
+        frame_texture: &Texture, // Full res Rgba32Float texture
+        levels: u32,
+        is_frame_a: bool, // true for pyramid A, false for pyramid B
+    ) -> Result<()> {
+        let (width, height) = (frame_texture.width(), frame_texture.height());
+        let pyramid_textures = if is_frame_a { &mut self.pyramid_a_textures } else { &mut self.pyramid_b_textures };
+        let pyramid_views = if is_frame_a { &mut self.pyramid_a_views } else { &mut self.pyramid_b_views };
+        
+        // TODO: Resize/recreate pyramid textures if needed (size change or first run)
+        // TODO: Create/recreate blur_temp_texture if needed
+        // TODO: Create default sampler
+
+        pyramid_textures.clear();
+        pyramid_views.clear();
+
+        let mut encoder = self.device.create_command_encoder(&CommandEncoderDescriptor {
+            label: Some(if is_frame_a { "Build Pyramid A Encoder" } else { "Build Pyramid B Encoder" }),
+        });
+
+        let mut current_width = width;
+        let mut current_height = height;
+        let mut last_view = frame_texture.create_view(&wgpu::TextureViewDescriptor::default()); // Start with full-res input
+
+        for level in 0..levels {
+            let next_width = (current_width + 1) / 2;
+            let next_height = (current_height + 1) / 2;
+            
+            println!("Building pyramid level {}: {}x{} -> {}x{}", level, current_width, current_height, next_width, next_height);
+
+            // TODO: Get/create textures for this level:
+            //  - blur_temp (current_width x current_height)
+            //  - pyramid_output (current_width x current_height) - this level's final blurred result
+            //  - downsample_output (next_width x next_height) - used as input for next level
+
+            // TODO: Create views for the above textures
+
+            // TODO: Create uniform buffers & bind groups for each pass
+            // let params_h = PyramidPassParams { ... };
+            // let uniform_buffer_h = self.device.create_buffer_init(...);
+            // let bind_group_h = self.device.create_bind_group(...);
+            // let params_v = PyramidPassParams { ... };
+            // let uniform_buffer_v = self.device.create_buffer_init(...);
+            // let bind_group_v = self.device.create_bind_group(...);
+            // let params_ds = PyramidPassParams { ... };
+            // let uniform_buffer_ds = self.device.create_buffer_init(...);
+            // let bind_group_ds = self.device.create_bind_group(...);
+
+            // TODO: Begin compute pass
+            // TODO: Dispatch blur_h_pipeline (input: last_view, output: blur_temp_view)
+            // TODO: Dispatch blur_v_pipeline (input: blur_temp_view, output: pyramid_output_view)
+            // TODO: Dispatch downsample_pipeline (input: pyramid_output_view, output: downsample_output_view)
+            // TODO: End compute pass
+
+            // TODO: Store the view for this level's blurred output (pyramid_output_view)
+            // pyramid_views.push(pyramid_output_view);
+            
+            // Prepare for next level
+            // last_view = downsample_output_view; // The downsampled output is the input for the next level
+            current_width = next_width;
+            current_height = next_height;
+            
+            // Break if dimensions get too small
+            if current_width <= 1 || current_height <= 1 {
+                break;
+            }
+        }
+        
+        // We need the final lowest-res blurred texture as well for the coarsest optical flow
+        // TODO: Decide if the last `last_view` (the downsampled output of the last iteration) should be stored.
+        // Or maybe the loop should run one more time for blur only on the smallest level?
+
         queue.submit(Some(encoder.finish()));
         Ok(())
     }
