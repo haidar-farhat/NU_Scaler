@@ -64,6 +64,15 @@ struct HornSchunckParams {
     _pad0: u32,        // Padding
 }
 
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct HornSchunckUniforms {
+    alpha_sq: f32,
+    delta_t: f32,
+    inverse_tex_size: [f32; 2], // Corresponds to vec2<f32> in WGSL
+    // Total 16 bytes, should be fine for alignment
+}
+
 pub struct WgpuFrameInterpolator {
     device: Arc<Device>,
     warp_blend_pipeline: ComputePipeline,
@@ -283,33 +292,90 @@ impl WgpuFrameInterpolator {
         });
 
         // --- Phase 2.2 Setup: Horn-Schunck --- 
-        let horn_schunck_shader_module = device.create_shader_module(include_wgsl!("shaders/horn_schunck.wgsl"));
+        let hs_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Horn-Schunck Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/horn_schunck.wgsl").into()),
+        });
+
+        // Horn-Schunck BGL and Pipeline
         let horn_schunck_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("Horn-Schunck BGL"),
             entries: &[
-                // params: HornSchunckParams
-                BindGroupLayoutEntry { binding: 0, visibility: ShaderStages::COMPUTE, ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None }, 
-                // i1_tex
-                BindGroupLayoutEntry { binding: 1, visibility: ShaderStages::COMPUTE, ty: BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: TextureViewDimension::D2, multisampled: false }, count: None }, 
-                // i2_tex
-                BindGroupLayoutEntry { binding: 2, visibility: ShaderStages::COMPUTE, ty: BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: TextureViewDimension::D2, multisampled: false }, count: None }, 
-                // flow_in_tex (Rg32Float)
-                BindGroupLayoutEntry { binding: 3, visibility: ShaderStages::COMPUTE, ty: BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: false }, view_dimension: TextureViewDimension::D2, multisampled: false }, count: None }, // Use non-filterable float
-                // flow_out_tex (Storage Rg32Float)
-                BindGroupLayoutEntry { binding: 4, visibility: ShaderStages::COMPUTE, ty: BindingType::StorageTexture { access: StorageTextureAccess::WriteOnly, format: TextureFormat::Rg32Float, view_dimension: TextureViewDimension::D2 }, count: None }, 
-                // nearest_sampler
-                BindGroupLayoutEntry { binding: 5, visibility: ShaderStages::COMPUTE, ty: BindingType::Sampler(SamplerBindingType::NonFiltering), count: None }, 
+                // prev_frame_level (I0 luminance, from Rgba32Float texture)
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // next_frame_level (I1 luminance, from Rgba32Float texture)
+                BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // prev_flow_level_uv (previous iteration's flow, Rg32Float texture)
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true }, // Sampled in shader
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // flow_sampler
+                BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering), // Matches flow_sampler type
+                    count: None,
+                },
+                // uniforms (HornSchunckUniforms)
+                BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(std::mem::size_of::<HornSchunckUniforms>() as u64),
+                    },
+                    count: None,
+                },
+                // out_flow_level_uv (current iteration's flow, Rg32Float storage texture)
+                BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: ShaderStages::COMPUTE,
+                    ty: BindingType::StorageTexture {
+                        access: StorageTextureAccess::WriteOnly,
+                        format: TextureFormat::Rg32Float,
+                        view_dimension: TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
             ],
         });
+
         let horn_schunck_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Horn-Schunck Pipeline Layout"),
             bind_group_layouts: &[&horn_schunck_bgl],
             push_constant_ranges: &[],
         });
+
         let horn_schunck_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
             label: Some("Horn-Schunck Pipeline"),
             layout: Some(&horn_schunck_pipeline_layout),
-            module: &horn_schunck_shader_module,
+            module: &hs_shader_module,
             entry_point: "main",
         });
 
@@ -680,8 +746,80 @@ impl WgpuFrameInterpolator {
         let final_idx = (num_iterations % 2) as usize;
         Ok(self.flow_views[final_idx].as_ref().unwrap())
     }
-}
 
+    fn ensure_flow_textures(&mut self, device: &Device, width: u32, height: u32) {
+        let texture_desc = TextureDescriptor {
+            size: Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rg32Float, // For (u,v) flow vectors
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING | TextureUsages::COPY_DST,
+            label: None, // Set specific labels below
+        };
+
+        // Texture A
+        if self.flow_textures[0].as_ref().map_or(true, |t| t.width() != width || t.height() != height || t.format() != texture_desc.format) {
+            log::debug!("Creating Flow Texture A: {}x{}", width, height);
+            let tex_a = device.create_texture(&TextureDescriptor {
+                label: Some("Flow Texture A"),
+                ..texture_desc
+            });
+            self.flow_views[0] = Some(tex_a.create_view(&TextureViewDescriptor::default()));
+            self.flow_textures[0] = Some(tex_a);
+        }
+
+        // Texture B
+        if self.flow_textures[1].as_ref().map_or(true, |t| t.width() != width || t.height() != height || t.format() != texture_desc.format) {
+            log::debug!("Creating Flow Texture B: {}x{}", width, height);
+            let tex_b = device.create_texture(&TextureDescriptor {
+                label: Some("Flow Texture B"),
+                ..texture_desc
+            });
+            self.flow_views[1] = Some(tex_b.create_view(&TextureViewDescriptor::default()));
+            self.flow_textures[1] = Some(tex_b);
+        }
+    }
+
+    pub fn compute_coarse_flow(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        level: usize, // Coarsest pyramid level index
+        num_iterations: usize,
+        alpha_sq: f32,
+    ) {
+        log::info!("Computing coarse flow for pyramid level {} with {} iterations, alpha_sq={}", level, num_iterations, alpha_sq);
+
+        let prev_frame_tex_view = self.pyramid_a_views[level].as_ref().expect("Prev frame view for level not found");
+        let next_frame_tex_view = self.pyramid_b_views[level].as_ref().expect("Next frame view for level not found");
+        
+        let width = self.pyramid_a_textures[level].as_ref().unwrap().width();
+        let height = self.pyramid_a_textures[level].as_ref().unwrap().height();
+
+        self.ensure_flow_textures(device, width, height);
+
+        let uniforms = HornSchunckUniforms {
+            alpha_sq,
+            delta_t: 1.0,
+            inverse_tex_size: [1.0 / width as f32, 1.0 / height as f32],
+        };
+        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Horn-Schunck Uniform Buffer"),
+            contents: bytemuck::bytes_of(&uniforms),
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST, // Though COPY_DST not used after init here
+        });
+
+        // Clear initial flow texture (flow_texture_a will be the first input)
+        let flow_tex_a_ref = self.flow_textures[0].as_ref().unwrap();
+        let flow_tex_bytes_per_pixel = 8; // Rg32Float (2 * f32)
+        let zero_data_size = (width * height * flow_tex_bytes_per_pixel) as usize;
+        let zero_data: Vec<u8> = vec![0; zero_data_size];
+
+        queue.write_texture(
+            ImageCopyTexture {
+                texture: flow_tex_a_ref,
+                mip_level: 0,
 // Helper to create a texture with specific data (RGBA8 for test images)
 pub fn create_texture_with_data(
     device: &Device,
