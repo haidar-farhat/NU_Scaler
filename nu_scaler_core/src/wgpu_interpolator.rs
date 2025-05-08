@@ -55,6 +55,15 @@ struct PyramidPassParams {
     _pad1: [u32; 2], // Padding
 }
 
+// Uniform struct for Horn-Schunck shader
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct HornSchunckParams {
+    size: [u32; 2],   // Texture dimensions
+    lambda: f32,       // Smoothness weight
+    _pad0: u32,        // Padding
+}
+
 pub struct WgpuFrameInterpolator {
     device: Arc<Device>,
     warp_blend_pipeline: ComputePipeline,
@@ -74,6 +83,13 @@ pub struct WgpuFrameInterpolator {
     downsample_a_views: Vec<Option<TextureView>>,
     downsample_b_textures: Vec<Option<Texture>>,
     downsample_b_views: Vec<Option<TextureView>>,
+    horn_schunck_pipeline: ComputePipeline,
+    horn_schunck_bgl: BindGroupLayout,
+    flow_textures: [Option<Texture>; 2],
+    flow_views: [Option<TextureView>; 2],
+    flow_sampler: Sampler,
+    final_flow_texture: Option<Texture>,
+    final_flow_view: Option<TextureView>,
 }
 
 impl WgpuFrameInterpolator {
@@ -266,6 +282,50 @@ impl WgpuFrameInterpolator {
             ..Default::default()
         });
 
+        // --- Phase 2.2 Setup: Horn-Schunck --- 
+        let horn_schunck_shader_module = device.create_shader_module(include_wgsl!("shaders/horn_schunck.wgsl"));
+        let horn_schunck_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("Horn-Schunck BGL"),
+            entries: &[
+                // params: HornSchunckParams
+                BindGroupLayoutEntry { binding: 0, visibility: ShaderStages::COMPUTE, ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None }, 
+                // i1_tex
+                BindGroupLayoutEntry { binding: 1, visibility: ShaderStages::COMPUTE, ty: BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: TextureViewDimension::D2, multisampled: false }, count: None }, 
+                // i2_tex
+                BindGroupLayoutEntry { binding: 2, visibility: ShaderStages::COMPUTE, ty: BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: TextureViewDimension::D2, multisampled: false }, count: None }, 
+                // flow_in_tex (Rg32Float)
+                BindGroupLayoutEntry { binding: 3, visibility: ShaderStages::COMPUTE, ty: BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: false }, view_dimension: TextureViewDimension::D2, multisampled: false }, count: None }, // Use non-filterable float
+                // flow_out_tex (Storage Rg32Float)
+                BindGroupLayoutEntry { binding: 4, visibility: ShaderStages::COMPUTE, ty: BindingType::StorageTexture { access: StorageTextureAccess::WriteOnly, format: TextureFormat::Rg32Float, view_dimension: TextureViewDimension::D2 }, count: None }, 
+                // nearest_sampler
+                BindGroupLayoutEntry { binding: 5, visibility: ShaderStages::COMPUTE, ty: BindingType::Sampler(SamplerBindingType::NonFiltering), count: None }, 
+            ],
+        });
+        let horn_schunck_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+            label: Some("Horn-Schunck Pipeline Layout"),
+            bind_group_layouts: &[&horn_schunck_bgl],
+            push_constant_ranges: &[],
+        });
+        let horn_schunck_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("Horn-Schunck Pipeline"),
+            layout: Some(&horn_schunck_pipeline_layout),
+            module: &horn_schunck_shader_module,
+            entry_point: "main",
+        });
+
+        // Create sampler for flow textures (Nearest neighbor)
+        let flow_sampler = device.create_sampler(&SamplerDescriptor {
+            label: Some("Flow Sampler (Nearest)"),
+            address_mode_u: AddressMode::ClampToEdge,
+            address_mode_v: AddressMode::ClampToEdge,
+            address_mode_w: AddressMode::ClampToEdge,
+            mag_filter: FilterMode::Nearest,
+            min_filter: FilterMode::Nearest,
+            mipmap_filter: FilterMode::Nearest,
+            ..
+            Default::default()
+        });
+
         Ok(Self {
             device,
             warp_blend_pipeline,
@@ -285,6 +345,13 @@ impl WgpuFrameInterpolator {
             downsample_a_views: Vec::new(),
             downsample_b_textures: Vec::new(),
             downsample_b_views: Vec::new(),
+            horn_schunck_pipeline,
+            horn_schunck_bgl,
+            flow_textures: [None, None],
+            flow_views: [None, None],
+            flow_sampler,
+            final_flow_texture: None,
+            final_flow_view: None,
         })
     }
 
@@ -525,6 +592,93 @@ impl WgpuFrameInterpolator {
 
         queue.submit(Some(encoder.finish()));
         Ok(())
+    }
+
+    // --- Phase 2.2: Coarse Optical Flow --- 
+    pub fn compute_coarse_flow(
+        &mut self,
+        queue: &Queue,
+        // Assumes build_pyramid was called for both A and B
+        num_iterations: u32,
+        lambda: f32,
+    ) -> Result<&TextureView> { // Returns view to the final flow texture
+        let num_pyramid_levels = self.pyramid_a_views.len();
+        if num_pyramid_levels == 0 {
+            return Err(anyhow::anyhow!("Pyramids must be built before computing coarse flow."));
+        }
+        let coarsest_level_idx = num_pyramid_levels - 1;
+
+        // Get views for the coarsest level textures from pyramid A and B
+        let i1_view = self.pyramid_a_views[coarsest_level_idx].as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Coarsest pyramid level view A is missing"))?;
+        let i2_view = self.pyramid_b_views[coarsest_level_idx].as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Coarsest pyramid level view B is missing"))?;
+        
+        // Get dimensions from the corresponding texture
+        let i1_tex = self.pyramid_a_textures[coarsest_level_idx].as_ref().unwrap();
+        let width = i1_tex.width();
+        let height = i1_tex.height();
+
+        // Ensure flow textures exist and match size
+        let flow_usage = TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING | TextureUsages::COPY_SRC | TextureUsages::COPY_DST;
+        let flow_format = TextureFormat::Rg32Float;
+        Self::ensure_texture(&self.device, &mut self.flow_textures[0], width, height, flow_format, flow_usage, "Flow Texture A");
+        Self::ensure_texture(&self.device, &mut self.flow_textures[1], width, height, flow_format, flow_usage, "Flow Texture B");
+        self.flow_views[0] = Some(self.flow_textures[0].as_ref().unwrap().create_view(&TextureViewDescriptor::default()));
+        self.flow_views[1] = Some(self.flow_textures[1].as_ref().unwrap().create_view(&TextureViewDescriptor::default()));
+        
+        // TODO: Initialize one flow texture to zero (e.g., using a compute shader pass or queue.write_texture if possible)
+        // For now, assume it might contain garbage from previous runs.
+
+        let mut encoder = self.device.create_command_encoder(&CommandEncoderDescriptor {
+            label: Some("Coarse Flow Encoder"),
+        });
+
+        let params_data = HornSchunckParams { size: [width, height], lambda, _pad0: 0 };
+        let uniform_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Horn-Schunck Uniforms"),
+            contents: bytemuck::bytes_of(&params_data),
+            usage: BufferUsages::UNIFORM,
+        });
+
+        let wg_size = 16;
+        let dispatch_x = (width + wg_size - 1) / wg_size;
+        let dispatch_y = (height + wg_size - 1) / wg_size;
+
+        for i in 0..num_iterations {
+            let (in_idx, out_idx) = if i % 2 == 0 { (0, 1) } else { (1, 0) };
+            let flow_in_view = self.flow_views[in_idx].as_ref().unwrap();
+            let flow_out_view = self.flow_views[out_idx].as_ref().unwrap();
+
+            let bind_group = self.device.create_bind_group(&BindGroupDescriptor {
+                label: Some(&format!("Horn-Schunck BG Iter {}", i)),
+                layout: &self.horn_schunck_bgl,
+                entries: &[
+                    BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
+                    BindGroupEntry { binding: 1, resource: BindingResource::TextureView(i1_view) },
+                    BindGroupEntry { binding: 2, resource: BindingResource::TextureView(i2_view) },
+                    BindGroupEntry { binding: 3, resource: BindingResource::TextureView(flow_in_view) },
+                    BindGroupEntry { binding: 4, resource: BindingResource::TextureView(flow_out_view) },
+                    BindGroupEntry { binding: 5, resource: BindingResource::Sampler(&self.flow_sampler) },
+                ],
+            });
+
+            {
+                let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+                    label: Some(&format!("Horn-Schunck Compute Pass Iter {}", i)),
+                    timestamp_writes: None,
+                });
+                compute_pass.set_pipeline(&self.horn_schunck_pipeline);
+                compute_pass.set_bind_group(0, &bind_group, &[]);
+                compute_pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
+            }
+        }
+
+        queue.submit(Some(encoder.finish()));
+
+        // Return the view of the texture containing the final result
+        let final_idx = (num_iterations % 2) as usize;
+        Ok(self.flow_views[final_idx].as_ref().unwrap())
     }
 }
 
