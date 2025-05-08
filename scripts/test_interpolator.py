@@ -60,6 +60,16 @@ def run_benchmark(interp, width, height, time_t=0.5):
     duration_ms = (end_time - start_time) * 1000
     print(f"--> interpolate_py took: {duration_ms:.2f} ms")
 
+    # Get GPU-specific timing if available
+    try:
+        gpu_duration_ms = interp.get_last_gpu_duration_ms()
+        if gpu_duration_ms is not None:
+            print(f"--> GPU execution took: {gpu_duration_ms:.3f} ms")
+        else:
+            print("--> GPU execution time not available (feature unsupported or query failed).")
+    except Exception as e:
+        print(f"Error calling get_last_gpu_duration_ms: {e}")
+
     print("Rebuilding NumPy array from output bytes...")
     try:
         out_arr = np.frombuffer(out_bytes, dtype=np.uint8).reshape((height, width, 4))
@@ -109,7 +119,8 @@ def run_test():
 
     print("\n--- Benchmark Summary ---")
     for res, timing in results.items():
-        print(f"{res}: {timing:.2f} ms")
+        # Note: Need to store/retrieve GPU timings separately if wanting to summarize them here
+        print(f"{res}: {timing:.2f} ms (End-to-End)")
     print("-------------------------")
 
 if __name__ == "__main__":

@@ -167,7 +167,7 @@ impl WgpuFrameInterpolator {
         }
     }
 
-    // Implement full byte-based interpolation logic
+    // Implement full byte-based interpolation logic WITH GPU TIMING
     #[pyo3(signature = (frame_a_bytes, frame_b_bytes, width, height, *, time_t=0.5))]
     fn interpolate_py<'py>(
         &self,
@@ -297,11 +297,31 @@ impl WgpuFrameInterpolator {
             ],
         });
 
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Py_Interp_Encoder") });
+        // Create readable buffer for timestamp query results (needs to be done before encoder)
+        let ts_readback_buffer = if self.timestamp_query_set.is_some() {
+            Some(self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Timestamp Readback Buffer"),
+                size: 16, // 2 * u64
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }))
+        } else {
+            None
+        };
+
+        // --- Command Encoder --- 
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Py_Interp_Encoder_With_Timing") });
+
+        // Write START timestamp if queries are enabled
+        if let Some(ts_query_set) = self.timestamp_query_set.as_ref() {
+            encoder.write_timestamp(ts_query_set, 0); // Write start timestamp
+        }
+
+        // Compute Pass
         {
             let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("Py_WarpBlend_Pass"),
-                timestamp_writes: None, // Added missing field
+                timestamp_writes: None, // Timestamps written outside the pass
             });
             compute_pass.set_pipeline(warp_blend_pipeline);
             compute_pass.set_bind_group(0, &bind_group, &[]);
@@ -309,7 +329,69 @@ impl WgpuFrameInterpolator {
             let dispatch_y = (height + 15) / 16;
             compute_pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
         }
+
+        // Write END timestamp, Resolve queries, Copy to readable buffer (if queries enabled)
+        if let (Some(ts_query_set), Some(ts_resolve_buffer), Some(ts_readback_buf)) = 
+               (self.timestamp_query_set.as_ref(), self.timestamp_query_buffer.as_ref(), ts_readback_buffer.as_ref())
+        {
+            encoder.write_timestamp(ts_query_set, 1); // Write end timestamp
+            encoder.resolve_query_set(ts_query_set, 0..2, ts_resolve_buffer, 0);
+            encoder.copy_buffer_to_buffer(ts_resolve_buffer, 0, ts_readback_buf, 0, 16);
+        }
+        
+        // Submit compute encoder
         self.queue.submit(Some(encoder.finish()));
+
+        // --- Read Back GPU Duration (if enabled and successful) --- 
+        let mut gpu_duration_ns: Option<u64> = None;
+        if let Some(ts_readback_buf) = ts_readback_buffer {
+            let timestamp_period = self.queue.get_timestamp_period(); // Get conversion factor
+            
+            let ts_result: Result<Vec<u64>, String> = pollster::block_on(async {
+                let buffer_slice = ts_readback_buf.slice(..);
+                let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
+                buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+                    sender.send(result).expect("Failed to send timestamp map_async result");
+                });
+                self.device.poll(wgpu::Maintain::Wait);
+                
+                match receiver.receive().await {
+                    Some(Ok(())) => {
+                        let data = buffer_slice.get_mapped_range();
+                        let timestamps: Vec<u64> = bytemuck::cast_slice(&data).to_vec();
+                        drop(data);
+                        ts_readback_buf.unmap();
+                        if timestamps.len() >= 2 {
+                            let duration_ticks = timestamps[1].saturating_sub(timestamps[0]);
+                            Ok(vec![duration_ticks]) // Return ticks temporarily
+                        } else {
+                            Err("Timestamp buffer did not contain 2 values".to_string())
+                        }
+                    }
+                    Some(Err(e)) => Err(format!("Failed to map timestamp buffer: {}", e)),
+                    None => Err("Timestamp buffer map channel closed prematurely".to_string()),
+                }
+            });
+
+            match ts_result {
+                Ok(ticks_vec) => {
+                    if !ticks_vec.is_empty() {
+                        let duration_ticks = ticks_vec[0];
+                        gpu_duration_ns = Some(duration_ticks.saturating_mul(timestamp_period as u64));
+                        println!("[WgpuFrameInterpolator] GPU Duration: {:.3} ms ({} ticks * {} ns/tick)", 
+                                 gpu_duration_ns.unwrap() as f64 / 1_000_000.0,
+                                 duration_ticks, 
+                                 timestamp_period);
+                    }
+                },
+                Err(e) => {
+                    // Don't raise Python error, just log and proceed without GPU time
+                    warn!("Failed to read back GPU timestamps: {}", e);
+                }
+            }
+        }
+        // Store the result (or None)
+        *self.last_gpu_duration_ns.lock().unwrap() = gpu_duration_ns;
 
         // 5. Read Back Output
         let buffer_size_bytes = (width * height * 4) as u64; // RGBA8Unorm is 4 bytes per pixel
@@ -362,6 +444,12 @@ impl WgpuFrameInterpolator {
 
         // 6. Return PyBytes
         Ok(PyBytes::new_bound(py, &result_bytes).into())
+    }
+
+    // Getter for the last measured GPU duration
+    fn get_last_gpu_duration_ms(&self) -> Option<f64> {
+        self.last_gpu_duration_ns.lock().unwrap()
+            .map(|ns| ns as f64 / 1_000_000.0) // Convert ns to ms
     }
 }
 
