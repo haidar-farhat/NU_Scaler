@@ -80,18 +80,12 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         // Access the frame buffer directly
         match frame.buffer() {
             Ok(fb) => {
-                // Attempt to Deref FrameBuffer to &[windows_capture::RGBA]
-                // This relies on FrameBuffer implementing Deref<Target = [windows_capture::RGBA]>
-                let rgba_slice: &[windows_capture::RGBA] = &*fb;
-                
-                let frame_data_to_send = unsafe {
-                    std::slice::from_raw_parts(
-                        rgba_slice.as_ptr() as *const u8,
-                        rgba_slice.len() * std::mem::size_of::<windows_capture::RGBA>()
-                    ).to_vec()
-                };
+                // Assuming FrameBuffer has a public method as_slice() -> &[u8]
+                // based on user inspection.
+                let bgra_byte_slice: &[u8] = fb.as_slice(); 
+                let frame_data_to_send = bgra_byte_slice.to_vec();
 
-                // Send the raw frame data (this will be RGBA if Deref worked as expected)
+                // Send the raw frame data (BGRA, assuming as_slice() provides BGRA)
                 match self.frame_sender.lock() {
                     Ok(sender) => {
                         if sender.send(Some((frame_data_to_send, width, height))).is_err() {
