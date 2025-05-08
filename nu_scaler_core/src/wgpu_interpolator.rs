@@ -92,8 +92,8 @@ struct RefineHSUniforms {
 pub struct WgpuFrameInterpolator {
     device: Arc<Device>,
     queue: Arc<Queue>,
-    warp_blend_pipeline: Option<RenderPipeline>,
-    warp_blend_bgl_internal: Option<BindGroupLayout>, // Renamed field
+    warp_blend_pipeline: Option<ComputePipeline>,
+    warp_blend_bgl_internal: Option<BindGroupLayout>,
     blur_h_pipeline: Option<ComputePipeline>,
     blur_v_pipeline: Option<ComputePipeline>,
     downsample_pipeline: Option<ComputePipeline>,
@@ -190,39 +190,15 @@ impl WgpuFrameInterpolator {
             push_constant_ranges: &[],
         });
 
-        let warp_blend_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Warp/Blend Pipeline"),
+        let warp_blend_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+            label: Some("Warp/Blend Compute Pipeline"),
             layout: Some(&warp_blend_pipeline_layout),
-            vertex: VertexState {
-                module: &warp_blend_shader_module,
-                entry_point: "vs_main",
-                buffers: &[], // No vertex buffer, quad generated in VS
-            },
-            fragment: Some(FragmentState {
-                module: &warp_blend_shader_module,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: TextureFormat::Rgba8UnormSrgb, // Assuming output to SRGB
-                    blend: None, // Or some blending mode
-                    write_mask: ColorWrites::ALL,
-                })],
-            }),
-            primitive: PrimitiveState {
-                topology: PrimitiveTopology::TriangleStrip, // Fullscreen quad
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None, // No culling for quad
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: MultisampleState::default(),
-            multiview: None,
+            module: &warp_blend_shader_module,
+            entry_point: "main",
         });
 
         // --- Phase 2.1 Setup: Image Pyramid --- 
-        let blur_h_shader_module = device.create_shader_module(include_wgsl!("../shaders/gaussian_blur_h.wgsl")); // Corrected path
+        let blur_h_shader_module = device.create_shader_module(include_wgsl!("../shaders/gaussian_blur_h.wgsl"));
         let blur_v_shader_module = device.create_shader_module(include_wgsl!("../shaders/gaussian_blur_v.wgsl"));
         let downsample_shader_module = device.create_shader_module(include_wgsl!("../shaders/downsample.wgsl"));
 
@@ -234,7 +210,7 @@ impl WgpuFrameInterpolator {
                 BindGroupLayoutEntry {
                     binding: 0,
                     visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: NonZeroU64::new(std::mem::size_of::<PyramidPassParams>() as u64) }, // Using NonZeroU64
+                    ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: NonZeroU64::new(std::mem::size_of::<PyramidPassParams>() as u64) },
                     count: None,
                 },
                 // src_tex: Input Texture
@@ -305,7 +281,7 @@ impl WgpuFrameInterpolator {
         // --- Phase 2.2 Setup: Horn-Schunck --- 
         let hs_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Horn-Schunck Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/horn_schunck.wgsl").into()), // Corrected path
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/horn_schunck.wgsl").into()),
         });
 
         // Corrected Horn-Schunck BGL to match horn_schunck.wgsl
@@ -408,7 +384,7 @@ impl WgpuFrameInterpolator {
         // Flow Upsample Shader, BGL, and Pipeline
         let upsample_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Flow Upsample Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/flow_upsample.wgsl").into()), // Corrected path
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/flow_upsample.wgsl").into()),
         });
         let flow_upsample_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("Flow Upsample BGL"),
@@ -416,7 +392,7 @@ impl WgpuFrameInterpolator {
                 // Binding 0: UpsampleUniforms
                 BindGroupLayoutEntry {
                     binding: 0, visibility: ShaderStages::COMPUTE, 
-                    ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: Some(std::mem::size_of::<UpsampleUniforms>() as u64) }, 
+                    ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: NonZeroU64::new(std::mem::size_of::<UpsampleUniforms>() as u64).unwrap() }, 
                     count: None },
                 // Binding 1: src_flow_tex (Texture_2d<f32> - Rg32Float)
                 BindGroupLayoutEntry {
@@ -450,7 +426,7 @@ impl WgpuFrameInterpolator {
         // Flow Refine Shader, BGL, and Pipeline
         let refine_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Flow Refine Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/flow_refine.wgsl").into()), // Corrected path
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/flow_refine.wgsl").into()),
         });
         let flow_refine_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("Flow Refine BGL"),
@@ -458,7 +434,7 @@ impl WgpuFrameInterpolator {
                 // Binding 0: RefineHSUniforms
                 BindGroupLayoutEntry {
                     binding: 0, visibility: ShaderStages::COMPUTE, 
-                    ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: Some(std::mem::size_of::<RefineHSUniforms>() as u64) }, 
+                    ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: NonZeroU64::new(std::mem::size_of::<RefineHSUniforms>() as u64).unwrap() }, 
                     count: None },
                 // Binding 1: I1_tex (Pyramid level - Rgba32Float, shader uses .r for luminance)
                 BindGroupLayoutEntry {
@@ -498,12 +474,12 @@ impl WgpuFrameInterpolator {
             device,
             queue,
             warp_blend_pipeline: Some(warp_blend_pipeline),
-            warp_blend_bgl_internal: Some(warp_blend_bind_group_layout), // Assign to renamed field
+            warp_blend_bgl_internal: Some(warp_blend_bind_group_layout),
             blur_h_pipeline: Some(blur_h_pipeline),
             blur_v_pipeline: Some(blur_v_pipeline),
             downsample_pipeline: Some(downsample_pipeline),
-            pyramid_pass_bind_group_layout, // Correctly assigned
-            shared_sampler, // Correctly assigned
+            pyramid_pass_bind_group_layout,
+            shared_sampler,
             blur_temp_texture: None,
             blur_temp_texture_view: None,
             pyramid_a_textures: Vec::new(),
@@ -515,10 +491,10 @@ impl WgpuFrameInterpolator {
             downsample_b_textures: Vec::new(),
             downsample_b_views: Vec::new(),
             horn_schunck_pipeline: Some(horn_schunck_pipeline),
-            horn_schunck_bgl, // Correctly assigned
+            horn_schunck_bgl,
             flow_textures: [None, None],
             flow_views: [None, None],
-            flow_sampler, // Correctly assigned
+            flow_sampler,
             final_flow_texture: None,
             final_flow_view: None,
             flow_upsample_bgl: Some(flow_upsample_bgl),
@@ -536,8 +512,8 @@ impl WgpuFrameInterpolator {
         frame_b_view: &TextureView,
         flow_texture_view: &TextureView,
         output_texture_view: &TextureView,
-        image_sampler: &Sampler, // Sampler for frame_a and frame_b
-        flow_sampler: &Sampler,  // Sampler for flow_texture
+        image_sampler: &Sampler,
+        flow_sampler: &Sampler,
         width: u32,
         height: u32,
         time_t: f32,
@@ -546,7 +522,7 @@ impl WgpuFrameInterpolator {
         let uniform_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Interpolation Uniform Buffer (Phase 1)"),
             contents: bytemuck::bytes_of(&uniforms_data),
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST, // COPY_DST only if we update it later, else just UNIFORM
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
         });
 
         let bind_group = self.device.create_bind_group(&BindGroupDescriptor {
@@ -585,7 +561,6 @@ impl WgpuFrameInterpolator {
         Ok(())
     }
 
-    // Helper to create or resize a texture stored in an Option
     fn ensure_texture(
         device: &Device, 
         current_texture_opt: &mut Option<Texture>,
@@ -594,7 +569,7 @@ impl WgpuFrameInterpolator {
         format: TextureFormat,
         usage: TextureUsages,
         label: &str
-    ) -> bool { // Returns true if texture was created/resized
+    ) -> bool {
         let needs_recreation = match current_texture_opt {
             Some(tex) => tex.width() != width || tex.height() != height || tex.format() != format || !tex.usage().contains(usage),
             None => true,
@@ -610,7 +585,7 @@ impl WgpuFrameInterpolator {
                 dimension: TextureDimension::D2,
                 format,
                 usage,
-                view_formats: &[], // Added missing field
+                view_formats: &[],
             }));
             true
         } else {
@@ -618,28 +593,25 @@ impl WgpuFrameInterpolator {
         }
     }
     
-    // Builds an image pyramid for either frame A or frame B
     pub fn build_pyramid(
         &mut self, 
         queue: &Queue, 
-        frame_texture: &Texture, // Full res Rgba32Float texture
+        frame_texture: &Texture,
         levels: u32,
-        is_frame_a: bool, // true for pyramid A, false for pyramid B
+        is_frame_a: bool,
     ) -> Result<()> {
         let (base_width, base_height) = (frame_texture.width(), frame_texture.height());
-        let format = frame_texture.format(); // Should be Rgba32Float
+        let format = frame_texture.format();
         let usage = TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING | TextureUsages::COPY_DST | TextureUsages::COPY_SRC;
         let view_desc = TextureViewDescriptor::default();
 
         let label_prefix = if is_frame_a { "PyramidA" } else { "PyramidB" };
 
-        // Select the correct vectors
         let pyramid_textures = if is_frame_a { &mut self.pyramid_a_textures } else { &mut self.pyramid_b_textures };
         let pyramid_views = if is_frame_a { &mut self.pyramid_a_views } else { &mut self.pyramid_b_views };
         let downsample_textures = if is_frame_a { &mut self.downsample_a_textures } else { &mut self.downsample_b_textures };
         let downsample_views = if is_frame_a { &mut self.downsample_a_views } else { &mut self.downsample_b_views };
 
-        // Resize vectors if levels changed or they are empty
         let num_levels = levels as usize;
         if pyramid_textures.len() != num_levels {
             println!("Resizing pyramid texture storage for {} levels", levels);
@@ -655,9 +627,8 @@ impl WgpuFrameInterpolator {
 
         let mut current_width = base_width;
         let mut current_height = base_height;
-        // Start with the original frame texture view
         let mut last_input_view = frame_texture.create_view(&view_desc); 
-        let blur_radius = 2; // For 5x5 kernel used in shaders
+        let blur_radius = 2;
 
         for level in 0..levels {
             let level_u = level as usize;
@@ -675,7 +646,6 @@ impl WgpuFrameInterpolator {
 
             println!("Building {} Level {}: {}x{} -> {}x{}", label_prefix, level, current_width, current_height, next_width, next_height);
 
-            // --- Ensure Textures Exist --- 
             Self::ensure_texture(&self.device, &mut self.blur_temp_texture, current_width, current_height, format, usage, &format!("{} Blur Temp", label_prefix));
             self.blur_temp_texture_view = Some(self.blur_temp_texture.as_ref().unwrap().create_view(&view_desc));
             let blur_temp_view_ref = self.blur_temp_texture_view.as_ref().unwrap();
@@ -684,26 +654,22 @@ impl WgpuFrameInterpolator {
             pyramid_views[level_u] = Some(pyramid_textures[level_u].as_ref().unwrap().create_view(&view_desc));
             let pyramid_view_ref = pyramid_views[level_u].as_ref().unwrap();
 
-            // Downsampled output - only really needed if not the last level
             let downsample_view_ref = if level < levels - 1 {
                  Self::ensure_texture(&self.device, &mut downsample_textures[level_u], next_width, next_height, format, usage, &format!("{} Downsample Level {}", label_prefix, level));
                  downsample_views[level_u] = Some(downsample_textures[level_u].as_ref().unwrap().create_view(&view_desc));
                  downsample_views[level_u].as_ref().unwrap()
             } else {
-                 // Use the last pyramid view as a dummy if no more levels, avoid creating unused texture.
-                 // However, the binding needs a view. Let's ensure the texture exists even if unused.
                  Self::ensure_texture(&self.device, &mut downsample_textures[level_u], next_width.max(1), next_height.max(1), format, usage, &format!("{} Downsample Level {} (Last)", label_prefix, level));
                  downsample_views[level_u] = Some(downsample_textures[level_u].as_ref().unwrap().create_view(&view_desc));
                  downsample_views[level_u].as_ref().unwrap()
             };
             
-            // --- Create Uniform Buffers & Bind Groups --- 
             let params_h = PyramidPassParams { in_size: [current_width, current_height], out_size: [current_width, current_height], radius: blur_radius, _pad0:0, _pad1:[0,0] };
             let uniform_buffer_h = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(&format!("{} Blur H Uniforms L{}", label_prefix, level)), contents: bytemuck::bytes_of(&params_h), usage: BufferUsages::UNIFORM });
             let bind_group_h = self.device.create_bind_group(&BindGroupDescriptor { label: Some(&format!("{} Blur H BG L{}", label_prefix, level)), layout: &self.pyramid_pass_bind_group_layout, entries: &[
                 BindGroupEntry { binding: 0, resource: uniform_buffer_h.as_entire_binding() },
-                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(&last_input_view) }, // Input
-                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(blur_temp_view_ref) }, // Output
+                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(&last_input_view) },
+                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(blur_temp_view_ref) },
                 BindGroupEntry { binding: 3, resource: BindingResource::Sampler(&self.shared_sampler) },
             ]});
 
@@ -711,21 +677,20 @@ impl WgpuFrameInterpolator {
             let uniform_buffer_v = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(&format!("{} Blur V Uniforms L{}", label_prefix, level)), contents: bytemuck::bytes_of(&params_v), usage: BufferUsages::UNIFORM });
             let bind_group_v = self.device.create_bind_group(&BindGroupDescriptor { label: Some(&format!("{} Blur V BG L{}", label_prefix, level)), layout: &self.pyramid_pass_bind_group_layout, entries: &[
                 BindGroupEntry { binding: 0, resource: uniform_buffer_v.as_entire_binding() },
-                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(blur_temp_view_ref) }, // Input (from H pass)
-                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(pyramid_view_ref) }, // Output (final for level)
+                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(blur_temp_view_ref) },
+                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(pyramid_view_ref) },
                 BindGroupEntry { binding: 3, resource: BindingResource::Sampler(&self.shared_sampler) },
             ]});
 
-            let params_ds = PyramidPassParams { in_size: [current_width, current_height], out_size: [next_width, next_height], radius: 0, _pad0:0, _pad1:[0,0] }; // Radius not used
+            let params_ds = PyramidPassParams { in_size: [current_width, current_height], out_size: [next_width, next_height], radius: 0, _pad0:0, _pad1:[0,0] };
             let uniform_buffer_ds = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some(&format!("{} DS Uniforms L{}", label_prefix, level)), contents: bytemuck::bytes_of(&params_ds), usage: BufferUsages::UNIFORM });
             let bind_group_ds = self.device.create_bind_group(&BindGroupDescriptor { label: Some(&format!("{} DS BG L{}", label_prefix, level)), layout: &self.pyramid_pass_bind_group_layout, entries: &[
                 BindGroupEntry { binding: 0, resource: uniform_buffer_ds.as_entire_binding() },
-                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(pyramid_view_ref) }, // Input (blurred)
-                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(downsample_view_ref) }, // Output (for next level)
+                BindGroupEntry { binding: 1, resource: BindingResource::TextureView(pyramid_view_ref) },
+                BindGroupEntry { binding: 2, resource: BindingResource::TextureView(downsample_view_ref) },
                 BindGroupEntry { binding: 3, resource: BindingResource::Sampler(&self.shared_sampler) },
             ]});
 
-            // --- Dispatch Compute Passes --- 
             {
                 let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor { 
                     label: Some(&format!("{} Pyramid Compute Pass L{}", label_prefix, level)), 
@@ -738,25 +703,19 @@ impl WgpuFrameInterpolator {
                 let dispatch_x_next = (next_width + wg_size - 1) / wg_size;
                 let dispatch_y_next = (next_height + wg_size - 1) / wg_size;
                 
-                // Horizontal Blur
                 compute_pass.set_pipeline(&self.blur_h_pipeline.as_ref().unwrap());
                 compute_pass.set_bind_group(0, &bind_group_h, &[]);
                 compute_pass.dispatch_workgroups(dispatch_x_curr, dispatch_y_curr, 1);
 
-                // Vertical Blur
                 compute_pass.set_pipeline(&self.blur_v_pipeline.as_ref().unwrap());
                 compute_pass.set_bind_group(0, &bind_group_v, &[]);
                 compute_pass.dispatch_workgroups(dispatch_x_curr, dispatch_y_curr, 1);
 
-                // Downsample
                 compute_pass.set_pipeline(&self.downsample_pipeline.as_ref().unwrap());
                 compute_pass.set_bind_group(0, &bind_group_ds, &[]);
                 compute_pass.dispatch_workgroups(dispatch_x_next, dispatch_y_next, 1);
             }
             
-            // Prepare for next level
-            // The input for the next blur/downsample iteration is the downsampled output of this one.
-            // Get the texture from the downsample vector and create a new view for the next loop iteration.
             last_input_view = downsample_textures[level_u].as_ref().unwrap().create_view(&view_desc);
             
             current_width = next_width;
@@ -767,12 +726,11 @@ impl WgpuFrameInterpolator {
         Ok(())
     }
 
-    // --- Phase 2.2: Coarse Optical Flow --- 
     pub fn compute_coarse_flow(
         &mut self,
-        level: usize, // Coarsest pyramid level index
+        level: usize,
         num_iterations: usize,
-        alpha_sq: f32, // This will be used as lambda in CoarseHSParams
+        alpha_sq: f32,
     ) {
         info!("Computing coarse flow for pyramid level {} with {} iterations, lambda (alpha_sq)={}", level, num_iterations, alpha_sq);
 
@@ -784,21 +742,19 @@ impl WgpuFrameInterpolator {
 
         self.ensure_flow_textures(width, height);
 
-        // Updated to use CoarseHSParams
         let uniforms = CoarseHSParams {
             size: [width, height],
-            lambda: alpha_sq, // Using alpha_sq as lambda, as per typical Horn-Schunck
-            _padding: 0,      // Explicitly set padding
+            lambda: alpha_sq,
+            _padding: 0,
         };
         let uniform_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Coarse Horn-Schunck Uniform Buffer"), // Updated label
+            label: Some("Coarse Horn-Schunck Uniform Buffer"),
             contents: bytemuck::bytes_of(&uniforms),
             usage: BufferUsages::UNIFORM,
         });
 
-        // Clear initial flow texture (flow_textures[0] will be the first input)
         let flow_tex_0_ref = self.flow_textures[0].as_ref().unwrap();
-        let flow_tex_bytes_per_pixel = 8; // Rg32Float (2 * f32)
+        let flow_tex_bytes_per_pixel = 8;
         let zero_data_size = (width * height * flow_tex_bytes_per_pixel) as usize;
         let zero_data: Vec<u8> = vec![0; zero_data_size];
 
@@ -819,23 +775,22 @@ impl WgpuFrameInterpolator {
         );
         
         let pipeline = self.horn_schunck_pipeline.as_ref().expect("Horn-Schunck pipeline not initialized");
-        let bgl = self.horn_schunck_bgl; // This is the corrected BGL
-        let sampler_for_hs = self.flow_sampler; // Shader expects a sampler at binding 5, use existing flow_sampler
+        let bgl = self.horn_schunck_bgl;
+        let sampler_for_hs = &self.flow_sampler;
 
         for i in 0..num_iterations {
             let (current_input_flow_view_idx, current_output_flow_view_idx) = if i % 2 == 0 {
-                (0, 1) // Input: flow_textures[0], Output: flow_textures[1]
+                (0, 1)
             } else {
-                (1, 0) // Input: flow_textures[1], Output: flow_textures[0]
+                (1, 0)
             };
             
             let current_input_flow_view = self.flow_views[current_input_flow_view_idx].as_ref().unwrap();
             let current_output_flow_view = self.flow_views[current_output_flow_view_idx].as_ref().unwrap();
 
-            // Updated BindGroup to match new BGL structure
             let bind_group = self.device.create_bind_group(&BindGroupDescriptor {
                 label: Some(&format!("Horn-Schunck Bind Group Iter {}", i)),
-                layout: &bgl, // Using the corrected BGL
+                layout: &bgl,
                 entries: &[
                     BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
                     BindGroupEntry { binding: 1, resource: BindingResource::TextureView(prev_frame_tex_view) },
@@ -857,7 +812,7 @@ impl WgpuFrameInterpolator {
                 compute_pass.set_pipeline(pipeline);
                 compute_pass.set_bind_group(0, &bind_group, &[]);
                 compute_pass.dispatch_workgroups(
-                    (width + 7) / 8, // Workgroup size 8x8 defined in horn_schunck.wgsl
+                    (width + 7) / 8,
                     (height + 7) / 8,
                     1,
                 );
@@ -869,9 +824,9 @@ impl WgpuFrameInterpolator {
         let final_flow_location = if num_iterations == 0 {
             "flow_textures[0] (cleared)"
         } else if num_iterations % 2 == 1 {
-            "flow_textures[1]" // After odd iterations (1, 3, 5...), iter 0 writes to [1], iter 1 to [0], iter 2 to [1]
+            "flow_textures[1]"
         } else {
-            "flow_textures[0]" // After even iterations (2, 4, ...), iter N-1 writes to [0]
+            "flow_textures[0]"
         };
         info!("Coarse flow computation complete for level {}. Final flow in {}", level, final_flow_location);
     }
@@ -882,12 +837,11 @@ impl WgpuFrameInterpolator {
             mip_level_count: 1,
             sample_count: 1,
             dimension: TextureDimension::D2,
-            format: TextureFormat::Rg32Float, // For (u,v) flow vectors
+            format: TextureFormat::Rg32Float,
             usage: TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING | TextureUsages::COPY_DST,
-            label: None, // Set specific labels below
+            label: None,
         };
 
-        // Texture A (index 0)
         if self.flow_textures[0].as_ref().map_or(true, |t| t.width() != width || t.height() != height || t.format() != texture_desc.format) {
             debug!("Creating Flow Texture 0 (A): {}x{} Format: {:?}", width, height, texture_desc.format);
             let tex_a = self.device.create_texture(&TextureDescriptor {
@@ -898,7 +852,6 @@ impl WgpuFrameInterpolator {
             self.flow_textures[0] = Some(tex_a);
         }
 
-        // Texture B (index 1)
         if self.flow_textures[1].as_ref().map_or(true, |t| t.width() != width || t.height() != height || t.format() != texture_desc.format) {
             debug!("Creating Flow Texture 1 (B): {}x{} Format: {:?}", width, height, texture_desc.format);
             let tex_b = self.device.create_texture(&TextureDescriptor {
@@ -910,34 +863,29 @@ impl WgpuFrameInterpolator {
         }
     }
 
-    // --- Phase 2.3: Hierarchical Flow Refinement ---
     pub fn refine_flow_hierarchy(
         &mut self,
         num_total_pyramid_levels: usize,
-        coarsest_flow_pyramid_level_idx: usize, // Index in pyramid_a/b_views for coarsest flow
-        mut current_flow_texture_idx: usize, // Index (0 or 1) of self.flow_textures holding the input flow
-        refinement_alpha: f32, // Alpha for residual Horn-Schunck
-        num_refinement_iterations_per_level: usize, // How many times to run residual HS at each level
-    ) -> usize { // Returns the index (0 or 1) of the flow_texture holding the final refined flow
+        coarsest_flow_pyramid_level_idx: usize,
+        mut current_flow_texture_idx: usize,
+        refinement_alpha: f32,
+        num_refinement_iterations_per_level: usize,
+    ) -> usize {
         if num_total_pyramid_levels == 0 || coarsest_flow_pyramid_level_idx >= num_total_pyramid_levels {
             warn!("Invalid pyramid levels for refinement. Total: {}, Coarsest Idx: {}", num_total_pyramid_levels, coarsest_flow_pyramid_level_idx);
-            return current_flow_texture_idx; // No refinement possible
+            return current_flow_texture_idx;
         }
-        if coarsest_flow_pyramid_level_idx == 0 { // Coarsest flow is already at the finest level
+        if coarsest_flow_pyramid_level_idx == 0 {
             info!("Coarse flow is already at the finest level. No hierarchical refinement needed.");
             return current_flow_texture_idx;
         }
 
-        let upsample_pipeline = self.flow_upsample_pipeline.as_ref().expect("Upsample pipeline not init");
-        let upsample_bgl = self.flow_upsample_bgl.as_ref().expect("Upsample BGL not init");
-        let refine_pipeline = self.flow_refine_pipeline.as_ref().expect("Refine pipeline not init");
-        let refine_bgl = self.flow_refine_bgl.as_ref().expect("Refine BGL not init");
-        // self.flow_sampler is used for upsampling (bilinear_sampler in flow_upsample.wgsl)
-        // The flow_refine.wgsl uses textureLoad, so it doesn't need a sampler binding.
+        let upsample_pipeline = self.flow_upsample_pipeline.clone().expect("Upsample pipeline not init");
+        let upsample_bgl = self.flow_upsample_bgl.clone().expect("Upsample BGL not init");
+        let refine_pipeline = self.flow_refine_pipeline.clone().expect("Refine pipeline not init");
+        let refine_bgl = self.flow_refine_bgl.clone().expect("Refine BGL not init");
+        let flow_sampler = self.flow_sampler.clone();
 
-        // Iterate from the level finer than the coarsest_flow_level, down to the finest level (index 0)
-        // Example: 4 levels (0,1,2,3). Coarse flow at level 3. Refine for levels 2, 1, 0.
-        // Loop `idx_finer_level` from `coarsest_flow_pyramid_level_idx - 1` down to `0`.
         for finer_level_idx in (0..coarsest_flow_pyramid_level_idx).rev() {
             let coarser_level_idx = finer_level_idx + 1;
 
@@ -945,11 +893,10 @@ impl WgpuFrameInterpolator {
             let src_w = self.flow_textures[current_flow_texture_idx].as_ref().unwrap().width();
             let src_h = self.flow_textures[current_flow_texture_idx].as_ref().unwrap().height();
 
-            // Destination for upsampled flow will be the *other* flow texture
             let upsampled_flow_texture_idx = 1 - current_flow_texture_idx;
             let dst_w = self.pyramid_a_textures[finer_level_idx].as_ref().unwrap().width();
             let dst_h = self.pyramid_a_textures[finer_level_idx].as_ref().unwrap().height();
-            self.ensure_flow_textures(dst_w, dst_h); // Ensure both flow_textures can hold this size
+            self.ensure_flow_textures(dst_w, dst_h);
             let upsampled_flow_target_view = self.flow_views[upsampled_flow_texture_idx].as_ref().unwrap();
 
             info!("Refining flow: Level {} ({}x{}) from Level {} ({}x{}). Output to flow_tex[{}].", 
