@@ -336,29 +336,46 @@ impl RealTimeCapture for ScreenCapture {
                 #[cfg(target_os = "windows")]
                 {
                     if let Some(rx) = self.wgc_frame_receiver.as_ref() {
-                        match rx.try_recv() {
-                            Ok(Some((bgra_buffer, width, height))) => {
-                                // Update dimensions based on received frame
-                                self.width = width;
-                                self.height = height;
-                                // The conversion is handled later in lib.rs based on target type.
-                                // Return the raw BGRA buffer received from the channel.
-                                Some((bgra_buffer, width, height))
-                            }
-                            Ok(None) => {
-                                self.debug_print("Received stop signal from WGC handler.");
-                                self.stop();
-                                None
-                            }
-                            Err(mpsc::TryRecvError::Empty) => None,
-                            Err(mpsc::TryRecvError::Disconnected) => {
-                                self.debug_print("WGC channel disconnected.");
-                                self.stop();
-                                None
+                        // --- Modified logic: Drain channel, return last frame --- 
+                        let mut last_frame_data: Option<(Vec<u8>, usize, usize)> = None;
+                        
+                        // Loop to consume all pending messages
+                        loop {
+                            match rx.try_recv() {
+                                Ok(Some(frame_tuple)) => {
+                                    // Got a frame, store it (overwriting previous one in this batch)
+                                    last_frame_data = Some(frame_tuple);
+                                }
+                                Ok(None) => {
+                                    // Got the stop signal (None sentinel)
+                                    self.debug_print("Received stop signal (None sentinel) from WGC handler.");
+                                    last_frame_data = None; // Ensure we don't return a frame if stop was received
+                                    self.stop(); // Stop capture immediately
+                                    break; // Exit loop
+                                }
+                                Err(mpsc::TryRecvError::Empty) => {
+                                    // Channel is empty, stop draining
+                                    break;
+                                }
+                                Err(mpsc::TryRecvError::Disconnected) => {
+                                    // Channel disconnected, stop capture and loop
+                                    self.debug_print("WGC channel disconnected.");
+                                    last_frame_data = None; // Ensure no frame is returned
+                                    self.stop();
+                                    break; // Exit loop
+                                }
                             }
                         }
+                        
+                        // Return the last frame we processed from the channel drain (if any)
+                        // Update width/height if we got a frame
+                        if let Some((_, width, height)) = &last_frame_data {
+                             self.width = *width;
+                             self.height = *height;
+                        }
+                        last_frame_data // This is Option<(Vec<u8>, usize, usize)> 
                     } else {
-                        None
+                        None // No receiver exists
                     }
                 }
                 #[cfg(not(target_os = "windows"))]
