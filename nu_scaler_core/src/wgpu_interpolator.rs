@@ -94,6 +94,39 @@ struct RefineHSUniforms {
                   // A safer version for 16-byte total would be: { size: [u32;2], alpha: f32, _internal_pad: u32 }
 }
 
+// --- New Enum for Workgroup Size Configuration ---
+#[pyclass]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkgroupSizePreset {
+    Square8x8,
+    Square16x16,
+    Wide32x8,
+    Tall8x32,
+}
+
+impl WorkgroupSizePreset {
+    // Helper to get dimensions
+    pub fn dimensions(&self) -> (u32, u32) {
+        match self {
+            WorkgroupSizePreset::Square8x8 => (8, 8),
+            WorkgroupSizePreset::Square16x16 => (16, 16),
+            WorkgroupSizePreset::Wide32x8 => (32, 8),
+            WorkgroupSizePreset::Tall8x32 => (8, 32),
+        }
+    }
+    // Helper to create from string (for Python binding)
+    pub fn from_string(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "8x8" | "square8x8" => Some(Self::Square8x8),
+            "16x16" | "square16x16" => Some(Self::Square16x16),
+            "32x8" | "wide32x8" | "wide" => Some(Self::Wide32x8),
+            "8x32" | "tall8x32" | "tall" => Some(Self::Tall8x32),
+            _ => None,
+        }
+    }
+}
+// --- End Enum ---
+
 #[pyclass] // Add this attribute
 pub struct WgpuFrameInterpolator {
     device: Arc<Device>,
@@ -130,6 +163,7 @@ pub struct WgpuFrameInterpolator {
     timestamp_query_set: Option<QuerySet>,
     timestamp_query_buffer: Option<wgpu::Buffer>, // Buffer for resolving queries
     last_gpu_duration_ns: Arc<std::sync::Mutex<Option<u64>>>, // Store last duration (needs Arc+Mutex for potential future async use & interior mutability)
+    workgroup_preset: Option<WorkgroupSizePreset>, // Optional: Store the preset if needed later
 }
 
 #[pymethods] // Add this block
@@ -454,7 +488,8 @@ impl WgpuFrameInterpolator {
 }
 
 impl WgpuFrameInterpolator {
-    pub fn new(device: Arc<Device>, queue: Arc<Queue>) -> Result<Self> {
+    pub fn new(device: Arc<Device>, queue: Arc<Queue>, workgroup_preset: WorkgroupSizePreset) -> Result<Self> 
+    {
         // Check for timestamp query support
         let features = device.features();
         let supports_timestamps = features.contains(wgpu::Features::TIMESTAMP_QUERY);
@@ -484,11 +519,32 @@ impl WgpuFrameInterpolator {
             None
         };
 
-        let warp_blend_shader_module = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("Warp/Blend Shader Module (Phase 1)"),
-            source: ShaderSource::Wgsl(include_str!("shaders/warp_blend.wgsl").into()), // Path: src/shaders/
-        });
+        // --- Warp/Blend Shader Setup (Configurable Workgroup) ---
+        let (wg_x, wg_y) = workgroup_preset.dimensions();
+        let warp_blend_shader_template = include_str!("shaders/warp_blend.wgsl");
+        // Replace the placeholder or existing workgroup size line
+        // Assuming the WGSL file has a line like: // WORKGROUP_SIZE_PLACEHOLDER
+        // Or find/replace the existing @workgroup_size line
+        let workgroup_directive = format!("@compute @workgroup_size({}, {}, 1)", wg_x, wg_y);
+        
+        // Simple find/replace for existing directive (less robust than placeholder)
+        let warp_blend_shader_string = warp_blend_shader_template
+            .lines()
+            .map(|line| {
+                if line.trim_start().starts_with("@compute @workgroup_size") {
+                    workgroup_directive.as_str() // Replace the line
+                } else {
+                    line // Keep other lines
+                }
+            })
+            .collect::<Vec<&str>>()
+            .join("\n");
 
+        let warp_blend_shader_module = device.create_shader_module(ShaderModuleDescriptor {
+            label: Some(&format!("Warp/Blend Shader Module ({:?})", workgroup_preset)),
+            source: ShaderSource::Wgsl(warp_blend_shader_string.into()), // Use modified string
+        });
+        
         let warp_blend_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("Warp/Blend BGL (Phase 1)"),
             entries: &[
@@ -551,7 +607,7 @@ impl WgpuFrameInterpolator {
         });
 
         let warp_blend_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
-            label: Some("Warp/Blend Compute Pipeline"),
+            label: Some(&format!("Warp/Blend Pipeline ({:?})", workgroup_preset)),
             layout: Some(&warp_blend_pipeline_layout),
             module: &warp_blend_shader_module,
             entry_point: "main",
@@ -807,6 +863,7 @@ impl WgpuFrameInterpolator {
             timestamp_query_set,
             timestamp_query_buffer,
             last_gpu_duration_ns: Arc::new(std::sync::Mutex::new(None)),
+            workgroup_preset: Some(workgroup_preset), // Optional: Store the preset if needed later
         })
     }
 
