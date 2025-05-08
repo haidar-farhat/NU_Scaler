@@ -195,9 +195,17 @@ class LiveFeedScreen(QWidget):
         self.timer = QTimer(self)
         self.timer.setInterval(100)  # Lowered to 10 FPS for diagnosis
         self.timer.timeout.connect(self.update_frame)
-        self.last_frame_time = None
-        self.last_timer_time = None
-        self.fps = 0.0
+        
+        # --- FPS Calculation Attributes ---
+        self.last_frame_time = None # For scaled FPS
+        self.fps = 0.0 # Scaled FPS
+        
+        self.base_fps = 0.0 # FPS of frames coming from capture source
+        self.last_base_frame_time = None
+        self.base_frame_count_for_fps = 0
+        # --- END FPS Calculation Attributes ---
+        
+        self.last_timer_time = None # Not currently used, but was there
         self.upscaler_initialized = False
         self.upscale_scale = 2.0  # Default scale factor
         self.advanced_upscaling = True  # Use advanced upscaler by default
@@ -638,6 +646,20 @@ class LiveFeedScreen(QWidget):
             if frame_result is None:
                 return # No frame yet
 
+            # --- Base FPS Calculation START ---
+            now_for_base_fps = time.perf_counter()
+            if self.last_base_frame_time is None:
+                self.last_base_frame_time = now_for_base_fps
+            
+            self.base_frame_count_for_fps += 1
+            base_fps_elapsed = now_for_base_fps - self.last_base_frame_time
+            
+            if base_fps_elapsed >= 1.0: # Update base_fps roughly every second
+                self.base_fps = self.base_frame_count_for_fps / base_fps_elapsed
+                self.base_frame_count_for_fps = 0
+                self.last_base_frame_time = now_for_base_fps
+            # --- Base FPS Calculation END ---
+
             frame_bytes_obj, in_w, in_h = frame_result
             current_captured_frame_bytes = frame_bytes_obj # Keep original for prev_frame_data
 
@@ -754,16 +776,17 @@ class LiveFeedScreen(QWidget):
                 pixmap = QPixmap.fromImage(qimg)
                 self.output_preview.set_pixmap(pixmap)
                 
-                # FPS calculation remains based on the upscaler's output rate for now
-                inst_fps = 1000.0 / upscale_gpu_time_ms if upscale_gpu_time_ms > 0 else 0.0
-                self.fps = 0.95 * self.fps + 0.05 * inst_fps if self.fps > 0 else inst_fps
+                # Scaled FPS calculation (based on upscaler output rate)
+                inst_scaled_fps = 1000.0 / upscale_gpu_time_ms if upscale_gpu_time_ms > 0 else 0.0
+                self.fps = 0.95 * self.fps + 0.05 * inst_scaled_fps if self.fps > 0 else inst_scaled_fps
                 
                 vram_str = self.memory_stats_label.text()
                 
                 overlay_lines = [
-                    f"Input: {out_w//self.upscale_scale:.0f}×{out_h//self.upscale_scale:.0f}",
-                    f"Upscaled: {out_w}×{out_h}",
-                    f"FPS: {self.fps:.1f}",
+                    f"Base Frame: {out_w//self.upscale_scale:.0f}×{out_h//self.upscale_scale:.0f}",
+                    f"Scaled Frame: {out_w}×{out_h}",
+                    f"Base FPS: {self.base_fps:.1f}",       # Display calculated base FPS
+                    f"Scaled FPS: {self.fps:.1f}",     # This is the existing self.fps
                     f"{vram_str}",
                     f"Upscale GPU Time: {upscale_gpu_time_ms:.1f} ms"
                 ]
@@ -779,12 +802,11 @@ class LiveFeedScreen(QWidget):
                 self.output_preview.set_overlay(overlay)
                 
                 status_bar_text = (
-                    f"Upscale: {upscale_gpu_time_ms:.1f}ms | "
-                    f"FPS: {self.fps:.1f} | "
-                    f"Res: {out_w//self.upscale_scale:.0f}×{out_h//self.upscale_scale:.0f} → {out_w}×{out_h}"
+                    f"Base: {out_w//self.upscale_scale:.0f}×{out_h//self.upscale_scale:.0f} @ {self.base_fps:.1f}FPS | "
+                    f"Scaled: {out_w}×{out_h} @ {self.fps:.1f}FPS ({upscale_gpu_time_ms:.1f}ms GPU)"
                 )
                 if self.interpolation_enabled and self.interpolator and interpolation_status == "Interpolated" and interpolation_cpu_time_ms > 0:
-                    status_bar_text += f" | Interp CPU: {interpolation_cpu_time_ms:.1f}ms"
+                    status_bar_text += f" | Interp CPU: {interpolation_cpu_time_ms:.1f}ms ({interpolation_status})"
                 elif self.interpolation_enabled and self.interpolator:
                     status_bar_text += f" | Interp: {interpolation_status}" 
 
