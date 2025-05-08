@@ -3,22 +3,23 @@
 
 use std::sync::Arc;
 use anyhow::Result;
-use wgpu::util::DeviceExt; // For create_buffer_init
 use wgpu::{
-    Device, Queue, ShaderModule, ComputePipeline, BindGroupLayout, Sampler,
+    Device, Queue, ComputePipeline, BindGroupLayout, Sampler,
     TextureView, TextureFormat, ShaderStages, BindingType, StorageTextureAccess,
     TextureViewDimension, SamplerBindingType, BufferBindingType, PipelineLayoutDescriptor,
     ComputePipelineDescriptor, ShaderModuleDescriptor, ShaderSource, BindGroupLayoutDescriptor,
     BindGroupLayoutEntry, BufferUsages, BindGroupDescriptor, BindGroupEntry, BindingResource,
     CommandEncoderDescriptor, ComputePassDescriptor, Texture, TextureUsages, Extent3d,
-    ImageCopyTexture, ImageDataLayout, Origin3d, Buffer,
-    include_wgsl, TextureDescriptor, TextureDimension,
-    SamplerDescriptor, AddressMode, FilterMode, TextureViewDescriptor,
+    ImageCopyTexture, ImageDataLayout, Origin3d, // Removed Buffer, ShaderModule as they were unused warnings
+    TextureDescriptor, TextureDimension, SamplerDescriptor, AddressMode, FilterMode, TextureViewDescriptor,
+    // Added missing imports:
+    RenderPipeline, VertexState, FragmentState, ColorWrites, PrimitiveState, PrimitiveTopology,
+    MultisampleState, TextureSampleType, TextureAspect,
 };
-use crate::utils::teinture_wgpu::WgpuState;
-use image::{ImageBuffer, Rgba, Rgb};
-use wgpu::util::DeviceExt; // For create_buffer_init
+use crate::utils::teinture_wgpu::{self, WgpuState}; // Assuming WgpuState and functions like create_device_queue are in teinture_wgpu module
+use wgpu::util::DeviceExt; // For create_buffer_init (kept one instance)
 use log::{debug, info, warn};
+use std::num::NonZeroU64;
 
 // Uniform structure for the warp/blend shader - MATCHING ORIGINAL SPEC (48 Bytes)
 #[repr(C)]
@@ -27,11 +28,8 @@ struct InterpolationUniforms {
     size: [u32; 2],       // offset 0, size 8
     _pad0: [u32; 2],      // offset 8, size 8 -> next at 16
     time_t: f32,          // offset 16, size 4 -> next at 20
-    // WGSL's _pad1: vec3<f32> will start at offset 32 due to align(16).
-    // So, Rust struct needs 12 bytes of padding here.
     _rust_pad_to_align_vec3: [f32; 3], // offset 20, size 12 -> next at 32
     _pad1_wgsl_equivalent: [f32; 3],      // offset 32, size 12. Current total 44.
-    // Final padding to make Rust struct 48 bytes, matching WGSL struct total size
     _final_struct_padding: [f32; 1], // offset 44, size 4 -> Total 48 bytes.
 }
 
