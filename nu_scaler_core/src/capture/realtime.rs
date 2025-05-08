@@ -80,12 +80,15 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         // Access the frame buffer directly
         match frame.buffer() {
             Ok(fb) => {
-                // Assuming FrameBuffer has a public method as_slice() -> &[u8]
-                // based on user inspection.
-                let bgra_byte_slice: &[u8] = fb.as_slice(); 
-                let frame_data_to_send = bgra_byte_slice.to_vec();
+                // Use the actual public methods: data() and len()
+                let data_ptr = fb.data();
+                let length = fb.len();
 
-                // Send the raw frame data (BGRA, assuming as_slice() provides BGRA)
+                let frame_data_to_send = unsafe {
+                    std::slice::from_raw_parts(data_ptr, length).to_vec()
+                };
+
+                // Send the raw frame data (BGRA, as per underlying capture API)
                 match self.frame_sender.lock() {
                     Ok(sender) => {
                         if sender.send(Some((frame_data_to_send, width, height))).is_err() {
