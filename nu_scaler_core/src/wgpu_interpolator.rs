@@ -25,7 +25,7 @@ use futures::executor::block_on; // Import block_on
 use wgpu::util::TextureDataOrder; // Added import
 use pyo3::prelude::*; // Add import
 use pollster; // Need this for blocking on async #[new]
-use pyo3::types::{PyBytes, PyByteArray};
+use pyo3::types::PyBytes;
 use pyo3::wrap_pyfunction;
 use pyo3::numpy::{PyArrayDyn, PyReadonlyArrayDyn, ToPyArray};
 
@@ -162,45 +162,50 @@ impl WgpuFrameInterpolator {
         }
     }
 
-    // Modified interpolate_py to accept NumPy arrays
-    #[pyo3(signature = (frame_a, frame_b, *, time_t=0.5))]
+    // Changed interpolate_py to accept and return PyBytes
+    #[pyo3(signature = (frame_a, frame_b, width, height, *, time_t=0.5))]
     fn interpolate_py<'py>(
         &self,
         py: Python<'py>,
-        frame_a: PyReadonlyArrayDyn<u8>, // Changed from &'py PyBytes
-        frame_b: PyReadonlyArrayDyn<u8>, // Changed from &PyBytes
+        frame_a_bytes: &'py PyBytes,
+        frame_b_bytes: &'py PyBytes,
+        width: u32,
+        height: u32,
         time_t: f32
-    ) -> PyResult<Py<PyArrayDyn<u8>>> // Returning a new NumPy array
+    ) -> PyResult<Py<PyBytes>>
     {
-        println!("[WgpuFrameInterpolator] Python interpolate_py called with NumPy arrays (Placeholder)");
-        println!("  time_t: {}", time_t);
-        // TODO: Implement actual WGPU texture creation from frame_a, frame_b
-        // TODO: Implement actual warp/blend pass (or other minimal pass)
-        // TODO: Read back WGPU texture to a new NumPy array
+        println!("[WgpuFrameInterpolator] Python interpolate_py (PyBytes) called.");
+        println!("  Dimensions: {}x{}, time_t: {}", width, height, time_t);
 
-        // For now, just demonstrate returning frame_a data as a new array.
-        // This requires that frame_a is contiguous and we know its dimensions.
-        // The actual implementation will create a new buffer from GPU output.
+        // 1. Get byte slices
+        let frame_a_data = frame_a_bytes.as_bytes();
+        let frame_b_data = frame_b_bytes.as_bytes();
         
-        let frame_a_data = frame_a.as_array(); // This is a read-only view
-
-        // Example: If we knew dimensions and wanted to return a copy of frame_a
-        // let dims = frame_a_data.shape();
-        // let height = dims[0];
-        // let width = dims[1];
-        // let channels = dims[2]; // Assuming RGBA, so 4
-
-        // For the smoke test, let's assume the input is 64x64x4 and return a clone of frame_a.
-        // This is NOT how the final function will work, but it tests the NumPy binding.
-        if frame_a_data.shape() != [64, 64, 4] {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                format!("Placeholder expects 64x64x4 RGBA input, got {:?}", frame_a_data.shape())
-            ));
+        let expected_size = (width * height * 4) as usize;
+        if frame_a_data.len() != expected_size || frame_b_data.len() != expected_size {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "Input byte lengths ({} B, {} B) do not match expected size {} B for {}x{}x4 RGBA image",
+                frame_a_data.len(), frame_b_data.len(), expected_size, width, height
+            )));
         }
-        
-        // Create a new PyArray and copy data (this is just for placeholder)
-        let output_array = frame_a_data.to_owned();
-        Ok(output_array.to_pyarray_bound(py).into())
+
+        // TODO: (Actual WGPU Implementation for PyBytes)
+        // 2. Create wgpu::Texture for frame_a, frame_b, dummy_flow, output_tex
+        //    - Use TextureFormat::Rgba8UnormSrgb or Rgba8Unorm
+        //    - Use queue.write_texture to upload frame_a_data, frame_b_data
+        //    - Create dummy_flow_texture (Rg32Float) and fill with zeros or use a pre-existing one.
+        //    - Create output_texture (Rgba8UnormSrgb or Rgba8Unorm)
+        // 3. Get TextureViews for all of them.
+        // 4. Call self.interpolate (the Rust method) with these views and samplers.
+        //    - Ensure self.interpolate is robust to flow_upsample/refine pipelines being None.
+        //      For now, it might mainly use the warp_blend_pipeline.
+        // 5. Read back output_texture to a Vec<u8>.
+        // 6. Convert Vec<u8> to PyBytes and return.
+
+        // Placeholder: Just return frame_a_bytes for now to test the signature change
+        // This means the output image will be the red square.
+        let py_bytes_out = PyBytes::new_bound(py, frame_a_data).into();
+        Ok(py_bytes_out)
     }
 }
 
