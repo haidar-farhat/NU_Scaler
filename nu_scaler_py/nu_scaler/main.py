@@ -319,7 +319,7 @@ class LiveFeedScreen(QWidget):
         controls = QGroupBox("Capture Controls")
         form = QFormLayout(controls)
         self.source_box = QComboBox()
-        self.source_box.addItems(["Screen", "Window", "Process", "Region"])
+        self.source_box.addItems(["Screen", "Process", "Region"])
         self.backend_box = QComboBox()
         self.backend_box.addItems(["Auto", "Win32", "X11", "Wayland"])
         self.target_box = QComboBox()
@@ -416,7 +416,7 @@ class LiveFeedScreen(QWidget):
 
     def update_source_ui(self, text):
         self.target_box.clear()
-        if text == "Window" or text == "Process":
+        if text == "Process":
             self.target_box.setEnabled(True)
             self.refresh_targets_btn.setEnabled(True)
             self.refresh_targets()
@@ -431,60 +431,103 @@ class LiveFeedScreen(QWidget):
         else:
             self.target_box.setEnabled(False)
             self.refresh_targets_btn.setEnabled(False)
-            self.target_box.addItem("N/A")
+            self.target_box.addItem("N/A - Invalid Source")
 
     def refresh_targets(self):
         current_source_type = self.source_box.currentText()
         self.target_box.clear()
         print(f"[GUI] Refreshing targets for source type: {current_source_type}")
 
-        if current_source_type == "Window":
-            if nu_scaler_core is not None and hasattr(nu_scaler_core, 'PyScreenCapture') and hasattr(nu_scaler_core.PyScreenCapture, 'list_windows'):
+        if current_source_type == "Process":
+            apps = []
+            if pygetwindow is not None:
+                print("[GUI] Using pygetwindow to find 'App' processes (with visible windows).")
+                app_pids = set() # Use a set for efficient PID lookup
                 try:
-                    windows = nu_scaler_core.PyScreenCapture.list_windows()
-                    print(f"[GUI] Received windows: {windows}")
-                    if windows:
-                        self.target_box.addItems(windows)
-                    else:
-                        self.target_box.addItem("No windows found")
-                        self.target_box.setEnabled(False)
-                except Exception as e:
-                    print(f"[GUI] Error listing windows: {e}")
-                    traceback.print_exc()
-                    self.target_box.addItem(f"Error listing windows")
-                    self.log_signal.emit(f"Error listing windows: {e}")
-            else:
-                msg = "Window listing: Rust core or method missing"
-                print(f"[GUI] {msg}")
-                self.target_box.addItem(msg)
-                self.target_box.setEnabled(False)
-        
-        elif current_source_type == "Process":
-            try:
-                processes = []
-                for proc in psutil.process_iter(['pid', 'name', 'exe', 'username']):
+                    all_windows = pygetwindow.getAllWindows()
+                    for window in all_windows:
+                        # Heuristic: must be visible, have a title, and have an associated PID (via _hWnd property access to get PID)
+                        # Note: Accessing _hWnd and then trying to get PID is pygetwindow internal structure dependent and might not be universally robust or cross-platform supported by pygetwindow itself for PIDs.
+                        # A more robust way is to get PIDs of processes that have windows and then cross-reference with psutil.
+                        # For now, we rely on pygetwindow to give us PIDs if possible, or we iterate psutil and check window visibility.
+                        
+                        # Simpler & more robust: get all PIDs from psutil, then check for visible windows for each.
+                        # However, to optimize, let's get PIDs that *definitely* have windows.
+                        # getAllWindows() gives window objects. We need their PIDs.
+                        # pygetwindow doesn't directly give PIDs with getAllWindows(). We need to iterate psutil processes and then check if they have visible windows.
+                        pass # Placeholder for revised logic below
+
+                except pygetwindow.PyGetWindowException as e_gw_all:
+                    print(f"[GUI] pygetwindow.getAllWindows() failed: {e_gw_all}. Process list might be less accurate.")
+                    # Fallback to psutil only if pygetwindow fails severely here
+
+                # Revised strategy: Iterate psutil, then check window visibility for each using pygetwindow
+                listed_pids = set()
+                for proc in psutil.process_iter(['pid', 'name', 'exe']):
+                    try:
+                        pid = proc.info['pid']
+                        name = proc.info['name'] or "N/A"
+                        exe = proc.info.get('exe')
+
+                        if not name or pid in listed_pids: # Skip if no name or already processed
+                            continue
+
+                        # Heuristic for an "App": has a visible window with a title.
+                        has_visible_titled_window = False
+                        if pygetwindow:
+                            try:
+                                for w in pygetwindow.getWindowsWithPid(pid):
+                                    if w.visible and w.title: # Check if window is visible and has a non-empty title
+                                        has_visible_titled_window = True
+                                        break
+                            except pygetwindow.PyGetWindowException:
+                                # Sometimes fails for specific processes, just means we can't confirm window state
+                                pass 
+                            except psutil.NoSuchProcess: # Process might have died between psutil listing and pygetwindow call
+                                continue
+                        
+                        if has_visible_titled_window:
+                            if exe: # Prefer to list if we have an executable path
+                                apps.append(f"{name} (PID: {pid})")
+                                listed_pids.add(pid)
+                            elif name != "N/A": # Fallback for processes without easily accessible exe but have windows (e.g. UWP apps)
+                                apps.append(f"{name} (PID: {pid}) - No Exe Path")
+                                listed_pids.add(pid)
+
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                        continue # Skip processes that can't be accessed
+                    except Exception as e_proc_iter:
+                        print(f"[GUI] Error processing proc {pid if 'pid' in locals() else 'unknown'}: {e_proc_iter}")
+                        continue
+
+                if not apps and pygetwindow is None:
+                    self.target_box.addItem("pygetwindow missing for App list; showing all processes")
+                    # Fallback to showing all processes if pygetwindow is not there
+                    for proc in psutil.process_iter(['pid', 'name', 'exe']):
+                        try:
+                            if proc.info.get('name') and proc.info.get('exe'): # Basic filter
+                                apps.append(f"{proc.info['name']} (PID: {proc.info['pid']})")
+                        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                            continue
+            else: # pygetwindow is None - fallback to basic psutil listing
+                print("[GUI] pygetwindow not available. Listing processes without window visibility check.")
+                self.log_signal.emit("Warning: pygetwindow not found. Process list may include background tasks.")
+                for proc in psutil.process_iter(['pid', 'name', 'exe']):
                     try:
                         proc_name = proc.info['name'] or "N/A"
-                        if proc_name and proc.info.get('exe'):
-                           processes.append(f"{proc_name} (PID: {proc.info['pid']})")
+                        if proc_name and proc.info.get('exe'): # Basic filter: has name and exe
+                           apps.append(f"{proc_name} (PID: {proc.info['pid']})")
                     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                         continue
-                
-                if processes:
-                    self.target_box.addItems(sorted(processes))
-                else:
-                    self.target_box.addItem("No suitable processes found")
-                    self.target_box.setEnabled(False)
-            except Exception as e:
-                error_msg = f"Error listing processes: {e}"
-                print(f"[GUI] {error_msg}")
-                traceback.print_exc()
-                self.target_box.addItem(error_msg)
-                self.log_signal.emit(error_msg)
+            
+            if apps:
+                self.target_box.addItems(sorted(list(set(apps)))) # Use set to ensure uniqueness before sorting
+            else:
+                self.target_box.addItem("No suitable 'App' processes found")
                 self.target_box.setEnabled(False)
         
-        else: # Screen or Region
-            self.target_box.setEnabled(False)
+        else: # Screen or Region (target_box should be disabled by update_source_ui)
+            pass # self.target_box.setEnabled(False) # Already handled by update_source_ui
 
     def update_scale_label(self):
         val = self.scale_slider.value() / 10.0
@@ -513,22 +556,8 @@ class LiveFeedScreen(QWidget):
                     self.status_bar.setText("FullScreen target missing in core")
                     return
 
-            elif source == "Window":
-                if not target_selection or target_selection.startswith("No windows found") or target_selection.startswith("Error") or target_selection.startswith("Window listing:"):
-                    self.log_signal.emit("Window capture: No valid window selected.")
-                    self.status_bar.setText("Invalid window selection")
-                    return
-                if hasattr(nu_scaler_core, "PyCaptureTarget") and "WindowByTitle" in nu_scaler_core.PyCaptureTarget.__members__ and hasattr(nu_scaler_core, "PyWindowByTitle"):
-                    capture_target_type = nu_scaler_core.PyCaptureTarget.WindowByTitle
-                    capture_target_param = nu_scaler_core.PyWindowByTitle(title=target_selection)
-                    print(f"[GUI] Using WindowByTitle target: {target_selection}")
-                else:
-                    self.log_signal.emit("Error: WindowByTitle capture not available in nu_scaler_core.")
-                    self.status_bar.setText("WindowByTitle target missing")
-                    return
-            
             elif source == "Process":
-                if not target_selection or target_selection.startswith("No suitable processes found") or target_selection.startswith("Error"):
+                if not target_selection or target_selection.startswith("No suitable processes found") or target_selection.startswith("No suitable 'App' processes found") or target_selection.startswith("Error"):
                     self.log_signal.emit("Process capture: No valid process selected.")
                     self.status_bar.setText("Invalid process selection")
                     return
@@ -556,12 +585,16 @@ class LiveFeedScreen(QWidget):
                                     if w.visible and w.title: # Basic check for a main-like window
                                         found_window = w
                                         break 
-                                # If no visible window with title, take the first one if any
+                                # If no visible window with title, take the first one if any (preferring one with a title if possible)
                                 if not found_window and candidate_windows:
-                                     found_window = candidate_windows[0]
+                                    for w_alt in candidate_windows:
+                                        if w_alt.title: # Prioritize any window with a title if primary check failed
+                                            found_window = w_alt
+                                            break
+                                    if not found_window: # Still no window with a title, take the very first one
+                                        found_window = candidate_windows[0]
 
-
-                            if found_window and found_window.title:
+                            if found_window and found_window.title: # Crucially, we need a title for WindowByTitle capture
                                 if hasattr(nu_scaler_core, "PyCaptureTarget") and "WindowByTitle" in nu_scaler_core.PyCaptureTarget.__members__ and hasattr(nu_scaler_core, "PyWindowByTitle"):
                                     capture_target_type = nu_scaler_core.PyCaptureTarget.WindowByTitle
                                     capture_target_param = nu_scaler_core.PyWindowByTitle(title=found_window.title)
