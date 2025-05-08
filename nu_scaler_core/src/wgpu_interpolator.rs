@@ -161,22 +161,22 @@ impl WgpuFrameInterpolator {
         }
     }
 
-    // Placeholder interpolate method for Python
-    // It currently ignores time_t and returns frame_a directly.
-    // Accepts PyBytes, returns PyBytes.
-    // TODO: Implement actual interpolation logic with proper texture handling.
+    // Renamed method to interpolate_py
+    // Added 'py lifetime to frame_a input
+    // Changed _frame_b back to frame_b (matching signature)
     #[pyo3(signature = (frame_a, frame_b, *, time_t=0.5))]
-    fn interpolate<'py>(
-        &self, 
+    fn interpolate_py<'py>(
+        &self,
         py: Python<'py>,
-        frame_a: &PyBytes, 
-        _frame_b: &PyBytes, // Ignored for now
+        frame_a: &'py PyBytes, // Added 'py lifetime here
+        frame_b: &PyBytes, // Renamed from _frame_b
         time_t: f32 // Ignored for now
-    ) -> PyResult<&'py PyBytes> 
+    ) -> PyResult<&'py PyBytes> // Return type already had 'py
     {
-        println!("[WgpuFrameInterpolator] Python interpolate called (Placeholder - Returns frame_a)");
+        println!("[WgpuFrameInterpolator] Python interpolate_py called (Placeholder - Returns frame_a)");
         println!("  time_t: {}", time_t);
-        // Since the real pipeline is likely broken/disabled, just return frame_a
+        // Argument frame_b is now implicitly unused
+        let _ = frame_b; // Explicitly ignore frame_b for now to avoid warning
         Ok(frame_a)
     }
 }

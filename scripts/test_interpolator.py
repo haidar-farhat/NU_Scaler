@@ -39,15 +39,15 @@ def run_test():
         print("Check if the constructor in Rust needs specific arguments.")
         exit(1)
 
-    print("Calling interpolate (time_t=0.5)...")
+    print("Calling interpolate_py (time_t=0.5)...")
     time_t = 0.5
     try:
         # TODO: Verify the expected input/output types for the Python binding
         # Assuming it takes numpy arrays [height, width, 4] RGBA uint8
         # and returns a similar numpy array.
-        out = interp.interpolate(img_a, img_b, time_t=time_t)
+        out = interp.interpolate_py(img_a, img_b, time_t=time_t)
     except Exception as e:
-        print(f"Error calling interpolate: {e}")
+        print(f"Error calling interpolate_py: {e}")
         print("Check the method signature and expected arguments in your Python bindings.")
         exit(1)
 
@@ -55,7 +55,7 @@ def run_test():
     try:
         # Ensure output is a valid numpy array for Image.fromarray
         if not isinstance(out, np.ndarray) or out.shape != (height, width, 4) or out.dtype != np.uint8:
-            print(f"Warning: Output from interpolate is not the expected numpy array format.")
+            print(f"Warning: Output from interpolate_py is not the expected numpy array format.")
             print(f"Got type: {type(out)}, shape: {getattr(out, 'shape', 'N/A')}, dtype: {getattr(out, 'dtype', 'N/A')}")
             # Attempt conversion if possible, otherwise save raw representation?
             # For now, we'll just try to save it.
