@@ -1079,7 +1079,7 @@ impl WgpuFrameInterpolator {
 mod tests {
     use super::*;
     use crate::utils::teinture_wgpu::{create_device_queue, ComparableTexture, create_texture_with_data, TextureDataOrder};
-    // use image::{ImageBuffer, Rgba, Rgb}; // Rgb might not be needed if not creating Rgb images
+    use wgpu::{Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureViewDescriptor};
 
     #[test]
     fn test_warp_blend_zero_flow() {
@@ -1336,4 +1336,202 @@ mod tests {
         }
 
     }
+
+    #[test]
+    fn test_refine_flow_uniform_shift() {
+        let (_device, _queue, _instance, _adapter) = futures::executor::block_on(create_device_queue());
+        let device = std::sync::Arc::new(_device);
+        let queue = std::sync::Arc::new(_queue);
+
+        let mut interpolator = WgpuFrameInterpolator::new(device.clone(), queue.clone()).expect("Failed to create interpolator");
+
+        let width = 32u32;
+        let height = 32u32;
+        let num_pyramid_levels = 3; // e.g., 32x32 (L0), 16x16 (L1), 8x8 (L2)
+        let coarsest_flow_level_idx = num_pyramid_levels - 1; // L2 (8x8)
+
+        // Create frame A (e.g., a simple ramp or pattern)
+        let mut frame_a_data = vec![0u8; (width * height * 4) as usize];
+        for y in 0..height {
+            for x in 0..width {
+                let idx = ((y * width + x) * 4) as usize;
+                frame_a_data[idx] = (x % 256) as u8; // R
+                frame_a_data[idx + 1] = (y % 256) as u8; // G
+                frame_a_data[idx + 2] = ((x + y) % 256) as u8; // B
+                frame_a_data[idx + 3] = 255; // A
+            }
+        }
+
+        // Create frame B by shifting frame A by (dx, dy)
+        let dx_shift = 2isize;
+        let dy_shift = 1isize;
+        let mut frame_b_data = vec![0u8; (width * height * 4) as usize];
+        for y in 0..height {
+            for x in 0..width {
+                let target_idx = ((y * width + x) * 4) as usize;
+                let src_x = x as isize - dx_shift;
+                let src_y = y as isize - dy_shift;
+
+                if src_x >= 0 && src_x < width as isize && src_y >= 0 && src_y < height as isize {
+                    let src_idx = ((src_y as u32 * width + src_x as u32) * 4) as usize;
+                    frame_b_data[target_idx..target_idx + 4].copy_from_slice(&frame_a_data[src_idx..src_idx + 4]);
+                } else {
+                    // Fill with black or some other boundary color for pixels shifted out of bounds
+                    frame_b_data[target_idx] = 0; frame_b_data[target_idx+1] = 0; frame_b_data[target_idx+2] = 0; frame_b_data[target_idx+3] = 255;
+                }
+            }
+        }
+
+        let texture_desc_common = TextureDescriptor {
+            size: Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1, sample_count: 1, dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba8UnormSrgb,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+            label: None, view_formats: &[]
+        };
+
+        let frame_a_texture = create_texture_with_data(
+            &device, &queue, 
+            &TextureDescriptor{label: Some("Frame A (Shift Test)"), ..texture_desc_common},
+            TextureDataOrder::LayerMajor, &frame_a_data
+        );
+        let frame_b_texture = create_texture_with_data(
+            &device, &queue, 
+            &TextureDescriptor{label: Some("Frame B (Shift Test)"), ..texture_desc_common},
+            TextureDataOrder::LayerMajor, &frame_b_data
+        );
+
+        // Build pyramids
+        interpolator.build_pyramid(&frame_a_texture, width, height, num_pyramid_levels as u32, true).expect("Build pyramid A failed");
+        interpolator.build_pyramid(&frame_b_texture, width, height, num_pyramid_levels as u32, false).expect("Build pyramid B failed");
+
+        // Compute coarse flow
+        let coarse_iterations = 10;
+        let coarse_alpha_sq = 0.02f32.powi(2);
+        interpolator.compute_coarse_flow(coarsest_flow_level_idx, coarse_iterations, coarse_alpha_sq);
+        
+        let initial_flow_idx = if coarse_iterations == 0 { 0 } else if coarse_iterations % 2 == 1 { 1 } else { 0 };
+        info!("Coarse flow computed, result in flow_textures[{}]. Starting hierarchical refinement.", initial_flow_idx);
+
+        // Refine flow hierarchy
+        let refinement_alpha = 0.05; // Example alpha for refinement steps
+        let refine_iters_per_level = 5;
+        let final_refined_flow_idx = interpolator.refine_flow_hierarchy(
+            num_pyramid_levels,
+            coarsest_flow_level_idx,
+            initial_flow_idx,
+            refinement_alpha,
+            refine_iters_per_level
+        );
+        info!("Hierarchical refinement finished. Final flow in flow_textures[{}].", final_refined_flow_idx);
+
+        // Read back the final flow texture (at full resolution - pyramid level 0)
+        let final_flow_texture_ref = interpolator.flow_textures[final_refined_flow_idx].as_ref().expect("Final flow texture missing");
+        assert_eq!(final_flow_texture_ref.width(), width, "Final flow width mismatch");
+        assert_eq!(final_flow_texture_ref.height(), height, "Final flow height mismatch");
+
+        // Use a helper to read Rg32Float texture to Vec<f32>
+        let flow_data_f32 = read_texture_rg32float_to_vec_f32(&device, &queue, final_flow_texture_ref);
+        
+        // Verify flow vectors
+        let mut incorrect_vectors = 0;
+        let mut total_vectors = 0;
+        let mut max_error = 0.0f32;
+
+        for y in 0..height {
+            for x in 0..width {
+                let idx = ((y * width + x) * 2) as usize; // 2 floats (u,v) per pixel
+                let u = flow_data_f32[idx];
+                let v = flow_data_f32[idx + 1];
+                total_vectors += 1;
+
+                // Expected flow: (dx_shift, dy_shift)
+                let expected_u = dx_shift as f32;
+                let expected_v = dy_shift as f32;
+
+                let error_u = (u - expected_u).abs();
+                let error_v = (v - expected_v).abs();
+                max_error = max_error.max(error_u).max(error_v);
+
+                // Allow some epsilon for errors due to discretization, pyramid filtering, and iterative solution
+                let epsilon = 0.5; // Adjusted epsilon
+                if error_u > epsilon || error_v > epsilon {
+                    if incorrect_vectors < 10 { // Log a few examples
+                        warn!("Incorrect flow at ({},{}): got ({:.2},{:.2}), expected ({:.2},{:.2}). Error U:{:.2}, V:{:.2}", 
+                               x, y, u, v, expected_u, expected_v, error_u, error_v);
+                    }
+                    incorrect_vectors += 1;
+                }
+            }
+        }
+
+        info!("Max error in flow: {:.3}", max_error);
+        assert_eq!(incorrect_vectors, 0, 
+                   "{} out of {} flow vectors were incorrect (beyond epsilon {}). Max error: {:.3}", 
+                   incorrect_vectors, total_vectors, 0.5, max_error);
+        info!("test_refine_flow_uniform_shift PASSED.");
+    }
+
+    // Helper function to read an Rg32Float texture into a Vec<f32>
+    fn read_texture_rg32float_to_vec_f32(device: &Device, queue: &Queue, texture: &Texture) -> Vec<f32> {
+        let width = texture.width();
+        let height = texture.height();
+        let depth = texture.depth_or_array_layers();
+        assert_eq!(texture.format(), TextureFormat::Rg32Float);
+        assert_eq!(depth, 1, "Expected 2D texture");
+
+        let bytes_per_pixel = 8; // Rg32Float is 2 * 4 bytes
+        let buffer_size = (width * height * bytes_per_pixel) as u64;
+        let buffer_desc = wgpu::BufferDescriptor {
+            label: Some("Rg32Float Readback Buffer"),
+            size: buffer_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        };
+        let readback_buffer = device.create_buffer(&buffer_desc);
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Rg32Float Readback Encoder"),
+        });
+
+        encoder.copy_texture_to_buffer(
+            wgpu::ImageCopyTexture {
+                texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::ImageCopyBuffer {
+                buffer: &readback_buffer,
+                layout: wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(width * bytes_per_pixel),
+                    rows_per_image: Some(height),
+                },
+            },
+            Extent3d { width, height, depth_or_array_layers: depth },
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+
+        let buffer_slice = readback_buffer.slice(..);
+        let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
+        buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+            sender.send(result).unwrap();
+        });
+        device.poll(wgpu::Maintain::Wait); // Wait for mapping
+        
+        let result = futures::executor::block_on(receiver.receive());
+        match result {
+            Some(Ok(())) => {
+                let data = buffer_slice.get_mapped_range();
+                let result_vec: Vec<f32> = bytemuck::cast_slice(&data).to_vec();
+                drop(data); // Unmap buffer before it's dropped
+                readback_buffer.unmap();
+                result_vec
+            }
+            Some(Err(e)) => panic!("Failed to map buffer for texture readback: {:?}", e),
+            None => panic!("Channel closed before map_async result received"),
+        }
+    }
+
 } 
