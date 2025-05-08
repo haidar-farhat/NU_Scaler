@@ -1,0 +1,14 @@
+[package]
+name = "dlss-sys"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+# No dependencies needed for these minimal FFI stubs 
+libloading = "0.8"
+
+[build-dependencies]
+bindgen = "0.69" # Or a version you prefer 

@@ -1,0 +1,68 @@
+version: '3.8'
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: nuscaler-backend
+    container_name: nuscaler-app
+    restart: unless-stopped
+    working_dir: /var/www/html
+    ports:
+      # Expose PHP-FPM port
+      - '9000:9000'
+    volumes:
+      - ./:/var/www/html
+    depends_on:
+      - db
+      - redis
+    networks:
+      - nuscaler_network
+
+  # Add Nginx service to handle web requests
+  nginx:
+    image: nginx:alpine
+    container_name: nuscaler-nginx
+    restart: unless-stopped
+    ports:
+      - '8080:80' # Expose web server on host port 8080
+    volumes:
+      - ./:/var/www/html
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - app
+    networks:
+      - nuscaler_network
+
+  db:
+    image: mysql:8.0
+    container_name: nuscaler-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-secret} # Use env var or default
+      MYSQL_DATABASE: ${DB_DATABASE:-nuscaler}
+      MYSQL_USER: ${DB_USERNAME:-nuscaler}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-secret}
+    ports:
+      - '${DB_PORT:-3306}:3306'
+    volumes:
+      - dbdata:/var/lib/mysql
+    networks:
+      - nuscaler_network
+
+  redis:
+    image: redis:6-alpine
+    container_name: nuscaler-redis
+    restart: unless-stopped
+    ports:
+      - '${REDIS_PORT:-6379}:6379'
+    networks:
+      - nuscaler_network
+
+networks:
+  nuscaler_network:
+    driver: bridge
+
+volumes:
+  dbdata:
+    driver: local

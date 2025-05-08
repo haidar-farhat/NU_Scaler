@@ -1,0 +1,22 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "nu_scaler"
+version = "0.1.0"
+description = "Hybrid Rust+Python real-time upscaling application."
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "PySide6",
+    "Pillow",
+    "numpy",      # Added for potential image manipulation
+    "ffpyplayer", # For video playback
+    "imageio",    # For video loading
+]
+# dependencies = []  # Add Python dependencies here
+
+[tool.maturin]
+manifest-path = "../nu_scaler_core/Cargo.toml"
+bindings = "pyo3"
