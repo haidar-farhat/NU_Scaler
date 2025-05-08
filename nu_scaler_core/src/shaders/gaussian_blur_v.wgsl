@@ -14,10 +14,10 @@ struct Params {
 @group(0) @binding(2) var dst_tex: texture_storage_2d<rgba32float, write>; // Output texture
 @group(0) @binding(3) var image_sampler: sampler; // Use a sampler for potential boundary handling
 
-// Same weights as horizontal pass
-const KERNEL_RADIUS: i32 = 2;
-const KERNEL_WEIGHTS = array<f32, 5>(1.0, 4.0, 6.0, 4.0, 1.0);
-const KERNEL_SUM = 16.0;
+// Use hardcoded weights for 5x5 kernel (radius 2)
+const W0: f32 = 1.0 / 16.0;
+const W1: f32 = 4.0 / 16.0;
+const W2: f32 = 6.0 / 16.0;
 
 @compute @workgroup_size(16, 16, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -26,24 +26,27 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 
     let output_coord = vec2<i32>(i32(global_id.x), i32(global_id.y));
+    let in_coord_x = u32(output_coord.x);
 
-    var color_sum: vec4<f32> = vec4<f32>(0.0);
+    // Apply vertical kernel (Unrolled loop)
+    let coord_m2 = clamp(output_coord.y - 2, 0, i32(params.in_size.y) - 1);
+    let coord_m1 = clamp(output_coord.y - 1, 0, i32(params.in_size.y) - 1);
+    let coord_00 = clamp(output_coord.y,     0, i32(params.in_size.y) - 1);
+    let coord_p1 = clamp(output_coord.y + 1, 0, i32(params.in_size.y) - 1);
+    let coord_p2 = clamp(output_coord.y + 2, 0, i32(params.in_size.y) - 1);
 
-    // Apply vertical kernel
-    for (var i: i32 = -KERNEL_RADIUS; i <= KERNEL_RADIUS; i = i + 1) {
-        // Clamp coordinates to stay within source texture bounds
-        // Reading input size from params.in_size
-        let sample_coord_y = clamp(output_coord.y + i, 0, i32(params.in_size.y) - 1);
-        let sample_coord = vec2<i32>(output_coord.x, sample_coord_y);
+    let color_m2 = textureLoad(src_tex, vec2<u32>(in_coord_x, u32(coord_m2)), 0);
+    let color_m1 = textureLoad(src_tex, vec2<u32>(in_coord_x, u32(coord_m1)), 0);
+    let color_00 = textureLoad(src_tex, vec2<u32>(in_coord_x, u32(coord_00)), 0);
+    let color_p1 = textureLoad(src_tex, vec2<u32>(in_coord_x, u32(coord_p1)), 0);
+    let color_p2 = textureLoad(src_tex, vec2<u32>(in_coord_x, u32(coord_p2)), 0);
 
-        // Fetch color from source texture
-        let neighbor_color = textureLoad(src_tex, vec2<u32>(u32(sample_coord.x), u32(sample_coord.y)), 0);
+    let color_sum = color_m2 * W0 +
+                    color_m1 * W1 +
+                    color_00 * W2 +
+                    color_p1 * W1 +
+                    color_p2 * W0;
 
-        // Get weight from kernel
-        let weight = KERNEL_WEIGHTS[i + KERNEL_RADIUS];
-        color_sum += neighbor_color * weight;
-    }
-
-    // Normalize and write to destination texture
-    textureStore(dst_tex, output_coord, color_sum / KERNEL_SUM);
+    // Write to destination texture (already normalized by weights)
+    textureStore(dst_tex, output_coord, color_sum);
 } 
