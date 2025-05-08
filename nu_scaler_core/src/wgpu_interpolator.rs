@@ -344,4 +344,171 @@ pub async fn read_texture_to_cpu(
     } else {
         Err(anyhow::anyhow!("Failed to map texture readback buffer or mapping failed."))
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*; // Import items from parent module
+    use wgpu::{Instance, RequestAdapterOptions, PowerPreference, SamplerDescriptor, AddressMode, FilterMode, TextureUsages};
+    use pollster; // For blocking on async calls in tests
+
+    async fn setup_wgpu() -> (Arc<Device>, Queue) {
+        let instance = Instance::default();
+        let adapter = instance
+            .request_adapter(&RequestAdapterOptions {
+                power_preference: PowerPreference::HighPerformance,
+                force_fallback_adapter: false,
+                compatible_surface: None,
+            })
+            .await
+            .expect("Failed to find an appropriate adapter");
+
+        let (device, queue) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: Some("Test Device"),
+                    required_features: wgpu::Features::empty(),
+                    required_limits: wgpu::Limits::default().using_resolution(adapter.limits()),
+                },
+                None,
+            )
+            .await
+            .expect("Failed to create device");
+        (Arc::new(device), queue)
+    }
+
+    #[test]
+    fn test_warp_blend_zero_flow() {
+        let (device, queue) = pollster::block_on(setup_wgpu());
+        let interpolator = WgpuFrameInterpolator::new(device.clone()).expect("Failed to create interpolator");
+
+        const WIDTH: u32 = 64;
+        const HEIGHT: u32 = 64;
+        const TIME_T: f32 = 0.5;
+
+        // Create frame_a (all red: 255,0,0,255 as Rgba32Float)
+        let mut frame_a_data_f32: Vec<f32> = Vec::with_capacity((WIDTH * HEIGHT * 4) as usize);
+        for _ in 0..(WIDTH * HEIGHT) {
+            frame_a_data_f32.extend_from_slice(&[1.0, 0.0, 0.0, 1.0]); // R, G, B, A as f32 (normalized)
+        }
+        let frame_a_data_u8: Vec<u8> = frame_a_data_f32.iter().flat_map(|&f| f.to_ne_bytes()).collect();
+        let frame_a_tex = create_texture_with_data(
+            &device, &queue, WIDTH, HEIGHT, &frame_a_data_u8, 
+            Some("Frame A Test Texture"), TextureFormat::Rgba32Float, 
+            TextureUsages::TEXTURE_BINDING
+        );
+        let frame_a_view = frame_a_tex.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // Create frame_b (all blue: 0,0,255,255 as Rgba32Float)
+        let mut frame_b_data_f32: Vec<f32> = Vec::with_capacity((WIDTH * HEIGHT * 4) as usize);
+        for _ in 0..(WIDTH * HEIGHT) {
+            frame_b_data_f32.extend_from_slice(&[0.0, 0.0, 1.0, 1.0]); // R, G, B, A as f32
+        }
+        let frame_b_data_u8: Vec<u8> = frame_b_data_f32.iter().flat_map(|&f| f.to_ne_bytes()).collect();
+        let frame_b_tex = create_texture_with_data(
+            &device, &queue, WIDTH, HEIGHT, &frame_b_data_u8, 
+            Some("Frame B Test Texture"), TextureFormat::Rgba32Float, 
+            TextureUsages::TEXTURE_BINDING
+        );
+        let frame_b_view = frame_b_tex.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // Create flow_tex (zero flow: (0.0, 0.0) for all pixels)
+        let zero_flow_data: Vec<(f32, f32)> = vec![(0.0, 0.0); (WIDTH * HEIGHT) as usize];
+        let flow_tex = create_flow_texture_with_data(
+            &device, &queue, WIDTH, HEIGHT, &zero_flow_data, 
+            Some("Zero Flow Test Texture")
+        );
+        let flow_tex_view = flow_tex.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // Create output texture (Rgba8Unorm)
+        let out_tex = create_output_texture(
+            &device, WIDTH, HEIGHT, TextureFormat::Rgba8Unorm, 
+            Some("Output Test Texture")
+        );
+        let out_tex_view = out_tex.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // Create samplers
+        let image_sampler = device.create_sampler(&SamplerDescriptor {
+            label: Some("Image Sampler"),
+            address_mode_u: AddressMode::ClampToEdge,
+            address_mode_v: AddressMode::ClampToEdge,
+            address_mode_w: AddressMode::ClampToEdge,
+            mag_filter: FilterMode::Linear,
+            min_filter: FilterMode::Linear,
+            mipmap_filter: FilterMode::Nearest,
+            ..Default::default()
+        });
+        let flow_sampler = device.create_sampler(&SamplerDescriptor {
+            label: Some("Flow Sampler (Nearest)"),
+            address_mode_u: AddressMode::ClampToEdge,
+            address_mode_v: AddressMode::ClampToEdge,
+            mag_filter: FilterMode::Nearest, // Flow data is often precise, no filtering
+            min_filter: FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        // Call interpolate
+        interpolator.interpolate(
+            &queue, 
+            &frame_a_view, &frame_b_view, &flow_tex_view, &out_tex_view, 
+            &image_sampler, &flow_sampler, 
+            WIDTH, HEIGHT, TIME_T
+        ).expect("Interpolation failed");
+
+        // Read back the output texture
+        let output_bytes = pollster::block_on(
+            read_texture_to_cpu(&device, &queue, &out_tex, WIDTH, HEIGHT, 4) // Rgba8Unorm is 4 bytes/pixel
+        ).expect("Failed to read texture to CPU");
+
+        // Assert pixel-wise average
+        // Expected: R=0.5*1.0=0.5 -> 127 or 128; G=0; B=0.5*1.0=0.5 -> 127 or 128; A=1.0 -> 255
+        // Allow some tolerance for f32 to u8 conversion and potential minor GPU differences.
+        let expected_r = (1.0 * (1.0 - TIME_T) + 0.0 * TIME_T * 255.0).round() as u8;
+        let expected_g = (0.0 * (1.0 - TIME_T) + 0.0 * TIME_T * 255.0).round() as u8;
+        let expected_b = (0.0 * (1.0 - TIME_T) + 1.0 * TIME_T * 255.0).round() as u8;
+        let expected_a = (1.0 * (1.0 - TIME_T) + 1.0 * TIME_T * 255.0).round() as u8; // Should be 255
+        
+        // Corrected expected values calculation for Rgba8Unorm output from normalized float inputs
+        // c0_r = 1.0, c1_r = 0.0. mix(1.0, 0.0, 0.5) = 0.5.  0.5 * 255 = 127.5 -> 127 or 128
+        // c0_b = 0.0, c1_b = 1.0. mix(0.0, 1.0, 0.5) = 0.5.  0.5 * 255 = 127.5 -> 127 or 128
+        // For color channels, result = ((1-t)*c0 + t*c1) * 255. For alpha, result = ((1-t)*a0 + t*a1) * 255
+
+        let expected_pixel = [
+            ((1.0 - TIME_T) * 1.0 + TIME_T * 0.0).clamp(0.0, 1.0) * 255.0,
+            ((1.0 - TIME_T) * 0.0 + TIME_T * 0.0).clamp(0.0, 1.0) * 255.0,
+            ((1.0 - TIME_T) * 0.0 + TIME_T * 1.0).clamp(0.0, 1.0) * 255.0,
+            ((1.0 - TIME_T) * 1.0 + TIME_T * 1.0).clamp(0.0, 1.0) * 255.0,
+        ];
+
+        let mut mismatches = 0;
+        for y in 0..HEIGHT {
+            for x in 0..WIDTH {
+                let idx = ((y * WIDTH + x) * 4) as usize;
+                let r = output_bytes[idx];
+                let g = output_bytes[idx + 1];
+                let b = output_bytes[idx + 2];
+                let a = output_bytes[idx + 3];
+
+                // Check with a small tolerance due to float precision and rounding
+                let r_diff = (r as f32 - expected_pixel[0]).abs();
+                let g_diff = (g as f32 - expected_pixel[1]).abs();
+                let b_diff = (b as f32 - expected_pixel[2]).abs();
+                let a_diff = (a as f32 - expected_pixel[3]).abs();
+
+                if r_diff > 1.5 || g_diff > 1.5 || b_diff > 1.5 || a_diff > 1.5 { // Allow diff of 1 due to rounding
+                    if mismatches < 5 { // Print only first few mismatches
+                        println!(
+                            "Mismatch at ({}, {}): Got [{}, {}, {}, {}], Expected ~[{}, {}, {}, {}] (raw expected: {:?})",
+                            x, y, r, g, b, a, 
+                            expected_pixel[0].round() as u8, expected_pixel[1].round() as u8, 
+                            expected_pixel[2].round() as u8, expected_pixel[3].round() as u8,
+                            expected_pixel
+                        );
+                    }
+                    mismatches += 1;
+                }
+            }
+        }
+        assert_eq!(mismatches, 0, "Pixel mismatch count: {}", mismatches);
+    }
 } 
