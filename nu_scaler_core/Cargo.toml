@@ -61,7 +61,7 @@ windows = { version = "0.56", features = [
 
 [features]
 default = ["python"]
-python = ["pyo3/extension-module", "dep:serde", "dep:serde_json"]
+python = ["pyo3/extension-module", "pyo3/numpy", "dep:serde", "dep:serde_json"]
 fsr3 = []
 
 # dlss = ["dep:dlss-sys"]
