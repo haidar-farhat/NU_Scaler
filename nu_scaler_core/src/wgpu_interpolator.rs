@@ -14,18 +14,17 @@ use wgpu::{
     ImageCopyTexture, ImageDataLayout, Origin3d, Buffer,
 };
 
-// Uniform structure for the warp/blend shader - CORRECTED LAYOUT FOR 64 Bytes
+// Uniform structure for the warp/blend shader - CORRECTED LAYOUT FOR 64 Bytes (using vec4 alignment)
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct InterpolationUniforms {
     size: [u32; 2],       // offset 0, size 8
-    _pad0: [u32; 2],      // offset 8, size 8 (now at offset 16)
+    _pad0: [u32; 2],      // offset 8, size 8 -> now at offset 16
     time_t: f32,          // offset 16, size 4
-    // Pad to 32 bytes before the first vec3
-    _pad_before_vec3_1: [f32; 3], // offset 20, size 12 -> now at offset 32
-    pad1: [f32; 3],       // offset 32, size 12 -> now at offset 44
-    // Pad to 64 bytes total
-    _pad_final: [f32; 5], // offset 44, size 20 -> total size 64
+    // Pad using vec4 alignment (16 bytes)
+    _pad1: [f32; 3],      // offset 20, size 12. Pad to 32 for next element.
+    _pad2: [f32; 4],      // offset 32, size 16. Pad to 48 for next element.
+    _pad3: [f32; 4],      // offset 48, size 16. Total size = 64 bytes.
 }
 
 impl InterpolationUniforms {
@@ -34,9 +33,9 @@ impl InterpolationUniforms {
             size: [width, height],
             _pad0: [0; 2],
             time_t,
-            _pad_before_vec3_1: [0.0; 3],
-            pad1: [0.0; 3], // Renamed from _pad1
-            _pad_final: [0.0; 5], // Added final padding
+            _pad1: [0.0; 3],
+            _pad2: [0.0; 4],
+            _pad3: [0.0; 4],
         }
     }
 }
@@ -49,16 +48,15 @@ pub struct WgpuFrameInterpolator {
 
 impl WgpuFrameInterpolator {
     pub fn new(device: Arc<Device>) -> Result<Self> {
-        // WGSL Shader source matching the 64-byte layout
+        // WGSL Shader source matching the new 64-byte layout
         let warp_blend_shader_source = r#"
             struct InterpolationUniforms {
               size: vec2<u32>,
               _pad0: vec2<u32>,
               time_t: f32,
-              _pad_before_vec3_1: vec3<f32>,
-              pad1: vec3<f32>,
-              // Pad to 64 bytes, e.g., using an array or other types
-              _pad_final: array<f32, 5>,
+              _pad1: vec3<f32>, // WGSL handles implicit padding based on member alignment
+              _pad2: vec4<f32>,
+              _pad3: vec4<f32>,
             };
 
             @group(0) @binding(0) var<uniform> u: InterpolationUniforms;
@@ -74,7 +72,6 @@ impl WgpuFrameInterpolator {
                 if (global_id.x >= u.size.x || global_id.y >= u.size.y) {
                     return;
                 }
-
                 let output_coord_i32 = vec2<i32>(i32(global_id.x), i32(global_id.y));
                 let current_pixel_center_uv = (vec2<f32>(global_id.xy) + 0.5) / vec2<f32>(u.size);
                 let flow_pixel_delta = textureSampleLevel(flow_tex, flow_sampler, current_pixel_center_uv, 0.0).xy;
