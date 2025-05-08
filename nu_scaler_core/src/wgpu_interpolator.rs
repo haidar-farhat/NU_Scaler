@@ -13,6 +13,7 @@ use wgpu::{
     CommandEncoderDescriptor, ComputePassDescriptor, Texture, TextureUsages, Extent3d,
     ImageCopyTexture, ImageDataLayout, Origin3d, Buffer,
     include_wgsl, TextureDescriptor, TextureDimension,
+    SamplerDescriptor, AddressMode, FilterMode, TextureViewDescriptor,
 };
 
 // Uniform structure for the warp/blend shader - MATCHING ORIGINAL SPEC (48 Bytes)
@@ -62,12 +63,17 @@ pub struct WgpuFrameInterpolator {
     blur_v_pipeline: ComputePipeline,
     downsample_pipeline: ComputePipeline,
     pyramid_pass_bind_group_layout: BindGroupLayout,
+    shared_sampler: Sampler,
     blur_temp_texture: Option<Texture>,
     blur_temp_texture_view: Option<TextureView>,
     pyramid_a_textures: Vec<Texture>,
     pyramid_a_views: Vec<TextureView>,
     pyramid_b_textures: Vec<Texture>,
     pyramid_b_views: Vec<TextureView>,
+    downsample_a_textures: Vec<Texture>,
+    downsample_a_views: Vec<TextureView>,
+    downsample_b_textures: Vec<Texture>,
+    downsample_b_views: Vec<TextureView>,
 }
 
 impl WgpuFrameInterpolator {
@@ -248,6 +254,18 @@ impl WgpuFrameInterpolator {
             entry_point: "main",
         });
 
+        // Create shared sampler
+        let shared_sampler = device.create_sampler(&SamplerDescriptor {
+            label: Some("Pyramid Sampler"),
+            address_mode_u: AddressMode::ClampToEdge,
+            address_mode_v: AddressMode::ClampToEdge,
+            address_mode_w: AddressMode::ClampToEdge,
+            mag_filter: FilterMode::Linear,
+            min_filter: FilterMode::Linear,
+            mipmap_filter: FilterMode::Nearest, // No mipmaps used here
+            ..Default::default()
+        });
+
         Ok(Self {
             device,
             warp_blend_pipeline,
@@ -256,12 +274,17 @@ impl WgpuFrameInterpolator {
             blur_v_pipeline,
             downsample_pipeline,
             pyramid_pass_bind_group_layout,
+            shared_sampler,
             blur_temp_texture: None,
             blur_temp_texture_view: None,
             pyramid_a_textures: Vec::new(),
             pyramid_a_views: Vec::new(),
             pyramid_b_textures: Vec::new(),
             pyramid_b_views: Vec::new(),
+            downsample_a_textures: Vec::new(),
+            downsample_a_views: Vec::new(),
+            downsample_b_textures: Vec::new(),
+            downsample_b_views: Vec::new(),
         })
     }
 
