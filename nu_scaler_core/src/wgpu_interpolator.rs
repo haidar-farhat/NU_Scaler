@@ -15,6 +15,7 @@ use wgpu::{
     // Ensure all needed types are imported
     RenderPipeline, VertexState, FragmentState, ColorWrites, PrimitiveState, PrimitiveTopology,
     MultisampleState, TextureSampleType, TextureAspect,
+    include_wgsl,
 };
 use crate::utils::teinture_wgpu::{self, WgpuState}; // Keep this, will fix if utils::teinture_wgpu is wrong later
 use wgpu::util::DeviceExt;
@@ -123,10 +124,9 @@ pub struct WgpuFrameInterpolator {
 
 impl WgpuFrameInterpolator {
     pub fn new(device: Arc<Device>, queue: Arc<Queue>) -> Result<Self> {
-        // Corrected shader paths (removed ../)
         let warp_blend_shader_module = device.create_shader_module(ShaderModuleDescriptor {
             label: Some("Warp/Blend Shader Module (Phase 1)"),
-            source: ShaderSource::Wgsl(include_str!("shaders/warp_blend.wgsl").into()), // Path corrected
+            source: ShaderSource::Wgsl(include_str!("../shaders/warp_blend.wgsl").into()), // Corrected path
         });
 
         let warp_blend_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -222,9 +222,9 @@ impl WgpuFrameInterpolator {
         });
 
         // --- Phase 2.1 Setup: Image Pyramid --- 
-        let blur_h_shader_module = device.create_shader_module(include_wgsl!("shaders/gaussian_blur_h.wgsl")); // Keep include_wgsl! if it works, assuming path is relative to src dir
-        let blur_v_shader_module = device.create_shader_module(include_wgsl!("shaders/gaussian_blur_v.wgsl"));
-        let downsample_shader_module = device.create_shader_module(include_wgsl!("shaders/downsample.wgsl"));
+        let blur_h_shader_module = device.create_shader_module(include_wgsl!("../shaders/gaussian_blur_h.wgsl")); // Corrected path
+        let blur_v_shader_module = device.create_shader_module(include_wgsl!("../shaders/gaussian_blur_v.wgsl"));
+        let downsample_shader_module = device.create_shader_module(include_wgsl!("../shaders/downsample.wgsl"));
 
         // Shared Bind Group Layout for blur and downsample passes
         let pyramid_pass_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -305,7 +305,7 @@ impl WgpuFrameInterpolator {
         // --- Phase 2.2 Setup: Horn-Schunck --- 
         let hs_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Horn-Schunck Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/horn_schunck.wgsl").into()), // Path corrected
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/horn_schunck.wgsl").into()), // Corrected path
         });
 
         // Corrected Horn-Schunck BGL to match horn_schunck.wgsl
@@ -408,7 +408,7 @@ impl WgpuFrameInterpolator {
         // Flow Upsample Shader, BGL, and Pipeline
         let upsample_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Flow Upsample Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/flow_upsample.wgsl").into()), // Path corrected
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/flow_upsample.wgsl").into()), // Corrected path
         });
         let flow_upsample_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("Flow Upsample BGL"),
@@ -450,7 +450,7 @@ impl WgpuFrameInterpolator {
         // Flow Refine Shader, BGL, and Pipeline
         let refine_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Flow Refine Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/flow_refine.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/flow_refine.wgsl").into()), // Corrected path
         });
         let flow_refine_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("Flow Refine BGL"),
