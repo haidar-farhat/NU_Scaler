@@ -14,17 +14,21 @@ use wgpu::{
     ImageCopyTexture, ImageDataLayout, Origin3d, Buffer,
 };
 
-// Uniform structure for the warp/blend shader - CORRECTED LAYOUT FOR 64 Bytes (using vec4 alignment)
+// Uniform structure for the warp/blend shader - CORRECTED LAYOUT FOR 80 Bytes
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct InterpolationUniforms {
     size: [u32; 2],       // offset 0, size 8
     _pad0: [u32; 2],      // offset 8, size 8 -> now at offset 16
     time_t: f32,          // offset 16, size 4
-    // Pad using vec4 alignment (16 bytes)
-    _pad1: [f32; 3],      // offset 20, size 12. Pad to 32 for next element.
-    _pad2: [f32; 4],      // offset 32, size 16. Pad to 48 for next element.
-    _pad3: [f32; 4],      // offset 48, size 16. Total size = 64 bytes.
+    // Pad to 32 bytes before the first vec3
+    _pad1: [f32; 3],      // offset 20, size 12 -> now at offset 32
+    // Pad to 48 bytes before the first vec4
+    _pad2: [f32; 4],      // offset 32, size 16 -> now at offset 48
+    // Pad to 64 bytes before the second vec4
+    _pad3: [f32; 4],      // offset 48, size 16 -> now at offset 64
+    // Pad to 80 bytes total
+    _pad4: [f32; 4],      // offset 64, size 16 -> total size 80
 }
 
 impl InterpolationUniforms {
@@ -36,6 +40,7 @@ impl InterpolationUniforms {
             _pad1: [0.0; 3],
             _pad2: [0.0; 4],
             _pad3: [0.0; 4],
+            _pad4: [0.0; 4], // Added final padding
         }
     }
 }
@@ -48,15 +53,16 @@ pub struct WgpuFrameInterpolator {
 
 impl WgpuFrameInterpolator {
     pub fn new(device: Arc<Device>) -> Result<Self> {
-        // WGSL Shader source matching the new 64-byte layout
+        // WGSL Shader source matching the new 80-byte layout
         let warp_blend_shader_source = r#"
             struct InterpolationUniforms {
               size: vec2<u32>,
               _pad0: vec2<u32>,
               time_t: f32,
-              _pad1: vec3<f32>, // WGSL handles implicit padding based on member alignment
+              _pad1: vec3<f32>,
               _pad2: vec4<f32>,
               _pad3: vec4<f32>,
+              _pad4: vec4<f32>,
             };
 
             @group(0) @binding(0) var<uniform> u: InterpolationUniforms;
