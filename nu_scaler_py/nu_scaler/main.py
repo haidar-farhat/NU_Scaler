@@ -895,6 +895,7 @@ class LiveFeedScreen(QWidget):
             return None
 
     def update_frame(self):
+        print("[TRACE] update_frame ENTERED") # Ensure this prints
         # print("[TRACE] update_frame called") # Optional: Uncomment for very verbose tracing
         try:
             if not self.capture:
