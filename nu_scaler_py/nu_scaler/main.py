@@ -475,18 +475,28 @@ class LiveFeedScreen(QWidget):
                         # Heuristic for an "App": has a visible window with a title.
                         has_visible_titled_window = False
                         if pygetwindow:
+                            print(f"[DEBUG] Checking PID: {pid} ({name}) for windows.") # DEBUG PRINT
                             try:
-                                for w in pygetwindow.getWindowsWithPid(pid):
+                                process_windows = pygetwindow.getWindowsWithPid(pid)
+                                if not process_windows:
+                                    print(f"[DEBUG] PID: {pid} ({name}) - pygetwindow found NO windows.") # DEBUG PRINT
+                                for i, w in enumerate(process_windows):
+                                    print(f"[DEBUG] PID: {pid} ({name}) - Window {i}: Title='{w.title}', Visible={w.visible}, Area={w.width*w.height}") # DEBUG PRINT
                                     if w.visible and w.title: # Check if window is visible and has a non-empty title
+                                        print(f"[DEBUG] PID: {pid} ({name}) - FOUND VISIBLE TITLED WINDOW: '{w.title}'") # DEBUG PRINT
                                         has_visible_titled_window = True
                                         break
-                            except pygetwindow.PyGetWindowException:
-                                # Sometimes fails for specific processes, just means we can't confirm window state
+                            except pygetwindow.PyGetWindowException as e_gw_pid:
+                                print(f"[DEBUG] PID: {pid} ({name}) - pygetwindow.getWindowsWithPid error: {e_gw_pid}") # DEBUG PRINT
                                 pass 
                             except psutil.NoSuchProcess: # Process might have died between psutil listing and pygetwindow call
+                                print(f"[DEBUG] PID: {pid} ({name}) - psutil.NoSuchProcess during pygetwindow call.") # DEBUG PRINT
                                 continue
+                        else: # Should not happen if pygetwindow loaded, but good for completeness
+                            print(f"[DEBUG] PID: {pid} ({name}) - pygetwindow object is None, skipping window check.") # DEBUG PRINT
                         
                         if has_visible_titled_window:
+                            print(f"[DEBUG] PID: {pid} ({name}) - Adding to 'Apps' list.") # DEBUG PRINT
                             if exe: # Prefer to list if we have an executable path
                                 apps.append(f"{name} (PID: {pid})")
                                 listed_pids.add(pid)
