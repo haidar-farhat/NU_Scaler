@@ -1187,7 +1187,48 @@ mod tests {
 
     // Helper function to read an Rg32Float texture into a Vec<f32>
     fn read_texture_rg32float_to_vec_f32(device: &Device, queue: &Queue, texture: &Texture) -> Vec<f32> {
-        // ... (setup buffer, encoder, copy) ...
+        let width = texture.width();
+        let height = texture.height();
+        let depth = texture.depth_or_array_layers();
+        assert_eq!(texture.format(), TextureFormat::Rg32Float);
+        assert_eq!(depth, 1, "Expected 2D texture");
+
+        let bytes_per_pixel = 8; // Rg32Float is 2 * 4 bytes
+        let buffer_size = (width * height * bytes_per_pixel) as u64;
+        
+        // RESTORED buffer creation logic
+        let buffer_desc = wgpu::BufferDescriptor {
+            label: Some("Rg32Float Readback Buffer"),
+            size: buffer_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        };
+        let readback_buffer = device.create_buffer(&buffer_desc);
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Rg32Float Readback Encoder"),
+        });
+
+        encoder.copy_texture_to_buffer(
+            wgpu::ImageCopyTexture {
+                texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::ImageCopyBuffer {
+                buffer: &readback_buffer,
+                layout: wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(width * bytes_per_pixel),
+                    rows_per_image: Some(height),
+                },
+            },
+            Extent3d { width, height, depth_or_array_layers: depth },
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+
+        // RESTORED buffer mapping logic (was already mostly present)
         let buffer_slice = readback_buffer.slice(..);
         let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
         buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
@@ -1201,8 +1242,8 @@ mod tests {
                 let data = buffer_slice.get_mapped_range();
                 let result_vec: Vec<f32> = bytemuck::cast_slice(&data).to_vec();
                 drop(data); // Unmap buffer before it's dropped
-                readback_buffer.unmap();
-                result_vec // Ensure this is the returned value
+                readback_buffer.unmap(); // Now readback_buffer is defined
+                result_vec 
             }
             Some(Err(e)) => panic!("Failed to map buffer for texture readback: {:?}", e),
             None => panic!("Channel closed before map_async result received"),
