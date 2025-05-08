@@ -18,8 +18,17 @@ struct UpsampleUniforms {
 
 @group(0) @binding(3) var dst_flow_tex: texture_storage_2d<rg32float, write>; // Renamed from dst_flow for clarity
 
-// [[stage(compute), workgroup_size(16,16)]] // WGSL uses @compute @workgroup_size(16,16,1)
-@compute @workgroup_size(1, 1, 1)
-fn main() {
-  // Empty
+@compute @workgroup_size(16, 16, 1)
+fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+  if (id.x >= u.dst_size.x || id.y >= u.dst_size.y) { 
+    return; 
+  }
+  
+  let dst_pixel_center_uv = (vec2<f32>(id.xy) + 0.5) / vec2<f32>(u.dst_size);
+  let src_sample_uv = (vec2<f32>(id.xy) + 0.5) / vec2<f32>(u.dst_size);
+
+  let sampled_flow_vec4 = textureSampleLevel(src_flow_tex, bilinear_sampler, src_sample_uv, 0.0);
+  let flow_vec2 = sampled_flow_vec4.xy;
+
+  textureStore(dst_flow_tex, vec2<i32>(id.xy), vec4<f32>(flow_vec2.x, flow_vec2.y, 0.0, 1.0));
 } 
