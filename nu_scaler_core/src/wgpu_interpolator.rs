@@ -163,7 +163,7 @@ impl WgpuFrameInterpolator {
     }
 
     // Changed interpolate_py to accept and return PyBytes
-    #[pyo3(signature = (frame_a, frame_b, width, height, *, time_t=0.5))]
+    #[pyo3(signature = (frame_a_bytes, frame_b_bytes, width, height, *, time_t=0.5))]
     fn interpolate_py<'py>(
         &self,
         py: Python<'py>,
@@ -177,35 +177,187 @@ impl WgpuFrameInterpolator {
         println!("[WgpuFrameInterpolator] Python interpolate_py (PyBytes) called.");
         println!("  Dimensions: {}x{}, time_t: {}", width, height, time_t);
 
-        // 1. Get byte slices
-        let frame_a_data = frame_a_bytes.as_bytes();
-        let frame_b_data = frame_b_bytes.as_bytes();
-        
+        // 1. Receive & Validate Inputs
         let expected_size = (width * height * 4) as usize;
-        if frame_a_data.len() != expected_size || frame_b_data.len() != expected_size {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                "Input byte lengths ({} B, {} B) do not match expected size {} B for {}x{}x4 RGBA image",
-                frame_a_data.len(), frame_b_data.len(), expected_size, width, height
-            )));
+        let a_data = frame_a_bytes.as_bytes();
+        let b_data = frame_b_bytes.as_bytes();
+        if a_data.len() != expected_size || b_data.len() != expected_size {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+              format!("Expected {} bytes per frame for {}x{}x4 RGBA, got frame_a: {} bytes, frame_b: {} bytes", 
+                      expected_size, width, height, a_data.len(), b_data.len())
+            ));
         }
 
-        // TODO: (Actual WGPU Implementation for PyBytes)
-        // 2. Create wgpu::Texture for frame_a, frame_b, dummy_flow, output_tex
-        //    - Use TextureFormat::Rgba8UnormSrgb or Rgba8Unorm
-        //    - Use queue.write_texture to upload frame_a_data, frame_b_data
-        //    - Create dummy_flow_texture (Rg32Float) and fill with zeros or use a pre-existing one.
-        //    - Create output_texture (Rgba8UnormSrgb or Rgba8Unorm)
-        // 3. Get TextureViews for all of them.
-        // 4. Call self.interpolate (the Rust method) with these views and samplers.
-        //    - Ensure self.interpolate is robust to flow_upsample/refine pipelines being None.
-        //      For now, it might mainly use the warp_blend_pipeline.
-        // 5. Read back output_texture to a Vec<u8>.
-        // 6. Convert Vec<u8> to PyBytes and return.
+        // 2. Upload to WGPU Textures
+        let texture_size_extent = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
+        let frame_texture_desc_common = wgpu::TextureDescriptor {
+            label: None, // Set individually
+            size: texture_size_extent,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm, // Common format for input/output images
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        };
 
-        // Placeholder: Just return frame_a_bytes for now to test the signature change
-        // This means the output image will be the red square.
-        let py_bytes_out = PyBytes::new_bound(py, frame_a_data).into();
-        Ok(py_bytes_out)
+        let frame_a_tex = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Py_Frame_A_Tex"),
+            ..frame_texture_desc_common
+        });
+        self.queue.write_texture(
+            wgpu::ImageCopyTexture { texture: &frame_a_tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            a_data,
+            wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(width * 4), rows_per_image: Some(height) },
+            texture_size_extent,
+        );
+
+        let frame_b_tex = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Py_Frame_B_Tex"),
+            ..frame_texture_desc_common
+        });
+        self.queue.write_texture(
+            wgpu::ImageCopyTexture { texture: &frame_b_tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            b_data,
+            wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(width * 4), rows_per_image: Some(height) },
+            texture_size_extent,
+        );
+
+        // 3. Prepare Zero Flow Texture (Rg16Float)
+        let flow_texture_format = wgpu::TextureFormat::Rg16Float;
+        let flow_bytes_per_pixel = 4; // RG16Float: 2 components * 2 bytes/component
+        let zero_flow_data_len = (width * height * flow_bytes_per_pixel) as usize;
+        let zero_flow_data: Vec<u8> = vec![0; zero_flow_data_len]; 
+        let flow_tex = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Py_Zero_Flow_Tex"),
+            size: texture_size_extent, // Flow has same dimensions as frames
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: flow_texture_format,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        self.queue.write_texture(
+            wgpu::ImageCopyTexture { texture: &flow_tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            &zero_flow_data,
+            wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(width * flow_bytes_per_pixel), rows_per_image: Some(height) },
+            texture_size_extent,
+        );
+
+        // Create Output Texture (for warp_blend pass)
+        let output_tex = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Py_Output_Tex"),
+            size: texture_size_extent,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm, // Match input/output image format
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC, // STORAGE for shader, COPY_SRC for readback
+            view_formats: &[],
+        });
+
+        // Create views
+        let frame_a_view = frame_a_tex.create_view(&wgpu::TextureViewDescriptor::default());
+        let frame_b_view = frame_b_tex.create_view(&wgpu::TextureViewDescriptor::default());
+        let flow_view = flow_tex.create_view(&wgpu::TextureViewDescriptor::default());
+        let output_view = output_tex.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // 4. Dispatch Warp/Blend Pass
+        let uniforms_data = InterpolationUniforms::new(width, height, time_t);
+        let uniform_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Py_Interpolation_Uniform_Buffer"),
+            contents: bytemuck::bytes_of(&uniforms_data),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let warp_blend_bgl = self.warp_blend_bgl_internal.as_ref().ok_or_else(
+            || PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("warp_blend_bgl_internal is None")
+        )?;
+        let warp_blend_pipeline = self.warp_blend_pipeline.as_ref().ok_or_else(
+            || PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("warp_blend_pipeline is None")
+        )?;
+
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Py_WarpBlend_BG"),
+            layout: warp_blend_bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&frame_a_view) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&frame_b_view) },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&flow_view) },
+                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&output_view) },
+                wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::Sampler(&self.shared_sampler) }, // Assuming shared_sampler is appropriate
+                wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::Sampler(&self.flow_sampler) },   // Assuming flow_sampler is appropriate
+            ],
+        });
+
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Py_Interp_Encoder") });
+        {
+            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { 
+                label: Some("Py_WarpBlend_Pass"),
+                timestamp_writes: None,
+            });
+            compute_pass.set_pipeline(warp_blend_pipeline);
+            compute_pass.set_bind_group(0, &bind_group, &[]);
+            let dispatch_x = (width + 15) / 16;
+            let dispatch_y = (height + 15) / 16;
+            compute_pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
+        }
+        self.queue.submit(Some(encoder.finish()));
+
+        // 5. Read Back Output
+        let buffer_size_bytes = (width * height * 4) as u64; // RGBA8Unorm is 4 bytes per pixel
+        let output_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Py_Output_Buffer"),
+            size: buffer_size_bytes,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let mut readback_encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Py_Readback_Encoder") });
+        readback_encoder.copy_texture_to_buffer(
+            wgpu::ImageCopyTexture { texture: &output_tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            wgpu::ImageCopyBuffer { 
+                buffer: &output_buffer, 
+                layout: wgpu::ImageDataLayout { 
+                    offset: 0, 
+                    bytes_per_row: Some(width * 4), 
+                    rows_per_image: Some(height) 
+                }
+            },
+            texture_size_extent,
+        );
+        self.queue.submit(Some(readback_encoder.finish()));
+
+        let result_bytes = pollster::block_on(async {
+            let buffer_slice = output_buffer.slice(..);
+            // buffer_slice.map_async(wgpu::MapMode::Read).await.unwrap(); // This was the manager's suggestion but map_async takes a callback
+            let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
+            buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+                sender.send(result).expect("Failed to send map_async result");
+            });
+            self.device.poll(wgpu::Maintain::Wait); // Wait for mapping
+            
+            match receiver.receive().await {
+                Some(Ok(())) => {
+                    let data = buffer_slice.get_mapped_range();
+                    let bytes_vec = data.to_vec();
+                    drop(data); // Unmap buffer before it's dropped
+                    output_buffer.unmap();
+                    Ok(bytes_vec)
+                }
+                Some(Err(e)) => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                    format!("Failed to map output buffer: {}", e)
+                )),
+                None => Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                    "Buffer map channel closed prematurely".to_string()
+                )),
+            }
+        })?;
+
+        // 6. Return PyBytes
+        Ok(PyBytes::new_bound(py, &result_bytes).into())
     }
 }
 
@@ -828,13 +980,13 @@ impl WgpuFrameInterpolator {
                 ],
             });
 
-            let mut encoder = self.device.create_command_encoder(&CommandEncoderDescriptor {
+            let mut encoder = self.device.create_command_encoder(&CommandEncoderDescriptor { 
                 label: Some(&format!("Horn-Schunck Command Encoder Iter {}", i)),
             });
             {
-                let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor {
+                let mut compute_pass = encoder.begin_compute_pass(&ComputePassDescriptor { 
                     label: Some(&format!("Horn-Schunck Compute Pass Iter {}", i)),
-                    timestamp_writes: None,
+                    timestamp_writes: None 
                 });
                 compute_pass.set_pipeline(pipeline); // Use pipeline obtained after mutable borrow
                 compute_pass.set_bind_group(0, &bind_group, &[]);
