@@ -196,6 +196,7 @@ impl WgpuFrameInterpolator {
             layout: Some(&warp_blend_pipeline_layout),
             module: &warp_blend_shader_module,
             entry_point: "main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
 
         // --- Phase 2.1 Setup: Image Pyramid --- 
@@ -251,6 +252,7 @@ impl WgpuFrameInterpolator {
             layout: Some(&pyramid_pipeline_layout),
             module: &blur_h_shader_module,
             entry_point: "main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
 
         let blur_v_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
@@ -258,6 +260,7 @@ impl WgpuFrameInterpolator {
             layout: Some(&pyramid_pipeline_layout),
             module: &blur_v_shader_module,
             entry_point: "main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
 
         let downsample_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
@@ -265,6 +268,7 @@ impl WgpuFrameInterpolator {
             layout: Some(&pyramid_pipeline_layout),
             module: &downsample_shader_module,
             entry_point: "main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
 
         // Create shared sampler
@@ -365,6 +369,7 @@ impl WgpuFrameInterpolator {
             layout: Some(&horn_schunck_pipeline_layout),
             module: &hs_shader_module,
             entry_point: "main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
 
         // Create sampler for flow textures (Linear filtering for smoother flow sampling)
@@ -459,6 +464,7 @@ impl WgpuFrameInterpolator {
             layout: Some(&flow_upsample_pipeline_layout),
             module: &flow_upsample_shader_module,
             entry_point: "main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
 
         // Flow Refine Shader, BGL, and Pipeline
@@ -506,6 +512,7 @@ impl WgpuFrameInterpolator {
             layout: Some(&flow_refine_pipeline_layout),
             module: &refine_shader_module,
             entry_point: "main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
         });
 
         Ok(Self {
