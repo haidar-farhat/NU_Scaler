@@ -13,8 +13,8 @@ anyhow = "1.0"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 log = "0.4"
 pollster = "0.3"
-# pyo3 must be optional if used with dep: in features
-pyo3 = { version = "0.21", features = ["extension-module", "numpy"], optional = true }
+# pyo3 declared as optional, features are added via the 'python' feature below
+pyo3 = { version = "0.21", optional = true }
 wgpu = "0.20.0"
 raw-window-handle = "0.6"
 bytemuck = { version = "1.12", features = ["derive"] }
