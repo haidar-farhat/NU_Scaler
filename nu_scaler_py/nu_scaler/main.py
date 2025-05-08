@@ -169,6 +169,26 @@ class LiveFeedScreen(QWidget):
         super().__init__(parent)
         self.capture = None
         self.upscaler = None
+        self.interpolator = None
+        if nu_scaler_core and hasattr(nu_scaler_core, 'WgpuFrameInterpolator'):
+            try:
+                # Default workgroup preset is Wide32x8
+                self.interpolator = nu_scaler_core.WgpuFrameInterpolator()
+                print("[LiveFeedScreen] WgpuFrameInterpolator initialized successfully.")
+                if hasattr(self, 'log_signal') and self.log_signal is not None: # Check if log_signal is connected
+                    self.log_signal.emit("Frame Interpolator: Initialized")
+            except Exception as e:
+                print(f"[LiveFeedScreen] Failed to initialize WgpuFrameInterpolator: {e}")
+                traceback.print_exc()
+                if hasattr(self, 'log_signal') and self.log_signal is not None:
+                    self.log_signal.emit(f"Frame Interpolator: Failed to init: {e}")
+        else:
+            print("[LiveFeedScreen] WgpuFrameInterpolator not available in nu_scaler_core.")
+            if hasattr(self, 'log_signal') and self.log_signal is not None:
+                 self.log_signal.emit("Frame Interpolator: Not available in core library")
+        
+        self.prev_frame_data = None # Stores (bytes, width, height) for interpolation
+        self.interpolation_enabled = False
         self.timer = QTimer(self)
         self.timer.setInterval(100)  # Lowered to 10 FPS for diagnosis
         self.timer.timeout.connect(self.update_frame)
@@ -250,11 +270,10 @@ class LiveFeedScreen(QWidget):
         self.input_label = QLabel("Live Feed Preview")
         self.input_label.setAlignment(Qt.AlignCenter)
         self.input_label.setStyleSheet("font-size: 18px; color: #ccc;")
-        self.input_preview = QLabel()
-        self.input_preview.setFixedSize(480, 270)
-        self.input_preview.setStyleSheet("background: #222; border: 1px solid #555;")
+        self.preview_label = AspectRatioPreview()
+        self.preview_label.set_parent_window(self.window())
         left_layout.addWidget(self.input_label)
-        left_layout.addWidget(self.input_preview)
+        left_layout.addWidget(self.preview_label, 1)
         # Controls
         controls = QGroupBox("Capture Controls")
         form = QFormLayout(controls)
@@ -345,6 +364,11 @@ class LiveFeedScreen(QWidget):
         self.start_stop_shortcut.activated.connect(self.toggle_start_stop)
         # Placeholder for hotkey customization in settings
         # TODO: Integrate with settings dialog/config
+        # Interpolation Checkbox
+        self.interpolation_checkbox = QCheckBox("Enable Frame Interpolation")
+        self.interpolation_checkbox.setChecked(self.interpolation_enabled)
+        self.interpolation_checkbox.toggled.connect(self.toggle_interpolation)
+        left_layout.addWidget(self.interpolation_checkbox)
 
     def update_source_ui(self, text):
         if text == "Window":
@@ -707,6 +731,14 @@ class LiveFeedScreen(QWidget):
             self.start_capture()
         elif self.stop_btn.isEnabled():
             self.stop_capture()
+
+    def toggle_interpolation(self, checked):
+        self.interpolation_enabled = checked
+        self.prev_frame_data = None # Reset on toggle to ensure clean start
+        if hasattr(self, 'log_signal') and self.log_signal is not None:
+            status = "Enabled" if checked else "Disabled"
+            self.log_signal.emit(f"Frame Interpolation: {status}")
+        print(f"[LiveFeedScreen] Frame interpolation {status}")
 
 class SettingsScreen(QWidget):
     def __init__(self, live_feed_screen=None):
