@@ -2,24 +2,24 @@ import sys
 # Remove sys.path.insert for pyd_test
 
 # --- PyGetWindow Diagnostics ---
-print("--- PyGetWindow Import Diagnostics ---")
-try:
-    import pygetwindow
-    print(f"Successfully imported pygetwindow.")
-    print(f"pygetwindow version: {getattr(pygetwindow, '__version__', 'Not found')}")
-    print(f"pygetwindow file location: {getattr(pygetwindow, '__file__', 'Not found')}")
-    print(f"pygetwindow dir(): {dir(pygetwindow)}")
-    if hasattr(pygetwindow, 'getWindowsWithPid'):
-        print("getWindowsWithPid IS found in pygetwindow.")
-    else:
-        print("getWindowsWithPid IS NOT found in pygetwindow. THIS IS THE PROBLEM.")
-except ImportError as e_diag:
-    print(f"Failed to import pygetwindow: {e_diag}")
-    pygetwindow = None # Ensure it's None if import fails
-except Exception as e_diag_other:
-    print(f"An unexpected error occurred during pygetwindow diagnostics: {e_diag_other}")
-    pygetwindow = None
-print("--- End PyGetWindow Import Diagnostics ---")
+# print("--- PyGetWindow Import Diagnostics ---")
+# try:
+#     import pygetwindow
+#     print(f"Successfully imported pygetwindow.")
+#     print(f"pygetwindow version: {getattr(pygetwindow, '__version__', 'Not found')}")
+#     print(f"pygetwindow file location: {getattr(pygetwindow, '__file__', 'Not found')}")
+#     print(f"pygetwindow dir(): {dir(pygetwindow)}")
+#     if hasattr(pygetwindow, 'getWindowsWithPid'):
+#         print("getWindowsWithPid IS found in pygetwindow.")
+#     else:
+#         print("getWindowsWithPid IS NOT found in pygetwindow. THIS IS THE PROBLEM.")
+# except ImportError as e_diag:
+#     print(f"Failed to import pygetwindow: {e_diag}")
+#     pygetwindow = None # Ensure it's None if import fails
+# except Exception as e_diag_other:
+#     print(f"An unexpected error occurred during pygetwindow diagnostics: {e_diag_other}")
+#     pygetwindow = None
+# print("--- End PyGetWindow Import Diagnostics ---")
 # --- End PyGetWindow Diagnostics ---
 
 from PySide6.QtWidgets import (
@@ -34,12 +34,23 @@ import traceback
 import threading
 import psutil
 import os
-# Import pygetwindow for PID-based window finding
-try:
-    import pygetwindow
-except ImportError:
-    pygetwindow = None
-    print("[main.py] pygetwindow library not found. Process capture fallback to window title may not work.")
+
+# Import for Windows API access if on Windows
+if os.name == 'nt':
+    try:
+        import win32gui
+        import win32process
+        import win32con # For window styles, if needed later
+        print("[main.py] Successfully imported pywin32 modules (win32gui, win32process).")
+    except ImportError:
+        win32gui = None
+        win32process = None
+        win32con = None
+        print("[main.py] pywin32 library not found. Process capture features for Windows will be limited.")
+else:
+    win32gui = None
+    win32process = None
+    win32con = None
 
 # Import the Rust extension as 'nu_scaler'
 try:
@@ -459,107 +470,84 @@ class LiveFeedScreen(QWidget):
         current_source_type = self.source_box.currentText()
         self.target_box.clear()
         print(f"[GUI] Refreshing targets for source type: {current_source_type}")
-
+        
         if current_source_type == "Process":
-            apps = []
-            if pygetwindow is not None:
-                print("[GUI] Using pygetwindow to find 'App' processes (with visible windows).")
-                app_pids = set() # Use a set for efficient PID lookup
+            apps = {}
+            if os.name == 'nt' and win32gui and win32process:
+                print("[GUI] Using pywin32 to find 'App' processes (with visible windows).")
                 try:
-                    all_windows = pygetwindow.getAllWindows()
-                    for window in all_windows:
-                        # Heuristic: must be visible, have a title, and have an associated PID (via _hWnd property access to get PID)
-                        # Note: Accessing _hWnd and then trying to get PID is pygetwindow internal structure dependent and might not be universally robust or cross-platform supported by pygetwindow itself for PIDs.
-                        # A more robust way is to get PIDs of processes that have windows and then cross-reference with psutil.
-                        # For now, we rely on pygetwindow to give us PIDs if possible, or we iterate psutil and check window visibility.
-                        
-                        # Simpler & more robust: get all PIDs from psutil, then check for visible windows for each.
-                        # However, to optimize, let's get PIDs that *definitely* have windows.
-                        # getAllWindows() gives window objects. We need their PIDs.
-                        # pygetwindow doesn't directly give PIDs with getAllWindows(). We need to iterate psutil processes and then check if they have visible windows.
-                        pass # Placeholder for revised logic below
+                    def enum_windows_callback(hwnd, lParam):
+                        if win32gui.IsWindowVisible(hwnd) and win32gui.GetWindowText(hwnd):
+                            _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                            # We store the title with the PID in case we need it for WindowByTitle fallback
+                            # and to ensure we only list a PID once even if it has multiple such windows.
+                            if pid not in lParam:
+                                lParam[pid] = win32gui.GetWindowText(hwnd) # Store first non-empty title found for this PID
+                        return True # Continue enumeration
 
-                except pygetwindow.PyGetWindowException as e_gw_all:
-                    print(f"[GUI] pygetwindow.getAllWindows() failed: {e_gw_all}. Process list might be less accurate.")
-                    # Fallback to psutil only if pygetwindow fails severely here
+                    window_owning_pids_with_titles = {}
+                    win32gui.EnumWindows(enum_windows_callback, window_owning_pids_with_titles)
 
-                # Revised strategy: Iterate psutil, then check window visibility for each using pygetwindow
-                listed_pids = set()
-                for proc in psutil.process_iter(['pid', 'name', 'exe']):
-                    try:
-                        pid = proc.info['pid']
-                        name = proc.info['name'] or "N/A"
-                        exe = proc.info.get('exe')
+                    if not window_owning_pids_with_titles:
+                        self.target_box.addItem("No processes with visible windows found (via pywin32).")
+                        self.target_box.setEnabled(False)
+                        return
 
-                        if not name or pid in listed_pids: # Skip if no name or already processed
-                            continue
-
-                        # Heuristic for an "App": has a visible window with a title.
-                        has_visible_titled_window = False
-                        if pygetwindow:
-                            print(f"[DEBUG] Checking PID: {pid} ({name}) for windows.") # DEBUG PRINT
-                            try:
-                                process_windows = pygetwindow.getWindowsWithPid(pid)
-                                if not process_windows:
-                                    print(f"[DEBUG] PID: {pid} ({name}) - pygetwindow found NO windows.") # DEBUG PRINT
-                                for i, w in enumerate(process_windows):
-                                    print(f"[DEBUG] PID: {pid} ({name}) - Window {i}: Title='{w.title}', Visible={w.visible}, Area={w.width*w.height}") # DEBUG PRINT
-                                    if w.visible and w.title: # Check if window is visible and has a non-empty title
-                                        print(f"[DEBUG] PID: {pid} ({name}) - FOUND VISIBLE TITLED WINDOW: '{w.title}'") # DEBUG PRINT
-                                        has_visible_titled_window = True
-                                        break
-                            except pygetwindow.PyGetWindowException as e_gw_pid:
-                                print(f"[DEBUG] PID: {pid} ({name}) - pygetwindow.getWindowsWithPid error: {e_gw_pid}") # DEBUG PRINT
-                                pass 
-                            except psutil.NoSuchProcess: # Process might have died between psutil listing and pygetwindow call
-                                print(f"[DEBUG] PID: {pid} ({name}) - psutil.NoSuchProcess during pygetwindow call.") # DEBUG PRINT
-                                continue
-                        else: # Should not happen if pygetwindow loaded, but good for completeness
-                            print(f"[DEBUG] PID: {pid} ({name}) - pygetwindow object is None, skipping window check.") # DEBUG PRINT
-                        
-                        if has_visible_titled_window:
-                            print(f"[DEBUG] PID: {pid} ({name}) - Adding to 'Apps' list.") # DEBUG PRINT
-                            if exe: # Prefer to list if we have an executable path
-                                apps.append(f"{name} (PID: {pid})")
-                                listed_pids.add(pid)
-                            elif name != "N/A": # Fallback for processes without easily accessible exe but have windows (e.g. UWP apps)
-                                apps.append(f"{name} (PID: {pid}) - No Exe Path")
-                                listed_pids.add(pid)
-
-                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                        continue # Skip processes that can't be accessed
-                    except Exception as e_proc_iter:
-                        print(f"[GUI] Error processing proc {pid if 'pid' in locals() else 'unknown'}: {e_proc_iter}")
-                        continue
-
-                if not apps and pygetwindow is None:
-                    self.target_box.addItem("pygetwindow missing for App list; showing all processes")
-                    # Fallback to showing all processes if pygetwindow is not there
-                    for proc in psutil.process_iter(['pid', 'name', 'exe']):
+                    # Now cross-reference with psutil to get process names
+                    final_apps_list = []
+                    for proc in psutil.process_iter(['pid', 'name']):
                         try:
-                            if proc.info.get('name') and proc.info.get('exe'): # Basic filter
-                                apps.append(f"{proc.info['name']} (PID: {proc.info['pid']})")
+                            pid = proc.info['pid']
+                            if pid in window_owning_pids_with_titles:
+                                name = proc.info['name'] or "N/A"
+                                # Using the title obtained from win32gui as it might be more accurate for the main window
+                                # For display, we show process name and PID.
+                                final_apps_list.append(f"{name} (PID: {pid})") 
                         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                             continue
-            else: # pygetwindow is None - fallback to basic psutil listing
-                print("[GUI] pygetwindow not available. Listing processes without window visibility check.")
-                self.log_signal.emit("Warning: pygetwindow not found. Process list may include background tasks.")
+                    
+                    if final_apps_list:
+                        self.target_box.addItems(sorted(list(set(final_apps_list)))) # Set for uniqueness, then sort
+                    else:
+                        # This case should be rare if window_owning_pids_with_titles was populated
+                        self.target_box.addItem("Could not match PIDs to process names.")
+                        self.target_box.setEnabled(False)
+
+                except Exception as e_win32:
+                    print(f"[GUI] Error using pywin32 for process listing: {e_win32}")
+                    traceback.print_exc()
+                    self.target_box.addItem("Error listing processes with pywin32.")
+                    self.log_signal.emit(f"pywin32 error: {e_win32}")
+                    self.target_box.setEnabled(False)
+            
+            else: # Not on Windows or pywin32 not available
+                if os.name == 'nt': # Specifically on Windows but pywin32 failed to import
+                    msg = "pywin32 missing for App list; showing basic process list."
+                    self.log_signal.emit("Warning: pywin32 not found. Process list may include background tasks.")
+                else: # Not on Windows
+                    msg = "Process capture not optimized for non-Windows; showing basic process list."
+                    self.log_signal.emit("Info: Process listing uses basic psutil iteration on non-Windows.")
+                
+                print(f"[GUI] {msg}")
+                self.target_box.addItem(msg) # Add as first item to inform user
+
+                # Fallback to basic psutil listing (all processes with a name and exe)
+                psutil_apps = []
                 for proc in psutil.process_iter(['pid', 'name', 'exe']):
                     try:
                         proc_name = proc.info['name'] or "N/A"
-                        if proc_name and proc.info.get('exe'): # Basic filter: has name and exe
-                           apps.append(f"{proc_name} (PID: {proc.info['pid']})")
+                        if proc_name and proc.info.get('exe'):
+                           psutil_apps.append(f"{proc_name} (PID: {proc.info['pid']})")
                     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                         continue
-            
-            if apps:
-                self.target_box.addItems(sorted(list(set(apps)))) # Use set to ensure uniqueness before sorting
-            else:
-                self.target_box.addItem("No suitable 'App' processes found")
-                self.target_box.setEnabled(False)
+                if psutil_apps:
+                    self.target_box.addItems(sorted(list(set(psutil_apps))))
+                else: # If basic list also empty (very unlikely)
+                    self.target_box.addItem("No processes found via psutil.")
+                    self.target_box.setEnabled(False) # Only disable if truly nothing found
         
-        else: # Screen or Region (target_box should be disabled by update_source_ui)
-            pass # self.target_box.setEnabled(False) # Already handled by update_source_ui
+        else: # Screen or Region
+            pass # target_box is handled by update_source_ui
 
     def update_scale_label(self):
         val = self.scale_slider.value() / 10.0
@@ -589,8 +577,8 @@ class LiveFeedScreen(QWidget):
                     return
 
             elif source == "Process":
-                if not target_selection or target_selection.startswith("No suitable processes found") or target_selection.startswith("No suitable 'App' processes found") or target_selection.startswith("Error"):
-                    self.log_signal.emit("Process capture: No valid process selected.")
+                if not target_selection or target_selection.startswith("No suitable") or target_selection.startswith("Error") or target_selection.startswith("pywin32 missing") or target_selection.startswith("Process capture not optimized"):
+                    self.log_signal.emit("Process capture: No valid process selected from the list.")
                     self.status_bar.setText("Invalid process selection")
                     return
                 try:
@@ -603,55 +591,56 @@ class LiveFeedScreen(QWidget):
                         capture_target_param = nu_scaler_core.PyWindowByPid(pid=pid)
                         print(f"[GUI] Using WindowByPid target (from core): {pid}")
                         self.log_signal.emit(f"Attempting capture for PID {pid} using core WindowByPid.")
-                    elif pygetwindow is not None: # Fallback: Use pygetwindow to find window title from PID
-                        print(f"[GUI] Attempting PID to Window Title fallback for PID: {pid} using pygetwindow.")
-                        self.log_signal.emit(f"Core WindowByPid not found. Trying Python fallback for PID {pid}.")
-                        
-                        found_window = None
+                    # Fallback: If core doesn't support WindowByPid, we might need to find a window title
+                    # using pywin32 (if available and on Windows) and use WindowByTitle.
+                    # This part makes the assumption that if WindowByPid is not in core, we still need a window title.
+                    elif os.name == 'nt' and win32gui and win32process: # Check if on Windows and pywin32 is available
+                        print(f"[GUI] Core WindowByPid not found. Attempting to find main window title for PID: {pid} using pywin32 for WindowByTitle fallback.")
+                        found_title_for_pid = None
                         try:
-                            candidate_windows = pygetwindow.getWindowsWithPid(pid)
-                            if candidate_windows:
-                                # Try to find a suitable window: visible and has a title.
-                                # More sophisticated selection could be added here (e.g., largest, active).
-                                for w in candidate_windows:
-                                    if w.visible and w.title: # Basic check for a main-like window
-                                        found_window = w
-                                        break 
-                                # If no visible window with title, take the first one if any (preferring one with a title if possible)
-                                if not found_window and candidate_windows:
-                                    for w_alt in candidate_windows:
-                                        if w_alt.title: # Prioritize any window with a title if primary check failed
-                                            found_window = w_alt
-                                            break
-                                    if not found_window: # Still no window with a title, take the very first one
-                                        found_window = candidate_windows[0]
+                            # Callback to find a suitable window for the specific PID
+                            def find_pid_window_callback(hwnd, lParam):
+                                target_pid, storage = lParam # lParam is a tuple (target_pid, [list_to_store_title])
+                                if win32gui.IsWindowVisible(hwnd):
+                                    _, current_pid = win32process.GetWindowThreadProcessId(hwnd)
+                                    if current_pid == target_pid:
+                                        title = win32gui.GetWindowText(hwnd)
+                                        if title: # Found a visible window with a title for our PID
+                                            storage.append(title)
+                                            return False # Stop enumeration, we found one
+                                return True # Continue enumeration
+                            
+                            window_titles_for_pid = []
+                            win32gui.EnumWindows(find_pid_window_callback, (pid, window_titles_for_pid))
 
-                            if found_window and found_window.title: # Crucially, we need a title for WindowByTitle capture
-                                if hasattr(nu_scaler_core, "PyCaptureTarget") and "WindowByTitle" in nu_scaler_core.PyCaptureTarget.__members__ and hasattr(nu_scaler_core, "PyWindowByTitle"):
-                                    capture_target_type = nu_scaler_core.PyCaptureTarget.WindowByTitle
-                                    capture_target_param = nu_scaler_core.PyWindowByTitle(title=found_window.title)
-                                    print(f"[GUI] Fallback: Capturing PID {pid} via window title '{found_window.title}'")
-                                    self.log_signal.emit(f"Fallback: Capturing PID {pid} using found window title: '{found_window.title}'")
-                                else:
-                                    self.log_signal.emit(f"Error: WindowByTitle capture not available in nu_scaler_core for PID {pid} fallback.")
-                                    self.status_bar.setText("WindowByTitle target missing for PID fallback")
-                                    return
+                            if window_titles_for_pid:
+                                found_title_for_pid = window_titles_for_pid[0] # Take the first one found
+                                print(f"[GUI] pywin32 found window title '{found_title_for_pid}' for PID {pid}.")
+
+                            if found_title_for_pid and hasattr(nu_scaler_core, "PyCaptureTarget") and "WindowByTitle" in nu_scaler_core.PyCaptureTarget.__members__ and hasattr(nu_scaler_core, "PyWindowByTitle"):
+                                capture_target_type = nu_scaler_core.PyCaptureTarget.WindowByTitle
+                                capture_target_param = nu_scaler_core.PyWindowByTitle(title=found_title_for_pid)
+                                print(f"[GUI] Fallback: Capturing PID {pid} via window title '{found_title_for_pid}' (found with pywin32).")
+                                self.log_signal.emit(f"Fallback: Capturing PID {pid} using pywin32-found window title: '{found_title_for_pid}'.")
                             else:
-                                self.log_signal.emit(f"Could not find a suitable window for PID {pid} using pygetwindow.")
-                                self.status_bar.setText(f"No capturable window found for PID {pid}")
+                                if not found_title_for_pid:
+                                    self.log_signal.emit(f"Could not find a suitable window title for PID {pid} using pywin32 for fallback.")
+                                    self.status_bar.setText(f"No window title for PID {pid} (pywin32)")
+                                else: # Found title but WindowByTitle target is missing in core
+                                    self.log_signal.emit(f"Error: WindowByTitle capture not available in nu_scaler_core for PID {pid} pywin32 fallback.")
+                                    self.status_bar.setText("WindowByTitle missing for PID fallback")
                                 return
-                        except Exception as e_gw:
-                            self.log_signal.emit(f"Error using pygetwindow for PID {pid}: {e_gw}")
-                            self.status_bar.setText(f"Error finding window for PID {pid}")
+                        except Exception as e_gw_fallback:
+                            self.log_signal.emit(f"Error during pywin32 fallback for PID {pid} window search: {e_gw_fallback}")
+                            self.status_bar.setText(f"Error finding window for PID {pid} (pywin32)")
                             traceback.print_exc()
                             return
                     else:
-                        # pygetwindow not available, and core WindowByPid not available
-                        self.log_signal.emit(f"Error: nu_scaler_core does not support WindowByPid, and pygetwindow is not available. Process capture for PID {pid} aborted.")
-                        self.status_bar.setText("Process capture: Core & pygetwindow missing.")
-                        print(f"[GUI] Error: Cannot capture process {pid}. Core does not support WindowByPid and pygetwindow is missing.")
+                        # Core WindowByPid not available, AND (not on Windows OR pywin32 not available)
+                        self.log_signal.emit(f"Error: Cannot capture PID {pid}. Core WindowByPid not supported, and no suitable Python fallback available.")
+                        self.status_bar.setText("Process capture: Core/fallback missing.")
                         return
-                except ValueError:
+                except ValueError: # For int(pid_str)
                     self.log_signal.emit(f"Error: Could not parse PID from selection '{target_selection}'.")
                     self.status_bar.setText("Invalid process selection (PID parsing failed)")
                     return
