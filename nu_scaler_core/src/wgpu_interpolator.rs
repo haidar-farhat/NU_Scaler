@@ -735,7 +735,7 @@ impl WgpuFrameInterpolator {
         // ** Get immutable info before mutable borrow **
         let width = self.pyramid_a_textures[level].as_ref().unwrap().width();
         let height = self.pyramid_a_textures[level].as_ref().unwrap().height();
-        let pipeline = self.horn_schunck_pipeline.as_ref().expect("HS pipeline missing");
+        // Don't get pipeline or views yet
         let bgl = &self.horn_schunck_bgl; // Borrow BGL
         let sampler_for_hs = &self.flow_sampler; // Borrow sampler
 
@@ -743,7 +743,8 @@ impl WgpuFrameInterpolator {
         self.ensure_flow_textures(width, height);
         // ** Mutable borrow ends **
         
-        // ** Get immutable views AFTER mutable borrow **
+        // ** Get immutable pipeline & views AFTER mutable borrow **
+        let pipeline = self.horn_schunck_pipeline.as_ref().expect("HS pipeline missing");
         let prev_frame_tex_view = self.pyramid_a_views[level].as_ref().expect("Prev frame view missing");
         let next_frame_tex_view = self.pyramid_b_views[level].as_ref().expect("Next frame view missing");
 
@@ -804,7 +805,7 @@ impl WgpuFrameInterpolator {
                     label: Some(&format!("Horn-Schunck Compute Pass Iter {}", i)),
                     timestamp_writes: None,
                 });
-                compute_pass.set_pipeline(pipeline); // Use borrowed pipeline
+                compute_pass.set_pipeline(pipeline); // Use pipeline obtained after mutable borrow
                 compute_pass.set_bind_group(0, &bind_group, &[]);
                 compute_pass.dispatch_workgroups(
                     (width + 7) / 8,
@@ -905,7 +906,7 @@ impl WgpuFrameInterpolator {
             let upsample_bgl = self.flow_upsample_bgl.as_ref().expect("Upsample BGL missing");
             let refine_pipeline = self.flow_refine_pipeline.as_ref().expect("Refine pipeline missing");
             let refine_bgl = self.flow_refine_bgl.as_ref().expect("Refine BGL missing");
-            let sampler_ref = &self.flow_sampler; // Borrow sampler, removed clone
+            let sampler_ref = &self.flow_sampler; // Borrow sampler
 
             info!("Refining flow: Level {} ({}x{}) from Level {} ({}x{}). Output to flow_tex[{}].", 
                    finer_level_idx, dst_w, dst_h, coarser_level_idx, src_w, src_h, upsampled_flow_texture_idx);
@@ -995,11 +996,7 @@ impl WgpuFrameInterpolator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    // Use GpuDetector and its helpers
     use crate::gpu::detector::GpuDetector;
-    // Keep helpers for texture creation/comparison if they are defined elsewhere or within this test module
-    // NOTE: This path still might be incorrect if teinture_wgpu is not under utils!
-    use crate::utils::teinture_wgpu::{ComparableTexture, create_texture_with_data, TextureDataOrder};
     use wgpu::{Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureViewDescriptor};
     use futures::executor::block_on; // Import block_on
 
