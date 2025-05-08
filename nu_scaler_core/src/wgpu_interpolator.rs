@@ -69,12 +69,14 @@ struct CoarseHSParams {
     _padding: f32,    // 4 bytes -> total 16 bytes
 }
 
-// Uniforms for flow_upsample.wgsl (restored to vec2<u32> style)
+// Uniforms for flow_upsample.wgsl (reverting to u32 fields workaround)
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct UpsampleUniforms {
-    src_size: [u32; 2],
-    dst_size: [u32; 2],
+    src_width: u32,
+    src_height: u32,
+    dst_width: u32,
+    dst_height: u32,
 }
 
 // Uniforms for flow_refine.wgsl
@@ -386,19 +388,21 @@ impl WgpuFrameInterpolator {
         // --- Phase 2.3 Setup: Hierarchical Flow Refinement --- 
 
         // Flow Upsample Shader, BGL, and Pipeline
-        // Restoring full shader content (vec2<u32> version)
+        // Reverting to u32 fields workaround in WGSL string
         let flow_upsample_shader_string = r#"
-        // nu_scaler_core/src/shaders/flow_upsample.wgsl (intended version)
+        // nu_scaler_core/src/shaders/flow_upsample.wgsl (u32 fields workaround)
         // Bilinearly upsamples a flow field.
 
         struct UpsampleUniforms {
-          src_size: vec2<u32>;
-          dst_size: vec2<u32>;
+          src_width: u32;
+          src_height: u32;
+          dst_width: u32;
+          dst_height: u32;
         }
 
         @group(0) @binding(0) var<uniform> u: UpsampleUniforms;
 
-        @group(0) @binding(1) var src_flow_tex: texture_2d<f32>; // Input flow (e.g., RG32Float)
+        @group(0) @binding(1) var src_flow_tex: texture_2d<f32>; 
         @group(0) @binding(2) var bilinear_sampler: sampler;
         @group(0) @binding(3) var dst_flow_tex: texture_storage_2d<rg32float, write>; // Output flow
 
@@ -950,7 +954,7 @@ impl WgpuFrameInterpolator {
 
             // 1. Upsample Flow
             // Using u32 fields workaround for instantiation:
-            let upsample_uniforms_data = UpsampleUniforms { src_size: [src_w, src_h], dst_size: [dst_w, dst_h] };
+            let upsample_uniforms_data = UpsampleUniforms { src_width: src_w, src_height: src_h, dst_width: dst_w, dst_height: dst_h };
             let upsample_uniform_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(&format!("Upsample Uniforms L{}->L{}", coarser_level_idx, finer_level_idx)),
                 contents: bytemuck::bytes_of(&upsample_uniforms_data),
