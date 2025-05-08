@@ -619,7 +619,8 @@ class LiveFeedScreen(QWidget):
                                 found_title_for_pid = window_titles_for_pid[0] # Take the first one found
                                 print(f"[GUI] pywin32 found window title '{found_title_for_pid}' for PID {pid}.")
 
-                            if found_title_for_pid and hasattr(nu_scaler_core, "PyCaptureTarget") and "WindowByTitle" in nu_scaler_core.PyCaptureTarget.__members__ and hasattr(nu_scaler_core, "PyWindowByTitle"):
+                            # Check if core supports WindowByTitle capture
+                            if found_title_for_pid and hasattr(nu_scaler_core, "PyCaptureTarget") and hasattr(nu_scaler_core.PyCaptureTarget, "WindowByTitle") and hasattr(nu_scaler_core, "PyWindowByTitle"):
                                 capture_target_type = nu_scaler_core.PyCaptureTarget.WindowByTitle
                                 capture_target_param = nu_scaler_core.PyWindowByTitle(title=found_title_for_pid)
                                 print(f"[GUI] Fallback: Capturing PID {pid} via window title '{found_title_for_pid}' (found with pywin32).")
