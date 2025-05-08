@@ -59,14 +59,15 @@ struct PyramidPassParams {
     _pad1: [u32; 2], // Padding
 }
 
-// Uniform struct for Horn-Schunck shader
-#[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct HornSchunckParams {
-    size: [u32; 2],   // Texture dimensions
-    lambda: f32,       // Smoothness weight
-    _pad0: u32,        // Padding
-}
+// HornSchunckUniforms is used by the current horn_schunck.wgsl and pipeline.
+// The old HornSchunckParams struct below is unused.
+// #[repr(C)]
+// #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+// struct HornSchunckParams {
+// size: [u32; 2],   // Texture dimensions
+// lambda: f32,       // Smoothness weight
+// _pad0: u32,        // Padding
+// }
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -408,15 +409,15 @@ impl WgpuFrameInterpolator {
             entry_point: "main",
         });
 
-        // Create sampler for flow textures (Nearest neighbor)
+        // Create sampler for flow textures (Linear filtering for smoother flow sampling)
         let flow_sampler = device.create_sampler(&SamplerDescriptor {
-            label: Some("Flow Sampler (Nearest)"),
+            label: Some("Flow Sampler (Linear)"),
             address_mode_u: AddressMode::ClampToEdge,
             address_mode_v: AddressMode::ClampToEdge,
             address_mode_w: AddressMode::ClampToEdge,
-            mag_filter: FilterMode::Nearest,
-            min_filter: FilterMode::Nearest,
-            mipmap_filter: FilterMode::Nearest,
+            mag_filter: FilterMode::Linear,
+            min_filter: FilterMode::Linear,
+            mipmap_filter: FilterMode::Nearest, // Mipmaps not used for flow textures here
             ..
             Default::default()
         });
@@ -693,8 +694,6 @@ impl WgpuFrameInterpolator {
     // --- Phase 2.2: Coarse Optical Flow --- 
     pub fn compute_coarse_flow(
         &mut self,
-        device: &Device,
-        queue: &Queue,
         level: usize, // Coarsest pyramid level index
         num_iterations: usize,
         alpha_sq: f32,
@@ -707,14 +706,14 @@ impl WgpuFrameInterpolator {
         let width = self.pyramid_a_textures[level].as_ref().unwrap().width();
         let height = self.pyramid_a_textures[level].as_ref().unwrap().height();
 
-        self.ensure_flow_textures(device, width, height);
+        self.ensure_flow_textures(width, height);
 
         let uniforms = HornSchunckUniforms {
             alpha_sq,
             delta_t: 1.0,
             inverse_tex_size: [1.0 / width as f32, 1.0 / height as f32],
         };
-        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let uniform_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Horn-Schunck Uniform Buffer"),
             contents: bytemuck::bytes_of(&uniforms),
             usage: BufferUsages::UNIFORM,
@@ -726,7 +725,7 @@ impl WgpuFrameInterpolator {
         let zero_data_size = (width * height * flow_tex_bytes_per_pixel) as usize;
         let zero_data: Vec<u8> = vec![0; zero_data_size];
 
-        queue.write_texture(
+        self.queue.write_texture(
             ImageCopyTexture {
                 texture: flow_tex_0_ref,
                 mip_level: 0,
@@ -785,7 +784,7 @@ impl WgpuFrameInterpolator {
                     1,
                 );
             }
-            queue.submit(std::iter::once(encoder.finish()));
+            self.queue.submit(std::iter::once(encoder.finish()));
             debug!("Submitted HS iteration {}", i);
         }
         
@@ -799,7 +798,7 @@ impl WgpuFrameInterpolator {
         info!("Coarse flow computation complete for level {}. Final flow in {}", level, final_flow_location);
     }
 
-    fn ensure_flow_textures(&mut self, device: &Device, width: u32, height: u32) {
+    fn ensure_flow_textures(&mut self, width: u32, height: u32) {
         let texture_desc = TextureDescriptor {
             size: Extent3d { width, height, depth_or_array_layers: 1 },
             mip_level_count: 1,
@@ -813,7 +812,7 @@ impl WgpuFrameInterpolator {
         // Texture A (index 0)
         if self.flow_textures[0].as_ref().map_or(true, |t| t.width() != width || t.height() != height || t.format() != texture_desc.format) {
             debug!("Creating Flow Texture 0 (A): {}x{} Format: {:?}", width, height, texture_desc.format);
-            let tex_a = device.create_texture(&TextureDescriptor {
+            let tex_a = self.device.create_texture(&TextureDescriptor {
                 label: Some("Flow Texture 0 (A)"),
                 ..texture_desc
             });
@@ -824,7 +823,7 @@ impl WgpuFrameInterpolator {
         // Texture B (index 1)
         if self.flow_textures[1].as_ref().map_or(true, |t| t.width() != width || t.height() != height || t.format() != texture_desc.format) {
             debug!("Creating Flow Texture 1 (B): {}x{} Format: {:?}", width, height, texture_desc.format);
-            let tex_b = device.create_texture(&TextureDescriptor {
+            let tex_b = self.device.create_texture(&TextureDescriptor {
                 label: Some("Flow Texture 1 (B)"),
                 ..texture_desc
             });
@@ -1045,7 +1044,7 @@ mod tests {
         let coarsest_level_idx = num_pyramid_levels - 1;
         
         // Test with 0 iterations
-        interpolator.compute_coarse_flow(&device, &queue, coarsest_level_idx, 0, 0.02f32.powi(2));
+        interpolator.compute_coarse_flow(coarsest_level_idx, 0, 0.02f32.powi(2));
         
         let level_width = width / (2u32.pow(coarsest_level_idx as u32));
         let level_height = height / (2u32.pow(coarsest_level_idx as u32));
@@ -1059,7 +1058,7 @@ mod tests {
 
         // Test with a few iterations
         let num_hs_iterations = 5;
-        interpolator.compute_coarse_flow(&device, &queue, coarsest_level_idx, num_hs_iterations, 0.02f32.powi(2));
+        interpolator.compute_coarse_flow(coarsest_level_idx, num_hs_iterations, 0.02f32.powi(2));
         info!("Finished compute_coarse_flow test with {} iterations.", num_hs_iterations);
         
         // Check which texture should hold the result
