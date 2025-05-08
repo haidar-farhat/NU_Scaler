@@ -608,20 +608,74 @@ class LiveFeedScreen(QWidget):
             self.update_source_ui(self.source_box.currentText()) 
 
     def stop_capture(self, silent=False):
-        if not silent:
-            self.status_bar.setText("Capture stopped")
-        
-        self.source_box.setEnabled(True)
-        self.update_source_ui(self.source_box.currentText())
+        print(f'[DEBUG] stop_capture: called (silent={silent})')
+        # Stop the frame processing timer first
         self.timer.stop()
+        print('[DEBUG] stop_capture: timer stopped')
+
+        # Stop the capture object
+        if self.capture:
+            try:
+                self.capture.stop()
+                print('[DEBUG] stop_capture: capture.stop() called')
+            except Exception as e:
+                print(f'[DEBUG] stop_capture: error stopping capture object: {e}')
+                if hasattr(self, 'log_signal') and self.log_signal:
+                    self.log_signal.emit(f"Error stopping capture device: {e}")
+            self.capture = None
+        
+        # Clean up worker and thread
+        if hasattr(self, '_upscale_thread') and self._upscale_thread is not None:
+            if self._upscale_thread.isRunning():
+                print(f'[DEBUG] stop_capture: Quitting upscale thread (state: {self._upscale_thread.isRunning()})')
+                self._upscale_thread.quit()
+                if not self._upscale_thread.wait(2000): # Wait for 2 seconds
+                    print('[DEBUG] stop_capture: Warning - upscale thread did not quit in time.')
+                else:
+                    print('[DEBUG] stop_capture: Upscale thread quit and waited')
+            self._upscale_thread = None
+        
+        if hasattr(self, '_upscale_worker') and self._upscale_worker is not None:
+            # Worker should be managed by its thread's lifecycle (e.g., deleteLater)
+            # but explicitly setting to None here after thread is stopped.
+            self._upscale_worker = None
+            print('[DEBUG] stop_capture: Upscale worker cleared')
+
+        # Reset upscaler related attributes
+        if self.upscaler:
+            print('[DEBUG] stop_capture: Clearing upscaler instance')
+            # If upscaler has a specific release method, it should be called before/during del
+            # e.g., if hasattr(self.upscaler, 'release'): self.upscaler.release()
+            self.upscaler = None # Allow it to be garbage collected
+        self.upscaler_initialized = False
+
+        # Update UI elements
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
-        self.target_box.setEnabled(True)
-        self.refresh_targets_btn.setEnabled(True)
-        self.upscaler = None
-        self.capture = None
-        self.timer.start()
-        self.log_signal.emit("Capture stopped")
+        self.source_box.setEnabled(True) 
+        
+        # update_source_ui will correctly set enable state for target_box and refresh_targets_btn
+        # and also populate target_box if needed (e.g. for Window/Process)
+        self.update_source_ui(self.source_box.currentText()) 
+
+        if not silent:
+            self.status_bar.setText("Capture stopped")
+            if hasattr(self, 'log_signal') and self.log_signal:
+                self.log_signal.emit("Capture stopped")
+        
+        # Close dedicated fullscreen window if it's open and managed by LiveFeedScreen
+        if hasattr(self, 'fullscreen_display_window') and self.fullscreen_display_window and self.fullscreen_display_window.isVisible():
+            print('[DEBUG] stop_capture: Closing fullscreen display window.')
+            self.fullscreen_display_window.close()
+            # Optionally set to None if it's managed this way:
+            # self.fullscreen_display_window = None 
+
+        # Optional: Force garbage collection if memory issues were observed, though usually not necessary
+        # import gc
+        # gc.collect()
+        # print(f'[DEBUG] stop_capture: gc collected (if uncommented)')
+
+        print(f'[DEBUG] stop_capture: finished')
 
     def toggle_advanced_upscaling(self, state):
         try:
