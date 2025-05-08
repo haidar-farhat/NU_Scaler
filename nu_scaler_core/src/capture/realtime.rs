@@ -83,7 +83,8 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
                 // NOTE: Assuming the buffer format is BGRA, which is expected by the
                 // conversion logic in `PyScreenCapture::get_frame` in lib.rs for window captures.
                 // Clone the data to ensure ownership for sending across the channel.
-                let frame_data_to_send = (*buffer).to_vec();
+                // Attempting buffer.to_vec() again, assuming FrameBuffer might implement necessary traits.
+                let frame_data_to_send = buffer.to_vec();
 
                 // Send the raw frame data (BGRA expected)
                 match self.frame_sender.lock() {
