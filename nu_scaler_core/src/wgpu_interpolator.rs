@@ -392,7 +392,7 @@ impl WgpuFrameInterpolator {
                 // Binding 0: UpsampleUniforms
                 BindGroupLayoutEntry {
                     binding: 0, visibility: ShaderStages::COMPUTE, 
-                    ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: NonZeroU64::new(std::mem::size_of::<UpsampleUniforms>() as u64).unwrap() }, 
+                    ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: Some(NonZeroU64::new(std::mem::size_of::<UpsampleUniforms>() as u64).unwrap()) }, 
                     count: None },
                 // Binding 1: src_flow_tex (Texture_2d<f32> - Rg32Float)
                 BindGroupLayoutEntry {
@@ -434,7 +434,7 @@ impl WgpuFrameInterpolator {
                 // Binding 0: RefineHSUniforms
                 BindGroupLayoutEntry {
                     binding: 0, visibility: ShaderStages::COMPUTE, 
-                    ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: NonZeroU64::new(std::mem::size_of::<RefineHSUniforms>() as u64).unwrap() }, 
+                    ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: Some(NonZeroU64::new(std::mem::size_of::<RefineHSUniforms>() as u64).unwrap()) }, 
                     count: None },
                 // Binding 1: I1_tex (Pyramid level - Rgba32Float, shader uses .r for luminance)
                 BindGroupLayoutEntry {
@@ -840,6 +840,7 @@ impl WgpuFrameInterpolator {
             format: TextureFormat::Rg32Float,
             usage: TextureUsages::TEXTURE_BINDING | TextureUsages::STORAGE_BINDING | TextureUsages::COPY_DST,
             label: None,
+            view_formats: &[],
         };
 
         if self.flow_textures[0].as_ref().map_or(true, |t| t.width() != width || t.height() != height || t.format() != texture_desc.format) {
@@ -1061,8 +1062,8 @@ mod tests {
 
         // Create samplers needed for interpolate
         // Using the samplers created in WgpuFrameInterpolator::new for consistency
-        let image_sampler = interpolator.shared_sampler.as_ref().expect("Missing shared sampler");
-        let flow_sampler_ref = &interpolator.flow_sampler; // flow_sampler is not Option
+        let image_sampler = &interpolator.shared_sampler; // Sampler is not Option, borrow directly
+        let flow_sampler_ref = &interpolator.flow_sampler; 
         
         // Call interpolate with correct arguments
         interpolator.interpolate(
