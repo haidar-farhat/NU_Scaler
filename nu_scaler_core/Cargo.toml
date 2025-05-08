@@ -59,6 +59,14 @@ serde_json = "1.0"
 # Added for texture readback helper
 futures-intrusive = "0.5"
 
+# Added for bytemuck support in tests/uniforms
+bytemuck = { version = "1.12", features = ["derive"] }
+# Added for block_on in tests
+futures = { version = "0.3", features = ["executor"] } 
+
+# Needed for buffer mapping in test readback helper
+futures-intrusive = "0.5.0"
+
 [build-dependencies]
 # ... existing build dependencies ...
 
