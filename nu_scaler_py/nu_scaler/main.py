@@ -568,7 +568,9 @@ class LiveFeedScreen(QWidget):
             capture_target_param = None
 
             if source == "Screen":
-                if hasattr(nu_scaler_core, "PyCaptureTarget") and "FullScreen" in nu_scaler_core.PyCaptureTarget.__members__:
+                # Check if core supports FullScreen capture
+                # Corrected check using hasattr:
+                if hasattr(nu_scaler_core, "PyCaptureTarget") and hasattr(nu_scaler_core.PyCaptureTarget, "FullScreen"):
                     capture_target_type = nu_scaler_core.PyCaptureTarget.FullScreen
                     print("[GUI] Using FullScreen target.")
                 else:
