@@ -1033,6 +1033,7 @@ async fn init_wgpu_for_standalone_upscaler(
     Ok((Arc::new(device), Arc::new(queue), gpu_info))
 }
 
+/* // Temporarily commented out due to DLSS removal
 #[pyclass(name = "DlssUpscaler", unsendable)]
 pub struct PyDlssUpscaler {
     inner: InnerDlssUpscaler,
@@ -1139,3 +1140,4 @@ impl PyDlssUpscaler {
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
     }
 }
+*/
