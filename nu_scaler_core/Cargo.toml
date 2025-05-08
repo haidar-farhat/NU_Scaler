@@ -45,7 +45,7 @@ rayon = "1.8"
 uuid = { version = "1.6", features = ["v4"] }
 log = "0.4"
 # Official DLSS integration
-dlss-sys = { version = "0.1.0", path = "./dlss-sys" }
+# dlss-sys = { version = "0.1.0", path = "./dlss-sys" }
 # Official FSR3 integration
 fsr3-sys = { version = "0.1.0", path = "./fsr3-sys", optional = true }
 thiserror = "1.0"
