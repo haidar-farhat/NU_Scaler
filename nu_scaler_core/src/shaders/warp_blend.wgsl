@@ -15,7 +15,7 @@ struct InterpolationUniforms {
 @group(0) @binding(5) var image_sampler: sampler;
 @group(0) @binding(6) var flow_sampler: sampler;
 
-@compute @workgroup_size(8, 8, 1)
+@compute @workgroup_size(8, 32, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (global_id.x >= u.size.x || global_id.y >= u.size.y) {
         return;
