@@ -168,14 +168,24 @@ pub struct WgpuFrameInterpolator {
 
 #[pymethods] // Add this block
 impl WgpuFrameInterpolator {
+    // Modified Python constructor to accept optional preset string
     #[new]
-    fn new_py() -> PyResult<Self> {
-        // Initialize WGPU device and queue (similar to setup_gpu_test_resources or lib.rs init)
-        // This requires blocking on an async function.
-        println!("[WgpuFrameInterpolator] Initializing WGPU for Python...");
+    #[pyo3(signature = (workgroup_preset_str=None))]
+    fn new_py(workgroup_preset_str: Option<String>) -> PyResult<Self> {
+        // Determine preset, default to Wide32x8
+        let preset = workgroup_preset_str
+            .as_deref() // Convert Option<String> to Option<&str>
+            .and_then(WorkgroupSizePreset::from_string) // Attempt to parse
+            .unwrap_or_else(|| {
+                warn!("Invalid or no workgroup preset provided, defaulting to Wide32x8.");
+                WorkgroupSizePreset::Wide32x8 // Default value
+            });
+
+        println!("[WgpuFrameInterpolator] Initializing WGPU for Python with preset: {:?} ...", preset);
         let (device_arc, queue_arc) = pollster::block_on(async {
-            // Use GpuDetector to find a suitable device/queue
-            // This might need error handling
+            // Initialize WGPU device and queue (similar to setup_gpu_test_resources or lib.rs init)
+            // This requires blocking on an async function.
+            println!("[WgpuFrameInterpolator] Initializing WGPU for Python...");
             let mut detector = GpuDetector::new();
             detector.detect_gpus().map_err(|e| 
                 pyo3::exceptions::PyRuntimeError::new_err(format!("GPU detection failed: {}", e))
@@ -185,11 +195,11 @@ impl WgpuFrameInterpolator {
             )
         })?; // ONLY ONE ? needed here to propagate the PyResult error
 
-        println!("[WgpuFrameInterpolator] WGPU Initialized. Calling Rust WgpuFrameInterpolator::new...");
-        // Call the original Rust ::new method
-        match WgpuFrameInterpolator::new(device_arc, queue_arc) {
+        println!("[WgpuFrameInterpolator] WGPU Initialized. Calling Rust WgpuFrameInterpolator::new with preset...");
+        // Call the modified Rust ::new method, passing the chosen preset
+        match WgpuFrameInterpolator::new(device_arc, queue_arc, preset) {
             Ok(instance) => {
-                println!("[WgpuFrameInterpolator] Rust instance created successfully.");
+                println!("[WgpuFrameInterpolator] Rust instance created successfully with preset {:?}.", preset);
                 Ok(instance)
             }
             Err(e) => {
