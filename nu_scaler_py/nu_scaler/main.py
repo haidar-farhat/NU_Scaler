@@ -674,7 +674,7 @@ class LiveFeedScreen(QWidget):
             self.capture = nu_scaler_core.PyScreenCapture()
             
             print(f"[GUI] Calling self.capture.start(target_type={capture_target_type}, target_param={capture_target_param})")
-            self.capture.start(capture_target_type, target_param)
+            self.capture.start(capture_target_type, capture_target_param)
             print("[GUI] capture.start() returned.")
 
             self.upscaler_initialized = False
