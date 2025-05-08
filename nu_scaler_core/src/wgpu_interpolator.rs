@@ -14,19 +14,17 @@ use wgpu::{
     ImageCopyTexture, ImageDataLayout, Origin3d, Buffer,
 };
 
-// Uniform structure for the warp/blend shader - CORRECTED LAYOUT FOR 96 Bytes
+// Uniform structure for the warp/blend shader - MATCHING ORIGINAL SPEC (48 Bytes)
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct InterpolationUniforms {
     size: [u32; 2],       // offset 0, size 8
-    _pad0: [u32; 2],      // offset 8, size 8 -> now at offset 16
-    time_t: f32,          // offset 16, size 4
-    _pad1: [f32; 3],      // offset 20, size 12 -> now at offset 32
-    _pad2: [f32; 4],      // offset 32, size 16 -> now at offset 48
-    _pad3: [f32; 4],      // offset 48, size 16 -> now at offset 64
-    _pad4: [f32; 4],      // offset 64, size 16 -> now at offset 80
-    // Pad to 96 bytes total
-    _pad5: [f32; 4],      // offset 80, size 16 -> total size 96
+    _pad0: [u32; 2],      // offset 8, size 8 -> next at 16
+    time_t: f32,          // offset 16, size 4 -> next at 20
+    // WGSL's _pad1: vec3<f32> will start at offset 32 due to align(16).
+    // So, Rust struct needs 12 bytes of padding here.
+    _rust_pad_to_align_vec3: [f32; 3], // offset 20, size 12 -> next at 32
+    _pad1: [f32; 3],      // offset 32, size 12. Total size 44. Padded to 48 for bytemuck.
 }
 
 impl InterpolationUniforms {
@@ -35,11 +33,8 @@ impl InterpolationUniforms {
             size: [width, height],
             _pad0: [0; 2],
             time_t,
+            _rust_pad_to_align_vec3: [0.0; 3],
             _pad1: [0.0; 3],
-            _pad2: [0.0; 4],
-            _pad3: [0.0; 4],
-            _pad4: [0.0; 4],
-            _pad5: [0.0; 4], // Added final padding
         }
     }
 }
@@ -52,17 +47,13 @@ pub struct WgpuFrameInterpolator {
 
 impl WgpuFrameInterpolator {
     pub fn new(device: Arc<Device>) -> Result<Self> {
-        // WGSL Shader source matching the new 96-byte layout
+        // WGSL Shader source as per original user spec (Phase 1.1)
         let warp_blend_shader_source = r#"
             struct InterpolationUniforms {
               size: vec2<u32>,
               _pad0: vec2<u32>,
               time_t: f32,
               _pad1: vec3<f32>,
-              _pad2: vec4<f32>,
-              _pad3: vec4<f32>,
-              _pad4: vec4<f32>,
-              _pad5: vec4<f32>,
             };
 
             @group(0) @binding(0) var<uniform> u: InterpolationUniforms;
