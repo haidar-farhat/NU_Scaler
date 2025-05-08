@@ -14,14 +14,16 @@ use wgpu::{
     ImageCopyTexture, ImageDataLayout, Origin3d, Buffer,
 };
 
-// Uniform structure for the warp/blend shader as per new spec
+// Uniform structure for the warp/blend shader - CORRECTED LAYOUT FOR WGSL PADDING
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct InterpolationUniforms {
-    size: [u32; 2],       // vec2<u32> -> offset 0, size 8
-    _pad0: [u32; 2],      // vec2<u32> -> offset 8, size 8 (aligns time_t to 16)
-    time_t: f32,          // f32       -> offset 16, size 4
-    _pad1: [f32; 3],      // vec3<f32> -> offset 20, size 12 (total size 32 bytes)
+    size: [u32; 2],       // offset 0, size 8
+    _pad0: [u32; 2],      // offset 8, size 8 (now at offset 16)
+    time_t: f32,          // offset 16, size 4
+    // Need 12 bytes padding to align _pad1 to 32 (vec3f align is 16)
+    _pad_after_time_t: [f32; 3], // offset 20, size 12
+    _pad1: [f32; 3],      // offset 32, size 12 (total size 44 -> padded to 48)
 }
 
 impl InterpolationUniforms {
@@ -30,7 +32,8 @@ impl InterpolationUniforms {
             size: [width, height],
             _pad0: [0, 0], // Padding
             time_t,
-            _pad1: [0.0, 0.0, 0.0], // Padding
+            _pad_after_time_t: [0.0; 3], // Added padding
+            _pad1: [0.0; 3], // Padding
         }
     }
 }
@@ -49,6 +52,7 @@ impl WgpuFrameInterpolator {
               size: vec2<u32>,
               _pad0: vec2<u32>,
               time_t: f32,
+              _pad_after_time_t: vec3<f32>,
               _pad1: vec3<f32>,
             };
 
