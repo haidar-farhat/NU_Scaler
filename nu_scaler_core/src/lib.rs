@@ -21,6 +21,7 @@ pub mod gpu;
 pub mod renderer;
 pub mod upscale;
 pub mod frame_interpolator;
+pub mod wgpu_interpolator;
 
 use capture::realtime::{CaptureTarget, ScreenCapture};
 use gpu::detector::{GpuInfo, GpuVendor};
