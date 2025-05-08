@@ -2,9 +2,10 @@
 // Bilinearly upsamples a flow field.
 
 struct UpsampleUniforms {
-  src_size: vec2<u32>;
-  dst_size: vec2<u32>;
-  // No padding needed as vec2<u32> is 8 bytes, total 16 bytes.
+  src_width: u32;
+  src_height: u32;
+  dst_width: u32;
+  dst_height: u32;
 }
 
 @group(0) @binding(0) var<uniform> u: UpsampleUniforms;
@@ -20,14 +21,17 @@ struct UpsampleUniforms {
 
 @compute @workgroup_size(16, 16, 1)
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
-  if (id.x >= u.dst_size.x || id.y >= u.dst_size.y) { 
+  if (id.x >= u.dst_width || id.y >= u.dst_height) { 
     return; 
   }
   
-  let dst_pixel_center_uv = (vec2<f32>(id.xy) + 0.5) / vec2<f32>(u.dst_size);
-  let src_sample_uv = (vec2<f32>(id.xy) + 0.5) / vec2<f32>(u.dst_size);
+  let dst_size_f32 = vec2<f32>(f32(u.dst_width), f32(u.dst_height));
 
-  let sampled_flow_vec4 = textureSampleLevel(src_flow_tex, bilinear_sampler, src_sample_uv, 0.0);
+  // Calculate UVs based on destination dimensions
+  let normalized_uv = (vec2<f32>(id.xy) + 0.5) / dst_size_f32;
+
+  // Sampling from src_flow_tex using these normalized UVs
+  let sampled_flow_vec4 = textureSampleLevel(src_flow_tex, bilinear_sampler, normalized_uv, 0.0);
   let flow_vec2 = sampled_flow_vec4.xy;
 
   textureStore(dst_flow_tex, vec2<i32>(id.xy), vec4<f32>(flow_vec2.x, flow_vec2.y, 0.0, 1.0));
