@@ -99,25 +99,25 @@ impl WgpuFrameInterpolator {
                     ty: BindingType::Buffer { ty: BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
                     count: None,
                 },
-                // frame_a_tex
+                // frame_a_tex (Try UnfilterableFloat)
                 BindGroupLayoutEntry {
                     binding: 1,
                     visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: TextureViewDimension::D2, multisampled: false },
+                    ty: BindingType::Texture { sample_type: wgpu::TextureSampleType::UnfilterableFloat, view_dimension: TextureViewDimension::D2, multisampled: false },
                     count: None,
                 },
-                // frame_b_tex
+                // frame_b_tex (Try UnfilterableFloat)
                 BindGroupLayoutEntry {
                     binding: 2,
                     visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: TextureViewDimension::D2, multisampled: false },
+                    ty: BindingType::Texture { sample_type: wgpu::TextureSampleType::UnfilterableFloat, view_dimension: TextureViewDimension::D2, multisampled: false },
                     count: None,
                 },
-                // flow_tex (texture_2d<vec2<f32>> implies filterable float or unfilterable float)
+                // flow_tex (Try UnfilterableFloat)
                 BindGroupLayoutEntry {
                     binding: 3,
                     visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: TextureViewDimension::D2, multisampled: false }, // Assuming filterable for now, format Rg32Float
+                    ty: BindingType::Texture { sample_type: wgpu::TextureSampleType::UnfilterableFloat, view_dimension: TextureViewDimension::D2, multisampled: false },
                     count: None,
                 },
                 // out_tex (storage texture)
@@ -127,18 +127,18 @@ impl WgpuFrameInterpolator {
                     ty: BindingType::StorageTexture { access: StorageTextureAccess::WriteOnly, format: TextureFormat::Rgba8Unorm, view_dimension: TextureViewDimension::D2 },
                     count: None,
                 },
-                // image_sampler (for frame_a, frame_b)
+                // image_sampler (Filtering)
                 BindGroupLayoutEntry {
                     binding: 5,
                     visibility: ShaderStages::COMPUTE,
                     ty: BindingType::Sampler(SamplerBindingType::Filtering),
                     count: None,
                 },
-                // flow_sampler (for flow_tex)
+                // flow_sampler (Filtering or NonFiltering)
                 BindGroupLayoutEntry {
                     binding: 6,
                     visibility: ShaderStages::COMPUTE,
-                    ty: BindingType::Sampler(SamplerBindingType::Filtering), // Could be NonFiltering if flow data is precise per texel
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering), // Keep as filtering for now, sampler descriptor controls it
                     count: None,
                 },
             ],
