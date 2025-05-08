@@ -732,27 +732,30 @@ impl WgpuFrameInterpolator {
         num_iterations: usize,
         alpha_sq: f32,
     ) {
-        info!("Computing coarse flow for pyramid level {} with {} iterations, lambda (alpha_sq)={}", level, num_iterations, alpha_sq);
+        info!("Computing coarse flow...");
 
-        let prev_frame_tex_view = self.pyramid_a_views[level].as_ref().expect("Prev frame view (Pyramid A) for level not found");
-        let next_frame_tex_view = self.pyramid_b_views[level].as_ref().expect("Next frame view (Pyramid B) for level not found");
-        
+        // ** Get immutable info before mutable borrow **
         let width = self.pyramid_a_textures[level].as_ref().unwrap().width();
         let height = self.pyramid_a_textures[level].as_ref().unwrap().height();
+        let prev_frame_tex_view = self.pyramid_a_views[level].as_ref().expect("Prev frame view missing");
+        let next_frame_tex_view = self.pyramid_b_views[level].as_ref().expect("Next frame view missing");
+        let pipeline = self.horn_schunck_pipeline.as_ref().expect("HS pipeline missing");
+        let bgl = &self.horn_schunck_bgl; // Borrow BGL
+        let sampler_for_hs = &self.flow_sampler; // Borrow sampler
 
+        // ** Perform mutable borrow **
         self.ensure_flow_textures(width, height);
+        // ** Mutable borrow ends **
 
-        let uniforms = CoarseHSParams {
-            size: [width, height],
-            lambda: alpha_sq,
-            _padding: 0,
-        };
+        // Create uniforms
+        let uniforms = CoarseHSParams { size: [width, height], lambda: alpha_sq, _padding: 0 };
         let uniform_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Coarse Horn-Schunck Uniform Buffer"),
             contents: bytemuck::bytes_of(&uniforms),
             usage: BufferUsages::UNIFORM,
         });
 
+        // Clear initial flow texture (can use queue from self.queue)
         let flow_tex_0_ref = self.flow_textures[0].as_ref().unwrap();
         let flow_tex_bytes_per_pixel = 8;
         let zero_data_size = (width * height * flow_tex_bytes_per_pixel) as usize;
@@ -774,30 +777,22 @@ impl WgpuFrameInterpolator {
             Extent3d { width, height, depth_or_array_layers: 1 },
         );
         
-        let pipeline = self.horn_schunck_pipeline.as_ref().expect("Horn-Schunck pipeline not initialized");
-        let bgl = self.horn_schunck_bgl;
-        let sampler_for_hs = &self.flow_sampler;
-
         for i in 0..num_iterations {
-            let (current_input_flow_view_idx, current_output_flow_view_idx) = if i % 2 == 0 {
-                (0, 1)
-            } else {
-                (1, 0)
-            };
-            
-            let current_input_flow_view = self.flow_views[current_input_flow_view_idx].as_ref().unwrap();
-            let current_output_flow_view = self.flow_views[current_output_flow_view_idx].as_ref().unwrap();
+            // ** Get immutable views needed for this iteration AFTER mutable borrow **
+            let (input_idx, output_idx) = if i % 2 == 0 { (0, 1) } else { (1, 0) };
+            let current_input_flow_view = self.flow_views[input_idx].as_ref().unwrap();
+            let current_output_flow_view = self.flow_views[output_idx].as_ref().unwrap();
 
             let bind_group = self.device.create_bind_group(&BindGroupDescriptor {
                 label: Some(&format!("Horn-Schunck Bind Group Iter {}", i)),
-                layout: &bgl,
+                layout: bgl, // Use borrowed BGL
                 entries: &[
                     BindGroupEntry { binding: 0, resource: uniform_buffer.as_entire_binding() },
                     BindGroupEntry { binding: 1, resource: BindingResource::TextureView(prev_frame_tex_view) },
                     BindGroupEntry { binding: 2, resource: BindingResource::TextureView(next_frame_tex_view) },
                     BindGroupEntry { binding: 3, resource: BindingResource::TextureView(current_input_flow_view) },
                     BindGroupEntry { binding: 4, resource: BindingResource::TextureView(current_output_flow_view) },
-                    BindGroupEntry { binding: 5, resource: BindingResource::Sampler(sampler_for_hs) },
+                    BindGroupEntry { binding: 5, resource: BindingResource::Sampler(sampler_for_hs) }, // Use borrowed sampler
                 ],
             });
 
@@ -809,7 +804,7 @@ impl WgpuFrameInterpolator {
                     label: Some(&format!("Horn-Schunck Compute Pass Iter {}", i)),
                     timestamp_writes: None,
                 });
-                compute_pass.set_pipeline(pipeline);
+                compute_pass.set_pipeline(pipeline); // Use borrowed pipeline
                 compute_pass.set_bind_group(0, &bind_group, &[]);
                 compute_pass.dispatch_workgroups(
                     (width + 7) / 8,
@@ -890,15 +885,27 @@ impl WgpuFrameInterpolator {
         for finer_level_idx in (0..coarsest_flow_pyramid_level_idx).rev() {
             let coarser_level_idx = finer_level_idx + 1;
 
-            let src_flow_tex_view = self.flow_views[current_flow_texture_idx].as_ref().unwrap();
-            let src_w = self.flow_textures[current_flow_texture_idx].as_ref().unwrap().width();
-            let src_h = self.flow_textures[current_flow_texture_idx].as_ref().unwrap().height();
-
-            let upsampled_flow_texture_idx = 1 - current_flow_texture_idx;
+            // ** Get immutable info needed for mutable call **
             let dst_w = self.pyramid_a_textures[finer_level_idx].as_ref().unwrap().width();
             let dst_h = self.pyramid_a_textures[finer_level_idx].as_ref().unwrap().height();
-            self.ensure_flow_textures(dst_w, dst_h);
+            
+            // ** Perform mutable borrow **
+            self.ensure_flow_textures(dst_w, dst_h); 
+            // ** Mutable borrow ends **
+
+            // ** Get immutable info needed for this iteration AFTER mutable borrow **
+            let upsampled_flow_texture_idx = 1 - current_flow_texture_idx;
             let upsampled_flow_target_view = self.flow_views[upsampled_flow_texture_idx].as_ref().unwrap();
+            let src_flow_tex_view = self.flow_views[current_flow_texture_idx].as_ref().unwrap(); 
+            let src_w = self.flow_textures[current_flow_texture_idx].as_ref().unwrap().width();
+            let src_h = self.flow_textures[current_flow_texture_idx].as_ref().unwrap().height();
+            let i1_view = self.pyramid_a_views[finer_level_idx].as_ref().unwrap();
+            let i2_view = self.pyramid_b_views[finer_level_idx].as_ref().unwrap();
+            let upsample_pipeline = self.flow_upsample_pipeline.as_ref().expect("Upsample pipeline missing");
+            let upsample_bgl = self.flow_upsample_bgl.as_ref().expect("Upsample BGL missing");
+            let refine_pipeline = self.flow_refine_pipeline.as_ref().expect("Refine pipeline missing");
+            let refine_bgl = self.flow_refine_bgl.as_ref().expect("Refine BGL missing");
+            let sampler_ref = &self.flow_sampler; // Borrow sampler
 
             info!("Refining flow: Level {} ({}x{}) from Level {} ({}x{}). Output to flow_tex[{}].", 
                    finer_level_idx, dst_w, dst_h, coarser_level_idx, src_w, src_h, upsampled_flow_texture_idx);
@@ -934,12 +941,9 @@ impl WgpuFrameInterpolator {
                 compute_pass.dispatch_workgroups((dst_w + 15) / 16, (dst_h + 15) / 16, 1);
             }
             self.queue.submit(std::iter::once(encoder_upsample.finish()));
-            current_flow_texture_idx = upsampled_flow_texture_idx; // Upsampled flow is now current input for refine
+            current_flow_texture_idx = upsampled_flow_texture_idx;
 
-            // 2. Refine Flow (Residual Horn-Schunck for num_refinement_iterations_per_level)
-            let i1_view = self.pyramid_a_views[finer_level_idx].as_ref().unwrap();
-            let i2_view = self.pyramid_b_views[finer_level_idx].as_ref().unwrap();
-            
+            // 2. Refine Flow
             let refine_uniforms_data = RefineHSUniforms { size: [dst_w, dst_h], alpha: refinement_alpha, _pad: [0.0; 3] };
             let refine_uniform_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(&format!("Refine Uniforms L{}", finer_level_idx)),
@@ -959,7 +963,7 @@ impl WgpuFrameInterpolator {
                         BindGroupEntry { binding: 0, resource: refine_uniform_buffer.as_entire_binding() },
                         BindGroupEntry { binding: 1, resource: BindingResource::TextureView(i1_view) },
                         BindGroupEntry { binding: 2, resource: BindingResource::TextureView(i2_view) },
-                        BindGroupEntry { binding: 3, resource: BindingResource::TextureView(residual_input_flow_view) }, // Upsampled or prev iteration's refined flow
+                        BindGroupEntry { binding: 3, resource: BindingResource::TextureView(residual_input_flow_view) },
                         BindGroupEntry { binding: 4, resource: BindingResource::TextureView(residual_output_flow_view) },
                     ],
                 });
@@ -977,13 +981,13 @@ impl WgpuFrameInterpolator {
                     compute_pass.dispatch_workgroups((dst_w + 15) / 16, (dst_h + 15) / 16, 1);
                 }
                 self.queue.submit(std::iter::once(encoder_refine.finish()));
-                current_flow_texture_idx = residual_output_flow_texture_idx; // Refined flow is now current
+                current_flow_texture_idx = residual_output_flow_texture_idx;
             }
             info!("Finished refinement for level {}. Final flow for this level in flow_tex[{}].", finer_level_idx, current_flow_texture_idx);
         }
 
         info!("Hierarchical flow refinement complete. Final flow in flow_tex[{}].", current_flow_texture_idx);
-        current_flow_texture_idx // Return the index of the texture holding the most refined flow
+        current_flow_texture_idx
     }
 }
 
