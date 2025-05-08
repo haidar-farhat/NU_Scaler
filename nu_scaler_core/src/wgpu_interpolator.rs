@@ -141,7 +141,7 @@ impl WgpuFrameInterpolator {
             detector.create_device_queue().await.map_err(|e| 
                 pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to create device/queue: {}", e))
             )
-        })??; // Double ?? to propagate PyResult errors
+        })?; // ONLY ONE ? needed here to propagate the PyResult error
 
         println!("[WgpuFrameInterpolator] WGPU Initialized. Calling Rust WgpuFrameInterpolator::new...");
         // Call the original Rust ::new method
