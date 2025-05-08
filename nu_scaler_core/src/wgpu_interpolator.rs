@@ -281,7 +281,7 @@ impl WgpuFrameInterpolator {
         // --- Phase 2.2 Setup: Horn-Schunck --- 
         let hs_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Horn-Schunck Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/horn_schunck.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/horn_schunck.wgsl").into()),
         });
 
         // Corrected Horn-Schunck BGL to match horn_schunck.wgsl
@@ -384,7 +384,7 @@ impl WgpuFrameInterpolator {
         // Flow Upsample Shader, BGL, and Pipeline
         let upsample_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Flow Upsample Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/flow_upsample.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/flow_upsample.wgsl").into()),
         });
         let flow_upsample_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("Flow Upsample BGL"),
@@ -426,7 +426,7 @@ impl WgpuFrameInterpolator {
         // Flow Refine Shader, BGL, and Pipeline
         let refine_shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Flow Refine Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../shaders/flow_refine.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/flow_refine.wgsl").into()),
         });
         let flow_refine_bgl = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
             label: Some("Flow Refine BGL"),
