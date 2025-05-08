@@ -24,6 +24,7 @@ use crate::gpu::detector::GpuDetector;
 use futures::executor::block_on; // Import block_on
 use wgpu::util::TextureDataOrder; // Added import
 use pyo3::prelude::*; // Add import
+use pollster; // Need this for blocking on async #[new]
 
 // Uniform structure for the warp/blend shader - MATCHING ORIGINAL SPEC (48 Bytes)
 #[repr(C)]
@@ -125,7 +126,40 @@ pub struct WgpuFrameInterpolator {
 
 #[pymethods] // Add this block
 impl WgpuFrameInterpolator {
-    // We will add Python methods here later (like #[new], interpolate_py, etc.)
+    #[new]
+    fn new_py() -> PyResult<Self> {
+        // Initialize WGPU device and queue (similar to setup_gpu_test_resources or lib.rs init)
+        // This requires blocking on an async function.
+        println!("[WgpuFrameInterpolator] Initializing WGPU for Python...");
+        let (device_arc, queue_arc) = pollster::block_on(async {
+            // Use GpuDetector to find a suitable device/queue
+            // This might need error handling
+            let mut detector = GpuDetector::new();
+            detector.detect_gpus().map_err(|e| 
+                pyo3::exceptions::PyRuntimeError::new_err(format!("GPU detection failed: {}", e))
+            )?;
+            detector.create_device_queue().await.map_err(|e| 
+                pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to create device/queue: {}", e))
+            )
+        })??; // Double ?? to propagate PyResult errors
+
+        println!("[WgpuFrameInterpolator] WGPU Initialized. Calling Rust WgpuFrameInterpolator::new...");
+        // Call the original Rust ::new method
+        match WgpuFrameInterpolator::new(device_arc, queue_arc) {
+            Ok(instance) => {
+                println!("[WgpuFrameInterpolator] Rust instance created successfully.");
+                Ok(instance)
+            }
+            Err(e) => {
+                 println!("[WgpuFrameInterpolator] Error calling Rust new: {}", e);
+                 Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Failed to initialize WgpuFrameInterpolator internals: {}", e
+                )))
+            }
+        }
+    }
+
+    // We will add Python methods here later (like interpolate_py, etc.)
 }
 
 impl WgpuFrameInterpolator {
