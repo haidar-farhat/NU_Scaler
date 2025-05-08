@@ -20,6 +20,9 @@ use crate::utils::teinture_wgpu::{self, WgpuState}; // Keep this, will fix if ut
 use wgpu::util::DeviceExt;
 use log::{debug, info, warn};
 use std::num::NonZeroU64;
+use crate::gpu::detector::GpuDetector;
+use crate::utils::teinture_wgpu::{ComparableTexture, create_texture_with_data, TextureDataOrder};
+use futures::executor::block_on; // Import block_on
 
 // Uniform structure for the warp/blend shader - MATCHING ORIGINAL SPEC (48 Bytes)
 #[repr(C)]
