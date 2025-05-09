@@ -22,7 +22,7 @@ use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender
 #[cfg(target_os = "windows")]
 use windows::{
     Win32::System::Threading::{
-        GetCurrentThread, SetThreadAffinityMask, SetThreadPriority,
+        GetCurrentThread, SetThreadAffinityMask,
         THREAD_PRIORITY_ABOVE_NORMAL, THREAD_PRIORITY_HIGHEST,
     },
     Win32::Foundation::BOOL,
@@ -334,11 +334,10 @@ impl ScreenCapture {
                 {
                     // Set worker thread priority
                     unsafe {
-                        let result: BOOL = windows::Win32::System::Threading::SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
-                        if result.0 == 0 { // Check the inner i32 value of BOOL; 0 is failure
-                            println!("[WorkerThread] Failed to set thread priority to ABOVE_NORMAL.");
+                        if windows::Win32::System::Threading::SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL).is_err() {
+                            println!("[WorkerThread] Failed to set thread priority to ABOVE_NORMAL (call returned error).");
                         } else {
-                            println!("[WorkerThread] Thread priority set to ABOVE_NORMAL.");
+                            println!("[WorkerThread] Thread priority set to ABOVE_NORMAL (call returned success).");
                         }
                     }
                 }
@@ -393,11 +392,10 @@ impl ScreenCapture {
                 {
                     // Set capture thread priority and affinity
                     unsafe {
-                        let result: BOOL = windows::Win32::System::Threading::SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
-                        if result.0 == 0 { // Check the inner i32 value of BOOL; 0 is failure
-                            println!("[WGC_CaptureThread] Failed to set thread priority to HIGHEST.");
+                        if windows::Win32::System::Threading::SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST).is_err() {
+                            println!("[WGC_CaptureThread] Failed to set thread priority to HIGHEST (call returned error).");
                         } else {
-                            println!("[WGC_CaptureThread] Thread priority set to HIGHEST.");
+                            println!("[WGC_CaptureThread] Thread priority set to HIGHEST (call returned success).");
                         }
                         if let Some(core_id) = capture_core_id {
                             if core_id < (std::mem::size_of::<usize>() * 8) { // Max 64 cores for usize mask
