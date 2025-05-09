@@ -97,7 +97,23 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         _capture_control: InternalCaptureControl
     ) -> Result<(), Self::Error>
     {
-        let total_start = Instant::now();
+        // +++ Start of on_frame_arrived interval logging +++
+        thread_local! {
+            static LAST_FRAME_ARRIVAL_TIME: Cell<Option<Instant>> = Cell::new(None);
+        }
+        let now = Instant::now();
+        LAST_FRAME_ARRIVAL_TIME.with(|last_time_cell| {
+            if let Some(last_time) = last_time_cell.get() {
+                let delta = now.duration_since(last_time);
+                println!("[CaptureHandler::on_frame_arrived] Interval since last call: {:?}", delta);
+            } else {
+                println!("[CaptureHandler::on_frame_arrived] First call.");
+            }
+            last_time_cell.set(Some(now));
+        });
+        // +++ End of on_frame_arrived interval logging +++
+
+        let total_start = Instant::now(); // This is for timing the work *within* on_frame_arrived
 
         let width = frame.width() as usize;
         let height = frame.height() as usize;
@@ -350,11 +366,14 @@ impl ScreenCapture {
         let capture_handler_flags = cb_sender; 
         let settings = Settings::new(
             window,
-            CursorCaptureSettings::Default,
-            DrawBorderSettings::Default,
+            CursorCaptureSettings::Disabled,  // +++ Changed from Default +++
+            DrawBorderSettings::Disabled,   // +++ Changed from Default +++
             ColorFormat::Bgra8,
             capture_handler_flags, // Pass the crossbeam sender here
         );
+        // Example for capture_area if you want to test cropping later:
+        // use windows_capture::settings::CaptureArea;
+        // settings.set_capture_area(CaptureArea::ClientArea); // Or specific rect
 
         let capture_thread_handle = thread::Builder::new()
             .name("wgc_capture_api_thread".to_string())
