@@ -102,43 +102,23 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         _capture_control: InternalCaptureControl
     ) -> Result<(), Self::Error>
     {
-        // +++ Start of on_frame_arrived interval logging (to file) +++
+        // +++ Start of on_frame_arrived interval logging (to console via println!) +++
         thread_local! {
-            static LAST_FRAME_ARRIVAL_TIME_FILE_LOG: Cell<Option<Instant>> = Cell::new(None);
-            // Attempt to open the log file once per thread, keep it simple. Errors will be ignored silently here.
-            static LOG_FILE: RefCell<Option<std::fs::File>> = RefCell::new(
-                OpenOptions::new().create(true).append(true).open("C:/temp/nu_scaler_on_frame_arrived_intervals.txt").ok()
-            );
+            static LAST_FRAME_ARRIVAL_TIME_CONSOLE_LOG: Cell<Option<Instant>> = Cell::new(None);
         }
         let now = Instant::now();
-        LAST_FRAME_ARRIVAL_TIME_FILE_LOG.with(|last_time_cell| {
-            LOG_FILE.with(|log_file_cell| {
-                let mut log_file_opt = log_file_cell.borrow_mut();
-                if let Some(log_file) = log_file_opt.as_mut() {
-                    let mut log_message = String::new();
-                    if let Some(last_time) = last_time_cell.get() {
-                        let delta = now.duration_since(last_time);
-                        log_message = format!("[CaptureHandler::on_frame_arrived] Interval since last call: {:?}\n", delta);
-                    } else {
-                        log_message = "[CaptureHandler::on_frame_arrived] First call.\n".to_string();
-                    }
-                    let _ = log_file.write_all(log_message.as_bytes());
-                    // Forcing a flush might be too slow for every frame, but useful for debugging if logs don't appear.
-                    // let _ = log_file.flush(); 
-                } else {
-                    // Fallback to println if file couldn't be opened, to still get some output.
-                    // This might be noisy if the file path is wrong or permissions are an issue.
-                    if let Some(last_time) = last_time_cell.get() {
-                        let delta = now.duration_since(last_time);
-                        println!("[CaptureHandler::on_frame_arrived] (FILE_LOG_FAILED) Interval: {:?}", delta);
-                    } else {
-                        println!("[CaptureHandler::on_frame_arrived] (FILE_LOG_FAILED) First call.");
-                    }
-                }
-            });
+        LAST_FRAME_ARRIVAL_TIME_CONSOLE_LOG.with(|last_time_cell| {
+            if let Some(last_time) = last_time_cell.get() {
+                let delta = now.duration_since(last_time);
+                // Ensure this println! is very unlikely to be missed or buffered away indefinitely.
+                // Adding a more prominent tag.
+                println!("RUST_CONSOLE_LOG [CaptureHandler::on_frame_arrived] Interval since last call: {:?}", delta);
+            } else {
+                println!("RUST_CONSOLE_LOG [CaptureHandler::on_frame_arrived] First call.");
+            }
             last_time_cell.set(Some(now));
         });
-        // +++ End of on_frame_arrived interval logging (to file) +++
+        // +++ End of on_frame_arrived interval logging (to console via println!) +++
 
         let total_start = Instant::now(); // This is for timing the work *within* on_frame_arrived
 
