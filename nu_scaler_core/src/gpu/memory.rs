@@ -14,11 +14,8 @@ use windows::core::ComInterface;
 
 #[cfg(target_os = "windows")]
 use windows::Win32::Graphics::Dxgi::{
-    CreateDXGIFactory1,
-    IDXGIAdapter1,
-    IDXGIAdapter3,
-    DXGI_ADAPTER_DESC1,
-    DXGI_QUERY_VIDEO_MEMORY_INFO,
+    IDXGIFactory1, IDXGIAdapter3, CreateDXGIFactory1, 
+    DXGI_ADAPTER_DESC1, DXGI_QUERY_VIDEO_MEMORY_INFO,
 };
 
 /// VRAM usage statistics

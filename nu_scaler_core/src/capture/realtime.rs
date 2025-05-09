@@ -98,7 +98,7 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
     // v1.4.3: `new` receives Context<Self::Flags>
     fn new(context: Context<Self::Flags>) -> Result<Self, Self::Error> {
         println!("[CaptureHandler] Created (v1.4.3 API).");
-        Ok(Self { frame_sender: context.flags() })
+        Ok(Self { frame_sender: context.get_flags() })
     }
 
     // v1.4.3: `frame` is &mut Frame
@@ -285,52 +285,94 @@ impl ScreenCapture {
         };
         self.debug_print(&format!("Starting WGC for Target: {}", item_title_for_debug));
         
-        let capture_item = target.clone().into_internal_type()?; // Use the helper
-
         // MPSC channel for worker to send to Python consumer (get_frame)
         let (py_sender, py_receiver): (StdSender<Option<FramePacket>>, StdReceiver<Option<FramePacket>>) = mpsc::channel();
         self.python_frame_receiver = Some(py_receiver);
 
-        // Call the free function start_wgc_capture (its signature needs to accept CaptureItem)
-        // Let's assume start_wgc_capture is refactored to accept a CaptureItem directly.
-        // pub fn start_wgc_capture(
-        //    capture_item: windows_capture::capture::CaptureItem,
-        //    python_frame_sender: StdSender<Option<FramePacket>>,
-        // ) -> Result<(JoinHandle<()>, CrossbeamSender<FramePacket>, Settings<CrossbeamSender<FramePacket>>), String>
-        
-        // This free function sets up cb_channels, spawns worker, creates Settings struct
-        let (worker_handle, cb_sender_for_handler_flags, wgc_settings) = 
-            start_wgc_capture_internal_setup(capture_item, py_sender)?;
-
-        self.wgc_worker_thread_handle = Some(worker_handle);
-        self.wgc_control_sender = Some(cb_sender_for_handler_flags); // This is the cb_sender
-
-        let capture_thread_settings = wgc_settings; // Settings struct already has the cb_sender flag
-        let local_stop_event = self.stop_event.clone();
-
-        self.wgc_capture_thread_handle = Some(thread::Builder::new()
-            .name("wgc_capture_thread".into())
-            .spawn(move || {
-                println!("[WGC Capture Thread] Starting using windows-capture v2.0.0...");
-                #[cfg(target_os = "windows")]
-                unsafe {
-                    if windows::Win32::System::Threading::SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST).is_err() {
-                        println!("[WGC Capture Thread] Failed to set thread priority to HIGHEST.");
-                    }
-                    if let Some(core_id) = capture_core_id.or(CAPTURE_CORE_ID) {
-                        if SetThreadAffinityMask(GetCurrentThread(), 1 << core_id) == 0 {
-                            println!("[WGC Capture Thread] Failed to set thread affinity to core {}.", core_id);
-                        }
-                    }
-                }
+        // In v1.4, we handle Window and Monitor differently
+        match target {
+            CaptureTarget::WindowByTitle(title) => {
+                let window = match Window::from_name(&title) {
+                    Ok(win) => win,
+                    Err(e) => return Err(format!("Failed to find window '{}': {}", title, e)),
+                };
                 
-                if let Err(e) = CaptureHandler::start(capture_thread_settings) {
-                    eprintln!("[WGC Capture Thread] Capture failed/stopped: {:?}", e);
-                }
-                println!("[WGC Capture Thread] Capture loop exited.");
-                local_stop_event.store(true, Ordering::SeqCst); 
-            })
-            .map_err(|e| format!("Failed to spawn WGC capture thread: {:?}", e))?);
+                let (worker_handle, cb_sender_for_handler_flags, wgc_settings) = 
+                    start_wgc_capture_internal_setup(window, py_sender)?;
+                    
+                self.wgc_worker_thread_handle = Some(worker_handle);
+                self.wgc_control_sender = Some(cb_sender_for_handler_flags); // This is the cb_sender
+
+                let capture_thread_settings = wgc_settings; // Settings struct already has the cb_sender flag
+                let local_stop_event = self.stop_event.clone();
+
+                self.wgc_capture_thread_handle = Some(thread::Builder::new()
+                    .name("wgc_capture_thread".into())
+                    .spawn(move || {
+                        println!("[WGC Capture Thread] Starting using windows-capture v1.4...");
+                        #[cfg(target_os = "windows")]
+                        unsafe {
+                            if windows::Win32::System::Threading::SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST).is_err() {
+                                println!("[WGC Capture Thread] Failed to set thread priority to HIGHEST.");
+                            }
+                            if let Some(core_id) = capture_core_id.or(CAPTURE_CORE_ID) {
+                                if SetThreadAffinityMask(GetCurrentThread(), 1 << core_id) == 0 {
+                                    println!("[WGC Capture Thread] Failed to set thread affinity to core {}.", core_id);
+                                }
+                            }
+                        }
+                        
+                        if let Err(e) = CaptureHandler::start(capture_thread_settings) {
+                            eprintln!("[WGC Capture Thread] Capture failed/stopped: {:?}", e);
+                        }
+                        println!("[WGC Capture Thread] Capture loop exited.");
+                        local_stop_event.store(true, Ordering::SeqCst); 
+                    })
+                    .map_err(|e| format!("Failed to spawn WGC capture thread: {:?}", e))?);
+            },
+            CaptureTarget::FullScreen => {
+                // For fullscreen, we use Monitor instead of Window
+                let monitor = match Monitor::primary() {
+                    Ok(mon) => mon,
+                    Err(e) => return Err(format!("Failed to get primary monitor: {}", e)),
+                };
+
+                // Need a separate function to handle Monitor
+                let (worker_handle, cb_sender, wgc_settings) = 
+                    start_wgc_capture_monitor(monitor, py_sender)?;
+                    
+                self.wgc_worker_thread_handle = Some(worker_handle);
+                self.wgc_control_sender = Some(cb_sender);
+
+                let capture_thread_settings = wgc_settings;
+                let local_stop_event = self.stop_event.clone();
+
+                self.wgc_capture_thread_handle = Some(thread::Builder::new()
+                    .name("wgc_capture_thread".into())
+                    .spawn(move || {
+                        println!("[WGC Capture Thread] Starting monitor capture using windows-capture v1.4...");
+                        #[cfg(target_os = "windows")]
+                        unsafe {
+                            if windows::Win32::System::Threading::SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST).is_err() {
+                                println!("[WGC Capture Thread] Failed to set thread priority to HIGHEST.");
+                            }
+                            if let Some(core_id) = capture_core_id.or(CAPTURE_CORE_ID) {
+                                if SetThreadAffinityMask(GetCurrentThread(), 1 << core_id) == 0 {
+                                    println!("[WGC Capture Thread] Failed to set thread affinity to core {}.", core_id);
+                                }
+                            }
+                        }
+                        
+                        if let Err(e) = CaptureHandler::start(capture_thread_settings) {
+                            eprintln!("[WGC Capture Thread] Capture failed/stopped: {:?}", e);
+                        }
+                        println!("[WGC Capture Thread] Capture loop exited.");
+                        local_stop_event.store(true, Ordering::SeqCst); 
+                    })
+                    .map_err(|e| format!("Failed to spawn WGC capture thread: {:?}", e))?);
+            },
+            _ => return Err("Unsupported capture type for WGC".to_string()),
+        }
         
         self.is_capturing.store(true, Ordering::SeqCst);
         Ok(())
@@ -343,10 +385,10 @@ impl ScreenCapture {
 
 // Placeholder for CaptureTarget::into_internal_type() - this needs to be implemented on CaptureTarget
 impl CaptureTarget {
-    fn into_internal_type(self) -> Result<windows_capture::capture::CaptureItem, String> {
+    fn into_internal_type(self) -> Result<windows_capture::window::Window, String> {
         match self {
-            CaptureTarget::WindowByTitle(title) => Window::from_name(&title).map(Into::into).map_err(|e| e.to_string()),
-            CaptureTarget::FullScreen => Monitor::primary().map(Into::into).map_err(|e| e.to_string()),
+            CaptureTarget::WindowByTitle(title) => Window::from_name(&title).map_err(|e| e.to_string()),
+            CaptureTarget::FullScreen => Err("FullScreen capture should use Monitor::primary() directly".to_string()),
             CaptureTarget::Region{..} => Err("Region capture not yet supported for WGC direct item".to_string()),
         }
     }
@@ -357,7 +399,7 @@ impl RealTimeCapture for ScreenCapture {
         self.debug_print(&format!("Starting capture: {:?}", target));
         if self.is_capturing.load(Ordering::Relaxed) {
             self.debug_print("Capture already running. Stopping first.");
-            self.stop()?; // Ensure previous capture is fully stopped
+            self.stop(); // Remove the ? operator since stop() no longer returns Result
         }
         
         self.target = Some(target.clone());
@@ -390,10 +432,10 @@ impl RealTimeCapture for ScreenCapture {
         }
     }
 
-    fn stop(&mut self) -> std::result::Result<(), String> {
+    fn stop(&mut self) {
         if !self.is_capturing.load(Ordering::SeqCst) && !self.running /* old flag */ {
             self.debug_print("Stop called but capture not running.");
-            return Ok(());
+            return;
         }
         self.debug_print("Stopping capture (RealTimeCapture::stop)...");
         
@@ -407,7 +449,6 @@ impl RealTimeCapture for ScreenCapture {
         self.is_capturing.store(false, Ordering::SeqCst);
         self.running = false; // old flag
         self.debug_print("Capture fully stopped (RealTimeCapture::stop).");
-        Ok(())
     }
 
     fn get_frame(&mut self) -> Option<(Vec<u8>, usize, usize)> { // Return type may need to be Option<FramePacket>
@@ -441,7 +482,7 @@ impl RealTimeCapture for ScreenCapture {
                         Err(ref e) if e.kind() == ErrorKind::WouldBlock => None, // No new frame
                         Err(e) => {
                             eprintln!("[ScreenCapture] Frame capture error (FullScreen): {}", e);
-                            self.stop().ok();
+                            self.stop();
                             None
                         }
                     }
@@ -461,13 +502,13 @@ impl RealTimeCapture for ScreenCapture {
                                 }
                                 Ok(None) => { 
                                     self.debug_print("[get_frame] WGC Path: Received STOP signal (None) from Python channel.");
-                                    self.stop().ok(); // Attempt to stop if not already
+                                    self.stop(); // Attempt to stop if not already
                                     return None; // Return None as capture is stopping/stopped
                                 }
                                 Err(mpsc::TryRecvError::Empty) => break,
                                 Err(mpsc::TryRecvError::Disconnected) => {
                                     self.debug_print("[get_frame] WGC Path: Python channel DISCONNECTED.");
-                                    self.stop().ok();
+                                    self.stop();
                                     return None;
                                 }
                             }
@@ -475,6 +516,9 @@ impl RealTimeCapture for ScreenCapture {
                         // Convert (Vec<u8>, u32, u32) to (Vec<u8>, usize, usize) for consistent return type
                         return last_frame_data.map(|(data, w, h)| (data, w as usize, h as usize));
                     }
+                    
+                    // No receiver or some other issue, return None
+                    return None;
                 }
                 #[cfg(not(target_os = "windows"))]
                 {
@@ -501,9 +545,7 @@ impl Drop for ScreenCapture {
     fn drop(&mut self) {
         self.debug_print("[ScreenCapture Drop] Dropping ScreenCapture instance.");
         if self.is_capturing.load(Ordering::Relaxed) {
-            if let Err(e) = self.stop() {
-                eprintln!("[ScreenCapture Drop] Error stopping capture: {}", e);
-            }
+            self.stop();
         }
     }
 }
@@ -517,9 +559,9 @@ mod x11_capture {
 
 // Free function for WGC setup (v1.4.3 API for Settings)
 fn start_wgc_capture_internal_setup(
-    capture_item: windows_capture::capture::CaptureItem,
+    capture_item: windows_capture::window::Window,
     python_frame_sender: StdSender<Option<FramePacket>>,
-) -> Result<(JoinHandle<()>, CrossbeamSender<FramePacket>, Settings<CrossbeamSender<FramePacket>>), String> {
+) -> Result<(JoinHandle<()>, CrossbeamSender<FramePacket>, Settings<CrossbeamSender<FramePacket>, windows_capture::window::Window>), String> {
     let (cb_sender, cb_receiver): (
         CrossbeamSender<FramePacket>,
         CrossbeamReceiver<FramePacket>,
@@ -554,12 +596,60 @@ fn start_wgc_capture_internal_setup(
     // Settings::new for windows-capture v1.4.3 (5 args, no Result)
     let settings = Settings::new(
         capture_item,                     
-        CursorCaptureSettings::Disabled, // Using Enum, hoping this compiles now with correct windows features
-        DrawBorderSettings::Disabled,    // Using Enum
+        false, // CursorCapture disabled (for v1.4)
+        false, // DrawBorder disabled (for v1.4)
         ColorFormat::Bgra8,            
         capture_handler_flags // This is CrossbeamSender<FramePacket>, used by Context for Handler::new
     ); 
     // No .map_err() or ? needed here for v1.4.3 as it's a const fn returning Self
+
+    Ok((worker_thread_handle, cb_sender, settings))
+}
+
+// Add a new function for monitor capture with v1.4 API
+#[cfg(target_os = "windows")]
+fn start_wgc_capture_monitor(
+    monitor: windows_capture::monitor::Monitor,
+    python_frame_sender: StdSender<Option<FramePacket>>,
+) -> Result<(JoinHandle<()>, CrossbeamSender<FramePacket>, Settings<CrossbeamSender<FramePacket>, windows_capture::monitor::Monitor>), String> {
+    let (cb_sender, cb_receiver): (
+        CrossbeamSender<FramePacket>,
+        CrossbeamReceiver<FramePacket>,
+    ) = crossbeam_channel::unbounded();
+
+    let worker_thread_py_sender = python_frame_sender.clone();
+    let worker_thread_handle = thread::Builder::new()
+        .name("wgc_worker_thread".into())
+        .spawn(move || {
+            println!("[WGC Worker Thread] Started. Waiting for frames.");
+            loop {
+                match cb_receiver.recv() {
+                    Ok(packet) => { 
+                        if worker_thread_py_sender.send(Some(packet)).is_err() {
+                            eprintln!("[WGC Worker Thread] Python mpsc receiver disconnected. Stopping.");
+                            break;
+                        }
+                    }
+                    Err(_) => {
+                        eprintln!("[WGC Worker Thread] Crossbeam channel disconnected. Stopping worker.");
+                        break;
+                    }
+                }
+            }
+            println!("[WGC Worker Thread] Stopped.");
+        })
+        .map_err(|e| format!("Failed to spawn WGC worker thread: {:?}", e))?;
+
+    let capture_handler_flags = cb_sender.clone(); 
+    
+    // Settings::new for windows-capture v1.4.3 (5 args, no Result)
+    let settings = Settings::new(
+        monitor,                     
+        false, // CursorCapture disabled (for v1.4)
+        false, // DrawBorder disabled (for v1.4)
+        ColorFormat::Bgra8,            
+        capture_handler_flags // This is CrossbeamSender<FramePacket>, used by Context for Handler::new
+    ); 
 
     Ok((worker_thread_handle, cb_sender, settings))
 }
