@@ -9,9 +9,11 @@ use std::thread::{self, JoinHandle};
 use std::time::Instant;
 
 // +++ Added imports +++
-use std::cell::{Cell, RefCell}; 
-use std::fs::OpenOptions;
-use std::io::Write;
+use std::cell::Cell; 
+// Removed unused imports based on compiler warnings
+// use std::cell::RefCell; 
+// use std::fs::OpenOptions;
+// use std::io::Write;
 
 // For crossbeam channel
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
@@ -19,20 +21,20 @@ use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender
 // For thread priority and affinity
 #[cfg(target_os = "windows")]
 use windows::{
-    core::PCWSTR,
     Win32::System::Threading::{
         GetCurrentThread, SetThreadAffinityMask, SetThreadPriority,
         THREAD_PRIORITY_ABOVE_NORMAL, THREAD_PRIORITY_HIGHEST,
     },
+    Win32::Foundation::BOOL,
 };
 
 // use std::sync::mpsc::{Receiver, Sender}; // Remove unused Receiver, Sender (mpsc itself covers usage)
-use std::fs;
-// use uuid::Uuid; // Remove unused Uuid
+// use std::fs; // Removed unused import
 
 // Windows API imports (needed for list_windows)
 // use windows::core::{Error, Result as WindowsResult}; // Unused
-use windows::Win32::Foundation::{BOOL, HWND, LPARAM};
+// Removed BOOL from this import as it's defined above in the cfg block
+use windows::Win32::Foundation::{HWND, LPARAM}; 
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetWindowTextW, IsWindowVisible, /*, FindWindowW*/
 }; // FindWindowW unused
@@ -198,7 +200,7 @@ pub struct ScreenCapture {
     
     // WGC related fields
     wgc_capture_thread: Option<JoinHandle<()>>, // Thread for windows-capture event loop
-    wgc_worker_thread: Option<JoinHandle<()>>, // Thread for processing frames from crossbeam and sending to Python
+    wgc_worker_thread: Option<JoinHandle<()>>,  // Thread for processing frames from crossbeam channel
     
     // Receiver for frames from Python's perspective (fed by wgc_worker_thread)
     python_frame_receiver: Option<StdReceiver<FramePacket>>, 
@@ -332,10 +334,11 @@ impl ScreenCapture {
                 {
                     // Set worker thread priority
                     unsafe {
-                        if SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL.0) == BOOL(0) {
-                            eprintln!("[WGC Worker Thread] Failed to set thread priority. Error: {:?}", windows::core::Error::from_win32());
+                        // Corrected: Use !.as_bool() for checking failure from SetThreadPriority
+                        if !SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL).as_bool() {
+                            println!("[WorkerThread] Failed to set thread priority to ABOVE_NORMAL.");
                         } else {
-                            println!("[WGC Worker Thread] Priority set to ABOVE_NORMAL.");
+                            println!("[WorkerThread] Thread priority set to ABOVE_NORMAL.");
                         }
                     }
                 }
@@ -373,8 +376,9 @@ impl ScreenCapture {
         let capture_handler_flags = cb_sender; 
         let settings = Settings::new(
             window,
-            CursorCaptureSettings::None,  // Corrected: Assuming ::None is the intended variant
-            DrawBorderSettings::None,   // Corrected: Assuming ::None is the intended variant
+            // Corrected: Using fully qualified path for enum variants
+            windows_capture::settings::CursorCaptureSettings::Disabled,
+            windows_capture::settings::DrawBorderSettings::Disabled,
             ColorFormat::Bgra8,
             capture_handler_flags, // Pass the crossbeam sender here
         );
@@ -389,10 +393,11 @@ impl ScreenCapture {
                 {
                     // Set capture thread priority and affinity
                     unsafe {
-                        if SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST.0) == BOOL(0) {
-                             eprintln!("[WGC Capture Thread] Failed to set thread priority. Error: {:?}", windows::core::Error::from_win32());
+                        // Corrected: Use !.as_bool() for checking failure from SetThreadPriority
+                        if !SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST).as_bool() {
+                            println!("[WGC_CaptureThread] Failed to set thread priority to HIGHEST.");
                         } else {
-                            println!("[WGC Capture Thread] Priority set to HIGHEST.");
+                            println!("[WGC_CaptureThread] Thread priority set to HIGHEST.");
                         }
                         if let Some(core_id) = capture_core_id {
                             if core_id < (std::mem::size_of::<usize>() * 8) { // Max 64 cores for usize mask
@@ -408,15 +413,15 @@ impl ScreenCapture {
                         }
                     }
                 }
-                println!("[WGC Capture Thread] Starting windows-capture session...");
+                println!("[WGC_CaptureThread] Starting capture event loop.");
                 if let Err(e) = CaptureHandler::start(settings) { // This blocks until capture stops
-                    eprintln!("[WGC Capture Thread] Capture failed/stopped: {}", e);
+                    eprintln!("[WGC_CaptureThread] Capture failed/stopped: {}", e);
                     // If CaptureHandler::start errors out, on_closed might not be called.
                     // We need to ensure the worker thread is signaled to stop.
                     // The cb_sender (capture_handler_flags) is moved into `settings`.
                     // If this thread exits, the sender might be dropped, which should disconnect the channel.
                 } else {
-                    println!("[WGC Capture Thread] Capture session finished gracefully.");
+                    println!("[WGC_CaptureThread] Capture session finished gracefully.");
                 }
                 // Note: If CaptureHandler::start returns, it means the capture session ended.
                 // on_closed should have sent None via cb_sender to the worker.
