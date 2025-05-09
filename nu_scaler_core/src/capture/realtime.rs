@@ -43,7 +43,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows_capture::capture::{Context, GraphicsCaptureApiHandler};
 use windows_capture::frame::Frame;
 use windows_capture::graphics_capture_api::InternalCaptureControl;
-use windows_capture::settings::{ColorFormat, CursorCaptureSettings, DrawBorderSettings, Settings, CaptureSettings};
+use windows_capture::settings::{ColorFormat, CursorCaptureSettings, DrawBorderSettings, Settings};
 use windows_capture::window::Window;
 
 /* // Remove block of unused windows imports
@@ -374,25 +374,22 @@ impl ScreenCapture {
         // The `cb_sender` is given to `CaptureHandler` via `Settings` flags.
         let capture_handler_flags = cb_sender; 
 
-        // +++ Construct CaptureSettings struct +++
-        let capture_settings = CaptureSettings {
-            cursor_capture: CursorCaptureSettings::Disabled,
-            draw_border: DrawBorderSettings::Disabled,
-            capture_area: None, // Or Some(CaptureArea::ClientArea) or a specific rect if needed
-        };
-
+        // Removed the separate CaptureSettings struct construction.
+        // Directly use the 5-argument Settings::new constructor from windows-capture v1.4.3
         let settings = Settings::new(
-            window, // This is GraphicsCaptureItem (Window implements Into<GraphicsCaptureItem>)
-            capture_handler_flags, // These are the ContextFlags
-            ColorFormat::Bgra8,
-            capture_settings, // Pass the constructed CaptureSettings struct here
-            false, // force_surface_sharing
-            std::ptr::null_mut(), // raw_d3d_device (usually null unless you have specific interop needs)
-            None // timeout_ms for AcquireNextFrame, None uses crate default (e.g. 100ms)
-        ).map_err(|e| format!("Failed to create WGC Settings: {:?}", e))?;
+            window, // Argument 1: GraphicsCaptureItem (Window implements Into<GraphicsCaptureItem>)
+            CursorCaptureSettings::Disabled, // Argument 2
+            DrawBorderSettings::Disabled,    // Argument 3
+            ColorFormat::Bgra8,              // Argument 4
+            capture_handler_flags            // Argument 5: ContextFlags (our CrossbeamSender)
+        ); // Settings::new is a const fn, so it doesn't return a Result, remove .map_err().
+           // If type errors persist for ::Disabled, it means the windows crate features are still not aligning.
 
         // Example for capture_area if you want to test cropping later:
+        // This would need to be done via a method on the `settings` object if supported,
+        // or by different constructor if available.
         // use windows_capture::settings::CaptureArea;
+        // settings.set_capture_area(CaptureArea::ClientArea); // Or specific rect
 
         let capture_thread_handle = thread::Builder::new()
             .name("wgc_capture_api_thread".to_string())
