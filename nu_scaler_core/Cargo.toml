@@ -54,7 +54,7 @@ windows = { version = "0.56.0", features = [
     "Win32_System_WinRT_Graphics_Capture",
     "Win32_System_Threading",
 ] }
-
+crossbeam-channel = "0.5"
 
 # Optional dependencies from previous state (may need review)
 # dlss-sys = { path = "../dlss-sys", optional = true }
