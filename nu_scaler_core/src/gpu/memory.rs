@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use wgpu::{Buffer, BufferDescriptor, BufferUsages, CommandEncoderDescriptor, Device, Queue};
 
 #[cfg(target_os = "windows")]
-use windows::core::ComInterface;
+use windows_core::ComInterface;
 
 /// VRAM usage statistics
 #[derive(Debug, Clone)]
