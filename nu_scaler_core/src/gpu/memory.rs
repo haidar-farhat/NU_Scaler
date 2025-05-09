@@ -400,31 +400,37 @@ impl MemoryPool {
     /// Query VRAM stats on Windows using DXGI
     #[cfg(target_os = "windows")]
     fn query_vram_windows(&self) -> Option<VramStats> {
-        use std::mem::zeroed;
-        use std::time::Instant;
-        use windows::core::Interface;
-        use windows::Win32::Graphics::Dxgi;
+        use windows_sys::Win32::System::SystemInformation::MEMORYSTATUSEX;
+        use windows_sys::Win32::System::SystemInformation::GlobalMemoryStatusEx;
+        use windows::Win32::Graphics::Dxgi::{IDXGIFactory1, CreateDXGIFactory1, IDXGIAdapter1, DXGI_ADAPTER_DESC1};
+        // The ComInterface for .cast() should be in scope from top-level import
 
         unsafe {
             // Create DXGI factory
-            let factory_result = Dxgi::CreateDXGIFactory1::<Dxgi::IDXGIFactory1>();
+            let factory_result = CreateDXGIFactory1();
             if let Ok(factory) = factory_result {
                 // Get first adapter
                 if let Ok(adapter) = factory.EnumAdapters1(0) {
                     // Try to get IDXGIAdapter3 for VRAM info
-                    let adapter3: Result<Dxgi::IDXGIAdapter3, _> = adapter.cast();
+                    let adapter3: Result<IDXGIAdapter1, _> = adapter.cast();
                     if let Ok(adapter3) = adapter3 {
                         let mut dedicated_vram: u64 = 0;
                         let mut usage_vram: u64 = 0;
 
                         // Get adapter description with properly created descriptor
-                        let mut desc = zeroed::<Dxgi::DXGI_ADAPTER_DESC1>();
-                        if adapter.GetDesc1(&mut desc).is_ok() {
+                        let mut desc = DXGI_ADAPTER_DESC1 {
+                            DedicatedVideoMemory: 0,
+                            ..Default::default()
+                        };
+                        if adapter.GetDesc(&mut desc).is_ok() {
                             dedicated_vram = desc.DedicatedVideoMemory as u64;
                         }
 
                         // Get current usage with properly created memory info struct
-                        let mut budget = zeroed::<Dxgi::DXGI_QUERY_VIDEO_MEMORY_INFO>();
+                        let mut budget = MEMORYSTATUSEX {
+                            dwLength: std::mem::size_of::<MEMORYSTATUSEX>() as u32,
+                            ..Default::default()
+                        };
                         if adapter3
                             .QueryVideoMemoryInfo(
                                 0,
@@ -433,7 +439,7 @@ impl MemoryPool {
                             )
                             .is_ok()
                         {
-                            usage_vram = budget.CurrentUsage;
+                            usage_vram = budget.ullTotalPageFileUsage;
                         }
 
                         // Convert to MB

@@ -43,7 +43,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows_capture::capture::{Context, GraphicsCaptureApiHandler};
 use windows_capture::frame::Frame;
 use windows_capture::graphics_capture_api::InternalCaptureControl;
-use windows_capture::settings::{ColorFormat, CursorCaptureSettings, DrawBorderSettings, Settings};
+use windows_capture::settings::{ColorFormat, Settings};
 use windows_capture::window::Window;
 
 /* // Remove block of unused windows imports
@@ -374,22 +374,17 @@ impl ScreenCapture {
         // The `cb_sender` is given to `CaptureHandler` via `Settings` flags.
         let capture_handler_flags = cb_sender; 
 
-        // Removed the separate CaptureSettings struct construction.
-        // Directly use the 5-argument Settings::new constructor from windows-capture v1.4.3
+        // Settings::new for windows-capture v2.0.0
         let settings = Settings::new(
-            window, // Argument 1: GraphicsCaptureItem (Window implements Into<GraphicsCaptureItem>)
-            CursorCaptureSettings::Disabled, // Argument 2
-            DrawBorderSettings::Disabled,    // Argument 3
-            ColorFormat::Bgra8,              // Argument 4
-            capture_handler_flags            // Argument 5: ContextFlags (our CrossbeamSender)
-        ); // Settings::new is a const fn, so it doesn't return a Result, remove .map_err().
-           // If type errors persist for ::Disabled, it means the windows crate features are still not aligning.
-
-        // Example for capture_area if you want to test cropping later:
-        // This would need to be done via a method on the `settings` object if supported,
-        // or by different constructor if available.
-        // use windows_capture::settings::CaptureArea;
-        // settings.set_capture_area(CaptureArea::ClientArea); // Or specific rect
+            window,                        // item: GraphicsCaptureItem
+            Some(false),                   // cursor_capture: Option<bool> (false to disable)
+            Some(false),                   // draw_border: Option<bool> (false to disable)
+            ColorFormat::Bgra8,            // color_format
+            capture_handler_flags,         // flags: F (our CrossbeamSender)
+            Some(false),                   // force_surface_sharing: Option<bool>
+            None,                          // raw_d3d_device: Option<*mut c_void>
+            None                           // timeout_ms: Option<u32>
+        ).map_err(|e| format!("Failed to create WGC Settings (v2.0.0): {:?}", e))?;
 
         let capture_thread_handle = thread::Builder::new()
             .name("wgc_capture_api_thread".to_string())
