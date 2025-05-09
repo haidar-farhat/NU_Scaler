@@ -334,7 +334,7 @@ impl ScreenCapture {
                 {
                     // Set worker thread priority
                     unsafe {
-                        let result: BOOL = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+                        let result: BOOL = windows::Win32::System::Threading::SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
                         if result.0 == 0 { // Check the inner i32 value of BOOL; 0 is failure
                             println!("[WorkerThread] Failed to set thread priority to ABOVE_NORMAL.");
                         } else {
@@ -393,7 +393,7 @@ impl ScreenCapture {
                 {
                     // Set capture thread priority and affinity
                     unsafe {
-                        let result: BOOL = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+                        let result: BOOL = windows::Win32::System::Threading::SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
                         if result.0 == 0 { // Check the inner i32 value of BOOL; 0 is failure
                             println!("[WGC_CaptureThread] Failed to set thread priority to HIGHEST.");
                         } else {
