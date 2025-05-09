@@ -35,7 +35,7 @@ windows-sys = { version = "0.52", features = [
 # Added missing dependencies from error messages
 scrap = "0.5"
 windows-capture = "1.4.3"
-windows = { version = "0.56", features = [
+windows = { version = "0.56.0", features = [
     "Foundation",
     "Foundation_Metadata",
     "Graphics",
@@ -52,6 +52,7 @@ windows = { version = "0.56", features = [
     "Win32_Graphics_Dxgi_Common",
     "Win32_System_WinRT",
     "Win32_System_WinRT_Graphics_Capture",
+    "Win32_System_Threading",
 ] }
 
 
@@ -76,3 +77,4 @@ fsr3 = []
 
 [build-dependencies]
 # Add build dependencies here
+crossbeam-channel = "0.5"
