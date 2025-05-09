@@ -46,6 +46,8 @@ use windows_capture::capture::{Context, GraphicsCaptureApiHandler};
 use windows_capture::frame::Frame;
 use windows_capture::graphics_capture_api::InternalCaptureControl;
 use windows_capture::settings::{ColorFormat, Settings};
+use windows_capture::settings::cursor_capture_settings::CursorCaptureSettings;
+use windows_capture::settings::draw_border_settings::DrawBorderSettings;
 use windows_capture::window::Window;
 use windows_capture::monitor::Monitor;
 
@@ -596,13 +598,13 @@ fn start_wgc_capture_internal_setup(
 
     let capture_handler_flags = cb_sender.clone(); 
     
-    // Settings::new for windows-capture v1.4.3 (5 args, no Result)
+    // Create settings using struct initialization
     let settings = Settings {
         item: capture_item,
-        capture_cursor: false, // Boolean for cursor capture
-        draw_border: false,    // Boolean for border drawing
+        capture_cursor: false,  
+        draw_border: false,
         color_format: ColorFormat::Bgra8,
-        flags: capture_handler_flags
+        flags: capture_handler_flags,
     };
     
     Ok((worker_thread_handle, cb_sender, settings))
@@ -644,13 +646,13 @@ fn start_wgc_capture_monitor(
 
     let capture_handler_flags = cb_sender.clone(); 
     
-    // Settings::new for windows-capture v1.4.3 (5 args, no Result)
+    // Create settings using struct initialization
     let settings = Settings {
         item: monitor,
-        capture_cursor: false, // Boolean for cursor capture
-        draw_border: false,    // Boolean for border drawing
+        capture_cursor: false,
+        draw_border: false,
         color_format: ColorFormat::Bgra8,
-        flags: capture_handler_flags
+        flags: capture_handler_flags,
     };
     
     Ok((worker_thread_handle, cb_sender, settings))
