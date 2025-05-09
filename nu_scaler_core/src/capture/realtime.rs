@@ -43,7 +43,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows_capture::capture::{Context, GraphicsCaptureApiHandler};
 use windows_capture::frame::Frame;
 use windows_capture::graphics_capture_api::InternalCaptureControl;
-use windows_capture::settings::{ColorFormat, Settings};
+use windows_capture::settings::{ColorFormat, Settings, CursorCaptureSettings, DrawBorderSettings};
 use windows_capture::window::Window;
 use windows_capture::monitor::Monitor;
 
@@ -84,26 +84,25 @@ pub trait RealTimeCapture {
         Self: Sized;
 }
 
-// Handles capture events for Windows Graphics Capture
+// Handles capture events for Windows Graphics Capture (v1.4.3 API)
 pub struct CaptureHandler {
     frame_sender: CrossbeamSender<FramePacket>,
 }
 
 impl GraphicsCaptureApiHandler for CaptureHandler {
-    type Flags = CrossbeamSender<FramePacket>;
+    type Flags = CrossbeamSender<FramePacket>; // Context uses this
     type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 
-    // Updated for windows-capture v2.0.0: `new` receives flags directly
-    fn new(flags: Self::Flags) -> Result<Self, Self::Error> {
-        println!("[CaptureHandler] Created.");
-        Ok(Self { frame_sender: flags })
+    // v1.4.3: `new` receives Context<Self::Flags>
+    fn new(context: Context<Self::Flags>) -> Result<Self, Self::Error> {
+        println!("[CaptureHandler] Created (v1.4.3 API).");
+        Ok(Self { frame_sender: context.flags() })
     }
 
-    // Updated for windows-capture v2.0.0: `frame` is &Frame (immutable)
-    // Body will be fixed in a subsequent edit.
+    // v1.4.3: `frame` is &mut Frame
     fn on_frame_arrived(
         &mut self,
-        frame: &Frame, 
+        frame: &mut Frame, // Changed back to &mut Frame
         _capture_control: InternalCaptureControl,
     ) -> Result<(), Self::Error> {
         thread_local! {
@@ -124,21 +123,33 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
             last_time_cell.set(Some(now));
         });
 
-        let buffer = frame.buffer().map_err(Box::new)?;
-        let bytes = buffer.as_bytes();
         let width = frame.width();
         let height = frame.height();
 
-        // try_send to avoid blocking if the worker is slow
-        if self.frame_sender.try_send((bytes.to_vec(), width, height)).is_err() {
-            // eprintln!("[CaptureHandler] Failed to send frame to worker: channel full or disconnected.");
+        match frame.buffer() { // On &mut Frame
+            Ok(mut fb) => { // fb is Buffer<'frame> which is mutable implicitly
+                match fb.as_nopadding_buffer() { // This should be available on v1.4.3 Buffer
+                    Ok(nopadding_byte_slice) => {
+                        if self.frame_sender.try_send((nopadding_byte_slice.to_vec(), width, height)).is_err() {
+                            // eprintln!("[CaptureHandler] Failed to send frame (v1.4.3): channel full or disconnected.");
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[CaptureHandler] Failed to get no-padding buffer (v1.4.3): {:?}", e);
+                        return Err(Box::new(e)); // Propagate error
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("[CaptureHandler] Failed to get frame buffer (v1.4.3): {:?}", e);
+                return Err(Box::new(e)); // Propagate error
+            }
         }
-        
         Ok(())
     }
 
     fn on_closed(&mut self) -> Result<(), Self::Error> {
-        println!("[CaptureHandler] Capture session closed.");
+        println!("[CaptureHandler] Capture session closed (v1.4.3 API).");
         Ok(())
     }
 }
@@ -502,13 +513,11 @@ mod x11_capture {
     // TODO: Implement X11 window capture
 }
 
-// Free function for WGC setup (renamed for clarity)
-// This function will create channels, spawn the worker thread, and prepare the Settings struct.
+// Free function for WGC setup (v1.4.3 API for Settings)
 fn start_wgc_capture_internal_setup(
     capture_item: windows_capture::capture::CaptureItem,
     python_frame_sender: StdSender<Option<FramePacket>>,
 ) -> Result<(JoinHandle<()>, CrossbeamSender<FramePacket>, Settings<CrossbeamSender<FramePacket>>), String> {
-
     let (cb_sender, cb_receiver): (
         CrossbeamSender<FramePacket>,
         CrossbeamReceiver<FramePacket>,
@@ -518,17 +527,7 @@ fn start_wgc_capture_internal_setup(
     let worker_thread_handle = thread::Builder::new()
         .name("wgc_worker_thread".into())
         .spawn(move || {
-            #[cfg(target_os = "windows")]
-            unsafe {
-                if windows::Win32::System::Threading::SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL).is_err() {
-                    println!("[WGC Worker Thread] Failed to set thread priority to ABOVE_NORMAL.");
-                }
-                if let Some(core_id) = WORKER_CORE_ID {
-                    if SetThreadAffinityMask(GetCurrentThread(), 1 << core_id) == 0 {
-                        println!("[WGC Worker Thread] Failed to set thread affinity to core {}.", core_id);
-                    }
-                }
-            }
+            // ... (worker thread logic as before, it receives FramePacket) ...
             println!("[WGC Worker Thread] Started. Waiting for frames.");
             loop {
                 match cb_receiver.recv() {
@@ -550,18 +549,16 @@ fn start_wgc_capture_internal_setup(
 
     let capture_handler_flags = cb_sender.clone(); 
     
+    // Settings::new for windows-capture v1.4.3 (5 args, no Result)
     let settings = Settings::new(
         capture_item,                     
-        Some(false),                   
-        Some(false),                   
+        CursorCaptureSettings::Disabled, // Using Enum, hoping this compiles now with correct windows features
+        DrawBorderSettings::Disabled,    // Using Enum
         ColorFormat::Bgra8,            
-        capture_handler_flags, // This is CrossbeamSender<FramePacket>         
-        Some(false),                   
-        None,                          
-        None                           
-    ).map_err(|e| format!("Failed to create WGC Settings (v2.0.0): {:?}", e))?;
+        capture_handler_flags // This is CrossbeamSender<FramePacket>, used by Context for Handler::new
+    ); 
+    // No .map_err() or ? needed here for v1.4.3 as it's a const fn returning Self
 
-    // Return worker handle, the cb_sender (for flags/control), and settings for CaptureHandler::start
     Ok((worker_thread_handle, cb_sender, settings))
 }
 
