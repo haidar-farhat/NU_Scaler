@@ -46,6 +46,9 @@ windows = { version = "0.52.0", features = [
     "Win32_Graphics_Dxgi",
     "Win32_Graphics_Dxgi_Common",
     "Win32_System_Threading",
+    "Win32_System_WinRT",
+    "Win32_System_WinRT_Graphics_Capture",
+    "Security",
 ] }
 crossbeam-channel = "0.5"
 
