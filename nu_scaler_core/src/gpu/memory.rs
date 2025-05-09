@@ -12,6 +12,15 @@ use wgpu::{Buffer, BufferDescriptor, BufferUsages, CommandEncoderDescriptor, Dev
 #[cfg(target_os = "windows")]
 use windows::core::ComInterface;
 
+#[cfg(target_os = "windows")]
+use windows::Win32::Graphics::Dxgi::{
+    CreateDXGIFactory1,
+    IDXGIAdapter1,
+    IDXGIAdapter3,
+    DXGI_ADAPTER_DESC1,
+    DXGI_QUERY_VIDEO_MEMORY_INFO,
+};
+
 /// VRAM usage statistics
 #[derive(Debug, Clone)]
 pub struct VramStats {
@@ -400,67 +409,38 @@ impl MemoryPool {
     /// Query VRAM stats on Windows using DXGI
     #[cfg(target_os = "windows")]
     fn query_vram_windows(&self) -> Option<VramStats> {
-        use windows_sys::Win32::System::SystemInformation::MEMORYSTATUSEX;
-        use windows_sys::Win32::System::SystemInformation::GlobalMemoryStatusEx;
-        use windows::Win32::Graphics::Dxgi::{IDXGIFactory1, CreateDXGIFactory1, IDXGIAdapter1, DXGI_ADAPTER_DESC1};
-        // The ComInterface for .cast() should be in scope from top-level import
-
         unsafe {
-            // Create DXGI factory
-            let factory_result = CreateDXGIFactory1();
+            let factory_result: windows::core::Result<IDXGIFactory1> = CreateDXGIFactory1();
             if let Ok(factory) = factory_result {
-                // Get first adapter
-                if let Ok(adapter) = factory.EnumAdapters1(0) {
-                    // Try to get IDXGIAdapter3 for VRAM info
-                    let adapter3: Result<IDXGIAdapter1, _> = adapter.cast();
-                    if let Ok(adapter3) = adapter3 {
-                        let mut dedicated_vram: u64 = 0;
-                        let mut usage_vram: u64 = 0;
+                if let Ok(adapter1) = factory.EnumAdapters1(0) {
+                    let mut desc1: DXGI_ADAPTER_DESC1 = std::mem::zeroed();
+                    if adapter1.GetDesc1(&mut desc1).is_ok() {
+                        let total_mb = (desc1.DedicatedVideoMemory as f32) / (1024.0 * 1024.0);
+                        let mut used_mb = 0.0;
 
-                        // Get adapter description with properly created descriptor
-                        let mut desc = DXGI_ADAPTER_DESC1 {
-                            DedicatedVideoMemory: 0,
-                            ..Default::default()
-                        };
-                        if adapter.GetDesc(&mut desc).is_ok() {
-                            dedicated_vram = desc.DedicatedVideoMemory as u64;
+                        // Try to cast to IDXGIAdapter3 to use QueryVideoMemoryInfo
+                        if let Ok(adapter3) = adapter1.cast::<IDXGIAdapter3>() {
+                            let mut memory_info: DXGI_QUERY_VIDEO_MEMORY_INFO = std::mem::zeroed();
+                            // Assuming the first (0) node index for budget query
+                            if adapter3.QueryVideoMemoryInfo(0, windows::Win32::Graphics::Dxgi::DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &mut memory_info).is_ok() {
+                                used_mb = (memory_info.CurrentUsage as f32) / (1024.0 * 1024.0);
+                            }
+                        } else {
+                            // Fallback or logging if IDXGIAdapter3 is not available
+                            println!("[MemoryPool] Could not cast to IDXGIAdapter3 to query current VRAM usage. Used VRAM will be reported as 0.");
                         }
-
-                        // Get current usage with properly created memory info struct
-                        let mut budget = MEMORYSTATUSEX {
-                            dwLength: std::mem::size_of::<MEMORYSTATUSEX>() as u32,
-                            ..Default::default()
-                        };
-                        if adapter3
-                            .QueryVideoMemoryInfo(
-                                0,
-                                Dxgi::DXGI_MEMORY_SEGMENT_GROUP_LOCAL,
-                                &mut budget,
-                            )
-                            .is_ok()
-                        {
-                            usage_vram = budget.ullTotalPageFileUsage;
-                        }
-
-                        // Convert to MB
-                        let total_mb = dedicated_vram as f32 / (1024.0 * 1024.0);
-                        let used_mb = usage_vram as f32 / (1024.0 * 1024.0);
-                        let free_mb = total_mb - used_mb;
-
-                        let mut stats = self.stats.lock().unwrap();
-                        stats.total_mb = total_mb;
-                        stats.used_mb = used_mb;
-                        stats.free_mb = free_mb;
-                        stats.app_allocated_mb =
-                            self.allocated_bytes.load(Ordering::Relaxed) as f32 / (1024.0 * 1024.0);
-                        stats.timestamp = Instant::now();
-
-                        return Some(stats.clone());
+                        
+                        return Some(VramStats {
+                            total_mb,
+                            used_mb,
+                            free_mb: total_mb - used_mb,
+                            app_allocated_mb: self.allocated_bytes.load(Ordering::Relaxed) as f32 / (1024.0 * 1024.0),
+                            timestamp: Instant::now(),
+                        });
                     }
                 }
             }
         }
-
         None
     }
 
