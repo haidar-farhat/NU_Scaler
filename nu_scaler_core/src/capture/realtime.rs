@@ -7,6 +7,8 @@ use std::sync::mpsc::{self, Receiver as StdReceiver, Sender as StdSender};
 // use std::sync::Mutex; // This was unused, removing for now. Add back if needed for other parts.
 use std::thread::{self, JoinHandle};
 use std::time::Instant;
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 // +++ Added imports +++
 use std::cell::Cell; 
