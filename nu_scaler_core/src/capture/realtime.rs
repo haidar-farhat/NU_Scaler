@@ -5,6 +5,7 @@ use std::io::ErrorKind;
 use std::sync::mpsc; // Keep
 use std::sync::Mutex;
 use std::thread;
+use std::time::Instant;
 // use std::sync::mpsc::{Receiver, Sender}; // Remove unused Receiver, Sender (mpsc itself covers usage)
 use std::fs;
 // use uuid::Uuid; // Remove unused Uuid
@@ -74,17 +75,28 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         _capture_control: InternalCaptureControl
     ) -> Result<(), Self::Error>
     {
+        let total_start = Instant::now();
+
         let width = frame.width() as usize;
         let height = frame.height() as usize;
 
+        let get_buffer_start = Instant::now();
         // Access the frame buffer directly
         match frame.buffer() {
             Ok(mut fb) => {
+                let get_buffer_duration = get_buffer_start.elapsed();
+
+                let as_nopadding_start = Instant::now();
                 // Use as_nopadding_buffer() to get tightly packed pixel data.
                 match fb.as_nopadding_buffer() {
                     Ok(nopadding_byte_slice) => {
-                        let frame_data_to_send = nopadding_byte_slice.to_vec(); // Convert to owned Vec<u8>
+                        let as_nopadding_duration = as_nopadding_start.elapsed();
 
+                        let to_vec_start = Instant::now();
+                        let frame_data_to_send = nopadding_byte_slice.to_vec(); // Convert to owned Vec<u8>
+                        let to_vec_duration = to_vec_start.elapsed();
+
+                        let lock_send_start = Instant::now();
                         // Send the raw frame data (BGRA, tightly packed)
                         match self.frame_sender.lock() {
                             Ok(sender) => {
@@ -93,13 +105,32 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
                                 }
                             },
                             Err(poison_error) => {
+                                let lock_send_duration = lock_send_start.elapsed();
+                                let total_duration = total_start.elapsed();
+                                eprintln!(
+                                    "[CaptureHandler] TIMING: get_buffer: {:?}, as_nopadding: {:?}, to_vec: {:?}, lock_send_err: {:?}, TOTAL_ERR: {:?}",
+                                    get_buffer_duration, as_nopadding_duration, to_vec_duration, lock_send_duration, total_duration
+                                );
                                 let msg = format!("Mutex poisoned during frame send: {}", poison_error);
                                 eprintln!("[CaptureHandler] FATAL: {}", msg);
                                 return Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, msg)));
                             }
                         }
+                        let lock_send_duration = lock_send_start.elapsed();
+                        let total_duration = total_start.elapsed();
+                        // Simple println for now, consider a more structured logging approach later
+                        println!(
+                            "[CaptureHandler] TIMING: get_buffer: {:?}, as_nopadding: {:?}, to_vec: {:?}, lock_send: {:?}, TOTAL: {:?}",
+                            get_buffer_duration, as_nopadding_duration, to_vec_duration, lock_send_duration, total_duration
+                        );
                     }
                     Err(e) => {
+                        let as_nopadding_duration = as_nopadding_start.elapsed();
+                        let total_duration = total_start.elapsed();
+                        eprintln!(
+                            "[CaptureHandler] TIMING: get_buffer: {:?}, as_nopadding_ERR: {:?}, TOTAL_ERR: {:?}",
+                            get_buffer_duration, as_nopadding_duration, total_duration
+                        );
                         eprintln!("[CaptureHandler] Failed to get no-padding buffer: {:?}", e);
                         // Optionally send nothing or an error indicator, or just skip the frame.
                         // For now, just skip if we can't get the buffer correctly.
@@ -107,6 +138,12 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
                 }
             }
             Err(e) => {
+                let get_buffer_duration = get_buffer_start.elapsed();
+                let total_duration = total_start.elapsed();
+                eprintln!(
+                    "[CaptureHandler] TIMING: get_buffer_ERR: {:?}, TOTAL_ERR: {:?}",
+                    get_buffer_duration, total_duration
+                );
                 // Failed to get buffer from the frame. Log and return error.
                 eprintln!("[CaptureHandler] Failed to get frame buffer: {:?}", e);
                 // Convert the windows_capture error into the required boxed error type.
