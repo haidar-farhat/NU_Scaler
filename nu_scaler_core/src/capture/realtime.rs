@@ -45,6 +45,7 @@ use windows_capture::frame::Frame;
 use windows_capture::graphics_capture_api::InternalCaptureControl;
 use windows_capture::settings::{ColorFormat, Settings};
 use windows_capture::window::Window;
+use windows_capture::monitor::Monitor;
 
 /* // Remove block of unused windows imports
 use windows::Graphics::Capture::{
@@ -55,9 +56,12 @@ use windows::Win32::Graphics::Direct3D11::{ID3D11Texture2D}; // Marked as unused
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM; // Marked as unused
 */
 
-// Define a type for the data passed through the crossbeam channel
-// Option is used to signal shutdown (None)
-type FramePacket = Option<(Vec<u8>, usize, usize)>;
+// Constants for thread affinity (optional)
+const CAPTURE_CORE_ID: Option<usize> = None; // Example: Some(2) to pin to core 2
+const WORKER_CORE_ID: Option<usize> = None;  // Example: Some(3) to pin to core 3
+
+// Channel packet type update
+type FramePacket = (Vec<u8>, u32, u32); // (data, width, height)
 
 #[derive(Debug, Clone)]
 pub enum CaptureTarget {
@@ -82,84 +86,36 @@ pub trait RealTimeCapture {
 
 // Handles capture events for Windows Graphics Capture
 pub struct CaptureHandler {
-    frame_sender: CrossbeamSender<Vec<u8>>, // To send frame data to the worker thread
-    // last_frame_time: Cell<Option<Instant>>, // Already using thread_local for interval logging
-    worker_thread_handle: Option<JoinHandle<()>>,
-    // No context needed here directly for v2.0.0 new()
+    frame_sender: CrossbeamSender<FramePacket>,
 }
 
 impl GraphicsCaptureApiHandler for CaptureHandler {
-    type Flags = CrossbeamSender<Vec<u8>>; // Flags are the sender instance
+    type Flags = CrossbeamSender<FramePacket>;
     type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 
     // Updated for windows-capture v2.0.0: `new` receives flags directly
     fn new(flags: Self::Flags) -> Result<Self, Self::Error> {
-        println!("[CaptureHandler] Created with flags (crossbeam_sender passed as flags).");
-        
-        // The worker thread is now spawned by the main logic that calls WGC start,
-        // and its handle might be passed or managed differently if needed by the handler itself.
-        // For now, the handler primarily uses the sender flag.
-        Ok(Self {
-            frame_sender: flags,
-            worker_thread_handle: None, // Worker handle is managed outside now
-        })
+        println!("[CaptureHandler] Created.");
+        Ok(Self { frame_sender: flags })
     }
 
     // Updated for windows-capture v2.0.0: `frame` is &Frame (immutable)
+    // Body will be fixed in a subsequent edit.
     fn on_frame_arrived(
         &mut self,
-        frame: &Frame, // Changed from &mut Frame to &Frame
-        capture_control: InternalCaptureControl,
+        frame: &Frame, 
+        _capture_control: InternalCaptureControl,
     ) -> Result<(), Self::Error> {
-        thread_local! {
-            static LAST_FRAME_ARRIVAL_TIME_CONSOLE_LOG: Cell<Option<Instant>> = Cell::new(None);
-        }
-        let now = Instant::now();
-        LAST_FRAME_ARRIVAL_TIME_CONSOLE_LOG.with(|last_time_cell| {
-            if let Some(last_time) = last_time_cell.get() {
-                let delta = now.duration_since(last_time);
-                println!(
-                    "[CaptureHandler::on_frame_arrived] Interval: {:?}, Approx FPS: {:.2}",
-                    delta,
-                    1.0 / delta.as_secs_f64()
-                );
-            }
-            last_time_cell.set(Some(now));
-        });
-
-        // Access the frame buffer (this might change if Frame API for buffer access changed)
-        // Assuming frame.buffer() still returns a Result<Buffer, _> and Buffer has to_bytes()
-        match frame.buffer() { // frame.buffer() on &Frame might work if it clones or gives a view
-            Ok(buffer) => {
-                // Assuming buffer.to_bytes() or similar method exists and is cheap enough
-                // or that we are okay with a copy here if unavoidable.
-                // For v2.0.0, frame.buffer() returns Result<WindowsCaptureBuffer, Error>
-                // and WindowsCaptureBuffer can be converted to &[u8]
-                let bytes = buffer.as_bytes()?; // Assuming as_bytes() returns Result<&[u8], Error> or similar
-                                            // and our error type is compatible or we .map_err()
-                if self.frame_sender.try_send(bytes.to_vec()).is_err() {
-                    // Optional: log if the channel is full, indicating worker thread is falling behind
-                    // println!("[CaptureHandler] Failed to send frame to worker: channel full or disconnected.");
-                }
-            }
-            Err(e) => {
-                println!("[CaptureHandler::on_frame_arrived] Failed to get frame buffer: {:?}", e);
-                // Decide if this error should stop capture or just be logged
-                // return Err(Box::new(e) as Self::Error); // Example: propagate error
-            }
-        }
+        // Placeholder - real logic to be added next
+        // println!("[CaptureHandler::on_frame_arrived] Frame w: {}, h: {}", frame.width(), frame.height());
+        // let buffer = frame.buffer()?;
+        // let bytes = buffer.as_bytes();
+        // self.frame_sender.try_send((bytes.to_vec(), frame.width(), frame.height())).ok();
         Ok(())
     }
 
     fn on_closed(&mut self) -> Result<(), Self::Error> {
         println!("[CaptureHandler] Capture session closed.");
-        // Signal worker thread to stop if it's managed by the handler and join it.
-        // However, in our current design, the worker thread lifecycle is tied to the main WGC start/stop.
-        // If the frame_sender is dropped, the worker will naturally exit its loop.
-        if let Some(handle) = self.worker_thread_handle.take() {
-            println!("[CaptureHandler] Joining worker thread from on_closed.");
-            let _ = handle.join(); // Ignore join error for now
-        }
         Ok(())
     }
 }
@@ -289,7 +245,7 @@ impl ScreenCapture {
             .map_err(|e| format!("Window '{}' not found or error: {:?}", title, e))?;
 
         // Channel for CaptureHandler (fast, lock-free) -> WGC Worker Thread
-        let (cb_sender, cb_receiver): (CrossbeamSender<Vec<u8>>, CrossbeamReceiver<Vec<u8>>) = crossbeam_channel::unbounded();
+        let (cb_sender, cb_receiver): (CrossbeamSender<FramePacket>, CrossbeamReceiver<FramePacket>) = crossbeam_channel::unbounded();
         
         // Channel for WGC Worker Thread -> Python consumer (standard mpsc)
         let (py_sender, py_receiver): (StdSender<FramePacket>, StdReceiver<FramePacket>) = mpsc::channel();
@@ -317,7 +273,7 @@ impl ScreenCapture {
                         Ok(frame_data) => {
                             // Process/forward to Python consumer
                             // println!("[WGC Worker Thread] Received frame {}x{}, sending to Python channel.", width, height);
-                            if worker_thread_py_sender.send(Some((frame_data, 0, 0))).is_err() {
+                            if worker_thread_py_sender.send(Some(frame_data)).is_err() {
                                 eprintln!("[WGC Worker Thread] Python mpsc receiver disconnected. Stopping.");
                                 break;
                             }
