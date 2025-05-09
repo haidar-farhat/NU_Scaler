@@ -190,6 +190,50 @@ class FullScreenDisplayWindow(QWidget):
     def get_current_overlay_text(self): # Helper for LiveFeedScreen if needed
         return self.preview_widget._overlay_text
 
+class CornerOverlayWindow(QWidget):
+    """Window to display upscaled content in a corner while allowing click-through to the desktop"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("NuScaler - Corner Overlay")
+        # Set flags for click-through, always-on-top window with no frame
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)  # Makes the window click-through
+        
+        # Create layout with no margins for the preview
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self.preview_widget = AspectRatioPreview(self)
+        self._layout.addWidget(self.preview_widget)
+        self.setLayout(self._layout)
+        
+        # Set the default position and size (bottom-right corner, 25% of screen)
+        screen = QApplication.primaryScreen().size()
+        width = screen.width() // 4
+        height = screen.height() // 4
+        self.resize(width, height)
+        self.move(screen.width() - width, screen.height() - height)
+        
+        # We don't connect doubleClicked here since the window is click-through
+        # However, we'll add a close shortcut
+        self.close_shortcut = QShortcut(QKeySequence(Qt.Key_Escape), self)
+        self.close_shortcut.activated.connect(self.close)
+
+    def set_pixmap(self, pixmap: QPixmap):
+        if pixmap and not pixmap.isNull():
+            self.preview_widget.set_pixmap(pixmap)
+        else:
+            self.preview_widget.set_pixmap(QPixmap())  # Clear
+
+    def set_overlay(self, text: str):
+        self.preview_widget.set_overlay(text)
+
+    def get_current_pixmap(self):
+        return self.preview_widget._pixmap
+
+    def get_current_overlay_text(self):
+        return self.preview_widget._overlay_text
+
 class UpscaleWorker(QObject):
     finished = Signal(bytes, int, int, float, str, float)
     error = Signal(str)
@@ -284,6 +328,8 @@ class LiveFeedScreen(QWidget):
         self._last_in_h = None
         self._last_scale = None
         self.fullscreen_display_window = None # For dedicated fullscreen output
+        self.corner_overlay_window = None # For corner overlay output
+        self.display_mode = "embedded" # "embedded", "fullscreen", or "corner"
         print('[DEBUG] LiveFeedScreen: Before init_ui')
         self.init_ui()
         print('[DEBUG] LiveFeedScreen: After init_ui')
@@ -446,6 +492,14 @@ class LiveFeedScreen(QWidget):
         self.start_stop_shortcut.activated.connect(self.toggle_start_stop)
         # Placeholder for hotkey customization in settings
         # TODO: Integrate with settings dialog/config
+
+        # Output display mode controls
+        self.display_btn = QPushButton("Fullscreen Mode")
+        self.display_btn.setToolTip("Toggle between display modes (embedded, fullscreen, corner overlay)")
+        self.display_btn.clicked.connect(self.toggle_display_mode)
+        
+        # Add to form layout
+        form.addRow("Display Mode:", self.display_btn)
 
     def update_source_ui(self, text):
         self.target_box.clear()
@@ -1110,10 +1164,13 @@ class LiveFeedScreen(QWidget):
                 
                 self.last_frame_time = time.perf_counter()
 
-                # Update dedicated fullscreen window if it's active
-                if self.fullscreen_display_window and self.fullscreen_display_window.isVisible():
+                # Update display windows based on current mode
+                if self.display_mode == "fullscreen" and self.fullscreen_display_window and self.fullscreen_display_window.isVisible():
                     self.fullscreen_display_window.set_pixmap(pixmap)
                     self.fullscreen_display_window.set_overlay(overlay)
+                elif self.display_mode == "corner" and self.corner_overlay_window and self.corner_overlay_window.isVisible():
+                    self.corner_overlay_window.set_pixmap(pixmap)
+                    self.corner_overlay_window.set_overlay(overlay)
 
             except Exception as e:
                 print(f"[ERROR] Failed to update output preview: {e}")
@@ -1137,33 +1194,110 @@ class LiveFeedScreen(QWidget):
             self.stop_capture()
 
     def handle_dedicated_fullscreen_toggle(self):
-        if self.fullscreen_display_window and self.fullscreen_display_window.isVisible():
-            self.fullscreen_display_window.hide()
-            # Restore embedded preview if it was changed
-            self.output_preview.set_overlay(self.fullscreen_display_window.get_current_overlay_text()) # Restore overlay
-            self.output_preview.set_pixmap(self.fullscreen_display_window.get_current_pixmap()) # Restore pixmap
-            if hasattr(self.output_preview, '_original_text_when_fullscreen'):
-                del self.output_preview._original_text_when_fullscreen # Clean up temporary attribute
+        # This is the original fullscreen toggle - kept for backward compatibility
+        # Instead we'll delegate to the more flexible toggle_display_mode
+        self.toggle_display_mode("fullscreen")
 
-        else:
+    def toggle_display_mode(self, mode=None):
+        """Toggle between embedded, fullscreen, and corner overlay display modes
+        
+        Args:
+            mode (str, optional): Force a specific mode ("embedded", "fullscreen", "corner")
+                                 If None, cycles through modes
+        """
+        current_mode = self.display_mode
+        
+        # If no mode specified, cycle to the next one
+        if mode is None:
+            if current_mode == "embedded":
+                mode = "fullscreen"
+            elif current_mode == "fullscreen":
+                mode = "corner"
+            else:  # "corner"
+                mode = "embedded"
+        
+        # Exit current mode
+        if current_mode == "fullscreen" and self.fullscreen_display_window and self.fullscreen_display_window.isVisible():
+            self.fullscreen_display_window.hide()
+            # Restore embedded preview 
+            if self.fullscreen_display_window.get_current_overlay_text():
+                self.output_preview.set_overlay(self.fullscreen_display_window.get_current_overlay_text())
+            if self.fullscreen_display_window.get_current_pixmap():
+                self.output_preview.set_pixmap(self.fullscreen_display_window.get_current_pixmap())
+            if hasattr(self.output_preview, '_original_text_when_fullscreen'):
+                del self.output_preview._original_text_when_fullscreen
+                
+        elif current_mode == "corner" and self.corner_overlay_window and self.corner_overlay_window.isVisible():
+            self.corner_overlay_window.hide()
+            # Restore embedded preview
+            if self.corner_overlay_window.get_current_overlay_text():
+                self.output_preview.set_overlay(self.corner_overlay_window.get_current_overlay_text())
+            if self.corner_overlay_window.get_current_pixmap():
+                self.output_preview.set_pixmap(self.corner_overlay_window.get_current_pixmap())
+            if hasattr(self.output_preview, '_original_text_when_corner'):
+                del self.output_preview._original_text_when_corner
+        
+        # Enter new mode
+        self.display_mode = mode
+        
+        if mode == "embedded":
+            self.display_btn.setText("Fullscreen Mode")
+            # Ensure overlay window is hidden and main preview is visible
+            if self.fullscreen_display_window:
+                self.fullscreen_display_window.hide()
+            if self.corner_overlay_window:
+                self.corner_overlay_window.hide()
+            
+        elif mode == "fullscreen":
+            self.display_btn.setText("Corner Mode")
+            
             if not self.fullscreen_display_window:
                 self.fullscreen_display_window = FullScreenDisplayWindow()
-            # Get current content from the embedded preview to show in fullscreen
-            current_pixmap = self.output_preview._pixmap 
+                
+            # Get current content from embedded preview
+            current_pixmap = self.output_preview._pixmap
             current_overlay_text = self.output_preview._overlay_text
-
+            
             if current_pixmap and not current_pixmap.isNull():
                 self.fullscreen_display_window.set_pixmap(current_pixmap)
-            else: # If no valid pixmap, show a blank or default one
+            else:
                 self.fullscreen_display_window.set_pixmap(QPixmap())
+                
             self.fullscreen_display_window.set_overlay(current_overlay_text)
             self.fullscreen_display_window.showFullScreen()
-
-            # Optionally, change the embedded preview's appearance
-            self.output_preview._original_text_when_fullscreen = current_overlay_text # Store for restoration
-            self.output_preview.set_pixmap(QPixmap()) # Clear embedded pixmap
-            self.output_preview.set_overlay("Output in dedicated window\n(Double-click here or Esc in window to exit)")
-
+            
+            # Change embedded preview appearance
+            self.output_preview._original_text_when_fullscreen = current_overlay_text
+            self.output_preview.set_pixmap(QPixmap())
+            self.output_preview.set_overlay("Output in fullscreen mode\n(Press Esc to exit)")
+            
+        elif mode == "corner":
+            self.display_btn.setText("Embedded Mode")
+            
+            if not self.corner_overlay_window:
+                self.corner_overlay_window = CornerOverlayWindow()
+                
+            # Get current content from embedded preview
+            current_pixmap = self.output_preview._pixmap
+            current_overlay_text = self.output_preview._overlay_text
+            
+            if current_pixmap and not current_pixmap.isNull():
+                self.corner_overlay_window.set_pixmap(current_pixmap)
+            else:
+                self.corner_overlay_window.set_pixmap(QPixmap())
+                
+            self.corner_overlay_window.set_overlay(current_overlay_text)
+            self.corner_overlay_window.show()
+            
+            # Change embedded preview appearance
+            self.output_preview._original_text_when_corner = current_overlay_text
+            self.output_preview.set_pixmap(QPixmap())
+            self.output_preview.set_overlay("Output in corner overlay mode\n(Press Esc to exit)")
+            
+        print(f"[LiveFeedScreen] Display mode changed to: {mode}")
+        if hasattr(self, 'log_signal') and self.log_signal is not None:
+            self.log_signal.emit(f"Display mode: {mode}")
+            
     def toggle_interpolation(self, checked):
         self.interpolation_enabled = checked
         self.prev_frame_data = None # Reset on toggle to ensure clean start
