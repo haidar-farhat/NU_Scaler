@@ -80,31 +80,37 @@ pub trait RealTimeCapture {
         Self: Sized;
 }
 
-// --- windows-capture Handler Implementation ---
-struct CaptureHandler {
-    // This sender is now a crossbeam_channel sender for high-speed, lock-free handoff
-    frame_sender: CrossbeamSender<FramePacket>,
+// Handles capture events for Windows Graphics Capture
+pub struct CaptureHandler {
+    frame_sender: CrossbeamSender<Vec<u8>>, // To send frame data to the worker thread
+    // last_frame_time: Cell<Option<Instant>>, // Already using thread_local for interval logging
+    worker_thread_handle: Option<JoinHandle<()>>,
+    // No context needed here directly for v2.0.0 new()
 }
 
-// Implement the correct trait from windows-capture v1.4
 impl GraphicsCaptureApiHandler for CaptureHandler {
-    // The Flags type for windows-capture context is now our crossbeam_channel Sender
-    type Flags = CrossbeamSender<FramePacket>;
-    type Error = Box<dyn std::error::Error + Send + Sync>;
+    type Flags = CrossbeamSender<Vec<u8>>; // Flags are the sender instance
+    type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 
-    // Use the required `new` method signature
-    fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
-        // ctx.flags is the CrossbeamSender passed in during Settings creation
-        Ok(Self { frame_sender: ctx.flags })
+    // Updated for windows-capture v2.0.0: `new` receives flags directly
+    fn new(flags: Self::Flags) -> Result<Self, Self::Error> {
+        println!("[CaptureHandler] Created with flags (crossbeam_sender passed as flags).");
+        
+        // The worker thread is now spawned by the main logic that calls WGC start,
+        // and its handle might be passed or managed differently if needed by the handler itself.
+        // For now, the handler primarily uses the sender flag.
+        Ok(Self {
+            frame_sender: flags,
+            worker_thread_handle: None, // Worker handle is managed outside now
+        })
     }
 
+    // Updated for windows-capture v2.0.0: `frame` is &Frame (immutable)
     fn on_frame_arrived(
         &mut self,
-        frame: &mut Frame,
-        _capture_control: InternalCaptureControl
-    ) -> Result<(), Self::Error>
-    {
-        // +++ Start of on_frame_arrived interval logging (to console via println!) +++
+        frame: &Frame, // Changed from &mut Frame to &Frame
+        capture_control: InternalCaptureControl,
+    ) -> Result<(), Self::Error> {
         thread_local! {
             static LAST_FRAME_ARRIVAL_TIME_CONSOLE_LOG: Cell<Option<Instant>> = Cell::new(None);
         }
@@ -112,87 +118,51 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         LAST_FRAME_ARRIVAL_TIME_CONSOLE_LOG.with(|last_time_cell| {
             if let Some(last_time) = last_time_cell.get() {
                 let delta = now.duration_since(last_time);
-                // Ensure this println! is very unlikely to be missed or buffered away indefinitely.
-                // Adding a more prominent tag.
-                println!("RUST_CONSOLE_LOG [CaptureHandler::on_frame_arrived] Interval since last call: {:?}", delta);
-            } else {
-                println!("RUST_CONSOLE_LOG [CaptureHandler::on_frame_arrived] First call.");
+                println!(
+                    "[CaptureHandler::on_frame_arrived] Interval: {:?}, Approx FPS: {:.2}",
+                    delta,
+                    1.0 / delta.as_secs_f64()
+                );
             }
             last_time_cell.set(Some(now));
         });
-        // +++ End of on_frame_arrived interval logging (to console via println!) +++
 
-        let total_start = Instant::now(); // This is for timing the work *within* on_frame_arrived
-
-        let width = frame.width() as usize;
-        let height = frame.height() as usize;
-
-        let get_buffer_start = Instant::now();
-        match frame.buffer() {
-            Ok(mut fb) => {
-                let get_buffer_duration = get_buffer_start.elapsed();
-                let as_nopadding_start = Instant::now();
-                match fb.as_nopadding_buffer() {
-                    Ok(nopadding_byte_slice) => {
-                        let as_nopadding_duration = as_nopadding_start.elapsed();
-                        let to_vec_start = Instant::now();
-                        // This to_vec() is still here, but the subsequent send is much faster.
-                        // Ideally, if windows-capture could give an owned buffer that is Send,
-                        // we could defer this. For now, let's assume to_vec() is necessary
-                        // to make FramePacket Send-able.
-                        let frame_data = nopadding_byte_slice.to_vec();
-                        let to_vec_duration = to_vec_start.elapsed();
-
-                        let send_start = Instant::now();
-                        // Send to the crossbeam channel. This should be very fast and non-blocking (if unbounded).
-                        if self.frame_sender.send(Some((frame_data, width, height))).is_err() {
-                            // Receiver likely dropped, means worker thread shut down or WGC is stopping.
-                            eprintln!("[CaptureHandler] Crossbeam receiver disconnected during frame send.");
-                            // This might signal that the capture session should terminate.
-                            // The windows-capture crate might handle this by eventually calling on_closed.
-                        }
-                        let send_duration = send_start.elapsed();
-                        let total_duration = total_start.elapsed();
-                        println!(
-                            "[CaptureHandler] TIMING: get_buffer: {:?}, as_nopadding: {:?}, to_vec: {:?}, crossbeam_send: {:?}, TOTAL: {:?}",
-                            get_buffer_duration, as_nopadding_duration, to_vec_duration, send_duration, total_duration
-                        );
-                    }
-                    Err(e) => {
-                        let as_nopadding_duration = as_nopadding_start.elapsed();
-                        let total_duration = total_start.elapsed();
-                        eprintln!(
-                            "[CaptureHandler] TIMING: get_buffer: {:?}, as_nopadding_ERR: {:?}, TOTAL_ERR: {:?}",
-                            get_buffer_duration, as_nopadding_duration, total_duration
-                        );
-                        eprintln!("[CaptureHandler] Failed to get no-padding buffer: {:?}", e);
-                    }
+        // Access the frame buffer (this might change if Frame API for buffer access changed)
+        // Assuming frame.buffer() still returns a Result<Buffer, _> and Buffer has to_bytes()
+        match frame.buffer() { // frame.buffer() on &Frame might work if it clones or gives a view
+            Ok(buffer) => {
+                // Assuming buffer.to_bytes() or similar method exists and is cheap enough
+                // or that we are okay with a copy here if unavoidable.
+                // For v2.0.0, frame.buffer() returns Result<WindowsCaptureBuffer, Error>
+                // and WindowsCaptureBuffer can be converted to &[u8]
+                let bytes = buffer.as_bytes()?; // Assuming as_bytes() returns Result<&[u8], Error> or similar
+                                            // and our error type is compatible or we .map_err()
+                if self.frame_sender.try_send(bytes.to_vec()).is_err() {
+                    // Optional: log if the channel is full, indicating worker thread is falling behind
+                    // println!("[CaptureHandler] Failed to send frame to worker: channel full or disconnected.");
                 }
             }
             Err(e) => {
-                let get_buffer_duration = get_buffer_start.elapsed();
-                let total_duration = total_start.elapsed();
-                eprintln!(
-                    "[CaptureHandler] TIMING: get_buffer_ERR: {:?}, TOTAL_ERR: {:?}",
-                    get_buffer_duration, total_duration
-                );
-                eprintln!("[CaptureHandler] Failed to get frame buffer: {:?}", e);
-                return Err(Box::new(e));
+                println!("[CaptureHandler::on_frame_arrived] Failed to get frame buffer: {:?}", e);
+                // Decide if this error should stop capture or just be logged
+                // return Err(Box::new(e) as Self::Error); // Example: propagate error
             }
         }
         Ok(())
     }
 
     fn on_closed(&mut self) -> Result<(), Self::Error> {
-        println!("[CaptureHandler] Capture session closed (on_closed called).");
-        // Signal worker thread to stop by sending None through the crossbeam channel
-        if self.frame_sender.send(None).is_err() {
-            eprintln!("[CaptureHandler] Crossbeam receiver already disconnected on_closed.");
+        println!("[CaptureHandler] Capture session closed.");
+        // Signal worker thread to stop if it's managed by the handler and join it.
+        // However, in our current design, the worker thread lifecycle is tied to the main WGC start/stop.
+        // If the frame_sender is dropped, the worker will naturally exit its loop.
+        if let Some(handle) = self.worker_thread_handle.take() {
+            println!("[CaptureHandler] Joining worker thread from on_closed.");
+            let _ = handle.join(); // Ignore join error for now
         }
         Ok(())
     }
 }
-// --- End Handler ---
 
 pub struct ScreenCapture {
     running: bool,
@@ -319,7 +289,7 @@ impl ScreenCapture {
             .map_err(|e| format!("Window '{}' not found or error: {:?}", title, e))?;
 
         // Channel for CaptureHandler (fast, lock-free) -> WGC Worker Thread
-        let (cb_sender, cb_receiver): (CrossbeamSender<FramePacket>, CrossbeamReceiver<FramePacket>) = crossbeam_channel::unbounded();
+        let (cb_sender, cb_receiver): (CrossbeamSender<Vec<u8>>, CrossbeamReceiver<Vec<u8>>) = crossbeam_channel::unbounded();
         
         // Channel for WGC Worker Thread -> Python consumer (standard mpsc)
         let (py_sender, py_receiver): (StdSender<FramePacket>, StdReceiver<FramePacket>) = mpsc::channel();
@@ -344,10 +314,10 @@ impl ScreenCapture {
                 println!("[WGC Worker Thread] Started. Waiting for frames from crossbeam channel...");
                 loop {
                     match cb_receiver.recv() { // Blocking receive from crossbeam
-                        Ok(Some((frame_data, width, height))) => {
+                        Ok(frame_data) => {
                             // Process/forward to Python consumer
                             // println!("[WGC Worker Thread] Received frame {}x{}, sending to Python channel.", width, height);
-                            if worker_thread_py_sender.send(Some((frame_data, width, height))).is_err() {
+                            if worker_thread_py_sender.send(Some((frame_data, 0, 0))).is_err() {
                                 eprintln!("[WGC Worker Thread] Python mpsc receiver disconnected. Stopping.");
                                 break;
                             }
