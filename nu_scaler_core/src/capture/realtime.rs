@@ -43,7 +43,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows_capture::capture::{Context, GraphicsCaptureApiHandler};
 use windows_capture::frame::Frame;
 use windows_capture::graphics_capture_api::InternalCaptureControl;
-use windows_capture::settings::{ColorFormat, CursorCaptureSettings, DrawBorderSettings, Settings};
+use windows_capture::settings::{ColorFormat, CursorCaptureSettings, DrawBorderSettings, Settings, CaptureSettings};
 use windows_capture::window::Window;
 
 /* // Remove block of unused windows imports
@@ -373,17 +373,26 @@ impl ScreenCapture {
         // --- Prepare and Start windows-capture API ---
         // The `cb_sender` is given to `CaptureHandler` via `Settings` flags.
         let capture_handler_flags = cb_sender; 
+
+        // +++ Construct CaptureSettings struct +++
+        let capture_settings = CaptureSettings {
+            cursor_capture: CursorCaptureSettings::Disabled,
+            draw_border: DrawBorderSettings::Disabled,
+            capture_area: None, // Or Some(CaptureArea::ClientArea) or a specific rect if needed
+        };
+
         let settings = Settings::new(
-            window,
-            // Corrected: Using direct variant name, relying on 'use' statement
-            CursorCaptureSettings::Disabled,
-            DrawBorderSettings::Disabled,
+            window, // This is GraphicsCaptureItem (Window implements Into<GraphicsCaptureItem>)
+            capture_handler_flags, // These are the ContextFlags
             ColorFormat::Bgra8,
-            capture_handler_flags, // Pass the crossbeam sender here
-        );
+            capture_settings, // Pass the constructed CaptureSettings struct here
+            false, // force_surface_sharing
+            std::ptr::null_mut(), // raw_d3d_device (usually null unless you have specific interop needs)
+            None // timeout_ms for AcquireNextFrame, None uses crate default (e.g. 100ms)
+        ).map_err(|e| format!("Failed to create WGC Settings: {:?}", e))?;
+
         // Example for capture_area if you want to test cropping later:
         // use windows_capture::settings::CaptureArea;
-        // settings.set_capture_area(CaptureArea::ClientArea); // Or specific rect
 
         let capture_thread_handle = thread::Builder::new()
             .name("wgc_capture_api_thread".to_string())
