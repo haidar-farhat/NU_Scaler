@@ -80,27 +80,29 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         // Access the frame buffer directly
         match frame.buffer() {
             Ok(mut fb) => {
-                // Use the actual public method: as_raw_buffer()
-                let raw_byte_slice: &mut [u8] = fb.as_raw_buffer();
-                let frame_data_to_send = raw_byte_slice.to_vec(); // Convert to owned Vec<u8>
+                // Use as_nopadding_buffer() to get tightly packed pixel data.
+                match fb.as_nopadding_buffer() {
+                    Ok(nopadding_byte_slice) => {
+                        let frame_data_to_send = nopadding_byte_slice.to_vec(); // Convert to owned Vec<u8>
 
-                // Send the raw frame data (BGRA, as per underlying capture API)
-                match self.frame_sender.lock() {
-                    Ok(sender) => {
-                        if sender.send(Some((frame_data_to_send, width, height))).is_err() {
-                            // Receiver disconnected, likely means capture was stopped.
-                            // It's okay to just log this, as the closing mechanism handles shutdown.
-                            eprintln!("[CaptureHandler] Receiver disconnected during frame send.");
-                            // Optionally return an error or signal stop more formally if needed
-                            // return Err(Box::new(std::io::Error::new(ErrorKind::BrokenPipe, "Receiver disconnected")));
+                        // Send the raw frame data (BGRA, tightly packed)
+                        match self.frame_sender.lock() {
+                            Ok(sender) => {
+                                if sender.send(Some((frame_data_to_send, width, height))).is_err() {
+                                    eprintln!("[CaptureHandler] Receiver disconnected during frame send.");
+                                }
+                            },
+                            Err(poison_error) => {
+                                let msg = format!("Mutex poisoned during frame send: {}", poison_error);
+                                eprintln!("[CaptureHandler] FATAL: {}", msg);
+                                return Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, msg)));
+                            }
                         }
-                    },
-                    Err(poison_error) => {
-                        // Mutex poisoning is serious, indicates a panic while locked.
-                        let msg = format!("Mutex poisoned during frame send: {}", poison_error);
-                        eprintln!("[CaptureHandler] FATAL: {}", msg);
-                        // Return an error to potentially stop the capture thread cleanly.
-                        return Err(Box::new(std::io::Error::new(ErrorKind::Other, msg)));
+                    }
+                    Err(e) => {
+                        eprintln!("[CaptureHandler] Failed to get no-padding buffer: {:?}", e);
+                        // Optionally send nothing or an error indicator, or just skip the frame.
+                        // For now, just skip if we can't get the buffer correctly.
                     }
                 }
             }
