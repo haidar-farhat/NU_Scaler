@@ -106,11 +106,34 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         frame: &Frame, 
         _capture_control: InternalCaptureControl,
     ) -> Result<(), Self::Error> {
-        // Placeholder - real logic to be added next
-        // println!("[CaptureHandler::on_frame_arrived] Frame w: {}, h: {}", frame.width(), frame.height());
-        // let buffer = frame.buffer()?;
-        // let bytes = buffer.as_bytes();
-        // self.frame_sender.try_send((bytes.to_vec(), frame.width(), frame.height())).ok();
+        thread_local! {
+            static LAST_FRAME_ARRIVAL_TIME_CONSOLE_LOG: Cell<Option<Instant>> = Cell::new(None);
+        }
+        let now = Instant::now();
+        LAST_FRAME_ARRIVAL_TIME_CONSOLE_LOG.with(|last_time_cell| {
+            if let Some(last_time) = last_time_cell.get() {
+                let delta = now.duration_since(last_time);
+                if delta.as_secs_f64() > 0.0 {
+                    println!(
+                        "RUST_CONSOLE_LOG [CaptureHandler::on_frame_arrived] Interval: {:?}, Approx FPS: {:.2}",
+                        delta,
+                        1.0 / delta.as_secs_f64()
+                    );
+                }
+            }
+            last_time_cell.set(Some(now));
+        });
+
+        let buffer = frame.buffer().map_err(Box::new)?;
+        let bytes = buffer.as_bytes();
+        let width = frame.width();
+        let height = frame.height();
+
+        // try_send to avoid blocking if the worker is slow
+        if self.frame_sender.try_send((bytes.to_vec(), width, height)).is_err() {
+            // eprintln!("[CaptureHandler] Failed to send frame to worker: channel full or disconnected.");
+        }
+        
         Ok(())
     }
 
@@ -125,36 +148,42 @@ pub struct ScreenCapture {
     scrap_capturer: Option<Capturer>,
     
     // WGC related fields
-    wgc_capture_thread: Option<JoinHandle<()>>, // Thread for windows-capture event loop
-    wgc_worker_thread: Option<JoinHandle<()>>,  // Thread for processing frames from crossbeam channel
+    wgc_capture_thread_handle: Option<JoinHandle<()>>, 
+    wgc_worker_thread_handle: Option<JoinHandle<()>>,  
     
-    // Receiver for frames from Python's perspective (fed by wgc_worker_thread)
-    python_frame_receiver: Option<StdReceiver<FramePacket>>, 
+    // Receiver for frames from Python's perspective, type updated
+    python_frame_receiver: Option<StdReceiver<Option<FramePacket>>>, 
     
-    // To signal the WGC capture and worker threads to stop
-    // The crossbeam_frame_sender is moved into CaptureHandler, but we need a way to signal its drop maybe.
-    // Or rely on dropping crossbeam_frame_receiver in the worker to signal the handler's sends to fail.
-    // Let's store the crossbeam_frame_sender used to start CaptureHandler to drop it explicitly if needed.
-    // Actually, the crossbeam_channel sender is passed to windows-capture. Its lifetime is tied there.
-    // The worker thread's crossbeam_receiver drop will signal the CaptureHandler.
-    // The std_frame_sender is moved into the worker thread.
-    
-    width: usize,
+    // Used to signal the WGC capture and worker threads to stop
+    // The cb_sender (from start_wgc_capture) is used by CaptureHandler, not directly stored here for stop signal usually.
+    // Dropping the capture (which stops the CaptureHandler::start loop) or other mechanisms handle stop.
+    // We might need a way to signal the CaptureHandler::start loop to exit if it doesn't by itself.
+    // For now, focusing on joining threads.
+
+    // Store the crossbeam sender if needed to signal worker to stop, or rely on channel disconnect
+    wgc_control_sender: Option<CrossbeamSender<FramePacket>>, // This is the cb_sender from start_wgc_capture
+    stop_event: Arc<std::sync::atomic::AtomicBool>, // For graceful shutdown signal
+
+    width: usize, // Note: scrap uses usize, WGC uses u32. Consider consistency or conversion.
     height: usize,
     pub target: Option<CaptureTarget>,
+    is_capturing: Arc<std::sync::atomic::AtomicBool>, // Used by multiple threads for status
 }
 
 impl ScreenCapture {
     pub fn new() -> Self {
         Self {
-            running: false,
+            running: false, // This will be managed by is_capturing primarily
             scrap_capturer: None,
-            wgc_capture_thread: None,
-            wgc_worker_thread: None,
-            python_frame_receiver: None, // This will be the std mpsc receiver
+            wgc_capture_thread_handle: None,
+            wgc_worker_thread_handle: None,
+            python_frame_receiver: None, 
+            wgc_control_sender: None,
+            stop_event: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             width: 0,
             height: 0,
             target: None,
+            is_capturing: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -200,191 +229,144 @@ impl ScreenCapture {
         println!("[ScreenCapture] {}", msg);
     }
 
-    fn stop_wgc(&mut self) {
-        self.debug_print("Stopping WGC...");
+    fn stop_wgc_threads(&mut self) { // Renamed from stop_wgc for clarity
+        self.debug_print("Stopping WGC threads...");
 
-        // The CaptureHandler's on_closed should send a None to the crossbeam channel.
-        // The worker thread will see this None and shut down, dropping the python_frame_sender.
-        // Python's get_frame will then see the channel disconnected.
+        // Signal the capture loop to stop (if it checks stop_event)
+        self.stop_event.store(true, Ordering::SeqCst);
 
-        // We need to ensure the windows-capture session is properly stopped.
-        // The `windows-capture` crate implies that dropping the `Settings` object
-        // or the context signals stop, but it's usually event-driven.
-        // The `InternalCaptureControl` in `on_frame_arrived` has `stop()`, but we don't store it.
-        // Relying on on_closed to propagate is the main path.
+        // Drop the main crossbeam sender. This will cause the worker to exit its recv() loop.
+        // The CaptureHandler::start loop might also exit if it detects its sender (flags) is broken or all receivers dropped.
+        if let Some(sender) = self.wgc_control_sender.take() {
+            drop(sender);
+            self.debug_print("Dropped WGC control sender (cb_sender).");
+        }
 
         // Join the WGC capture thread (runs windows-capture's event loop)
-        if let Some(handle) = self.wgc_capture_thread.take() {
+        if let Some(handle) = self.wgc_capture_thread_handle.take() {
             self.debug_print("Joining WGC capture thread...");
-            if let Err(e) = handle.join() {
-                eprintln!("[ScreenCapture] WGC capture thread panicked: {:?}", e);
-            } else {
-                self.debug_print("WGC capture thread joined.");
+            if handle.join().is_err() {
+                eprintln!("[ScreenCapture] WGC capture thread panicked or error during join.");
             }
+            self.debug_print("WGC capture thread joined.");
         }
 
         // Join the worker thread
-        if let Some(handle) = self.wgc_worker_thread.take() {
+        if let Some(handle) = self.wgc_worker_thread_handle.take() {
             self.debug_print("Joining WGC worker thread...");
-            if let Err(e) = handle.join() {
-                eprintln!("[ScreenCapture] WGC worker thread panicked: {:?}", e);
-            } else {
-                self.debug_print("WGC worker thread joined.");
+            if handle.join().is_err() {
+                eprintln!("[ScreenCapture] WGC worker thread panicked or error during join.");
             }
+            self.debug_print("WGC worker thread joined.");
         }
-        // python_frame_receiver is dropped when ScreenCapture is dropped or on next start.
-        self.python_frame_receiver = None;
-        self.debug_print("WGC stopped.");
+        self.python_frame_receiver = None; // Clear the receiver as threads are stopped
+        self.debug_print("WGC threads stopped.");
     }
 
     #[cfg(target_os = "windows")]
-    fn start_wgc(&mut self, title: String, capture_core_id: Option<usize>) -> Result<(), String> {
-        self.debug_print(&format!("Starting WGC for Window Title: {}", title));
-
-        let window = Window::from_name(&title)
-            .map_err(|e| format!("Window '{}' not found or error: {:?}", title, e))?;
-
-        // Channel for CaptureHandler (fast, lock-free) -> WGC Worker Thread
-        let (cb_sender, cb_receiver): (CrossbeamSender<FramePacket>, CrossbeamReceiver<FramePacket>) = crossbeam_channel::unbounded();
+    fn start_wgc_main_logic(&mut self, target: CaptureTarget, capture_core_id: Option<usize>) -> Result<(), String> {
+        let item_title_for_debug = match &target {
+            CaptureTarget::WindowByTitle(t) => t.clone(),
+            CaptureTarget::FullScreen => "FullScreen".to_string(),
+            _ => "UnknownTarget".to_string(),
+        };
+        self.debug_print(&format!("Starting WGC for Target: {}", item_title_for_debug));
         
-        // Channel for WGC Worker Thread -> Python consumer (standard mpsc)
-        let (py_sender, py_receiver): (StdSender<FramePacket>, StdReceiver<FramePacket>) = mpsc::channel();
+        let capture_item = target.clone().into_internal_type()?; // Use the helper
+
+        // MPSC channel for worker to send to Python consumer (get_frame)
+        let (py_sender, py_receiver): (StdSender<Option<FramePacket>>, StdReceiver<Option<FramePacket>>) = mpsc::channel();
         self.python_frame_receiver = Some(py_receiver);
 
-        // --- Spawn WGC Worker Thread ---
-        let worker_thread_py_sender = py_sender.clone(); // Clone sender for the worker thread
-        let worker_thread_handle = thread::Builder::new()
-            .name("wgc_worker_thread".to_string())
-            .spawn(move || {
-                #[cfg(target_os = "windows")]
-                {
-                    // Set worker thread priority
-                    unsafe {
-                        if windows::Win32::System::Threading::SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL).is_err() {
-                            println!("[WorkerThread] Failed to set thread priority to ABOVE_NORMAL (call returned error).");
-                        } else {
-                            println!("[WorkerThread] Thread priority set to ABOVE_NORMAL (call returned success).");
-                        }
-                    }
-                }
-                println!("[WGC Worker Thread] Started. Waiting for frames from crossbeam channel...");
-                loop {
-                    match cb_receiver.recv() { // Blocking receive from crossbeam
-                        Ok(frame_data) => {
-                            // Process/forward to Python consumer
-                            // println!("[WGC Worker Thread] Received frame {}x{}, sending to Python channel.", width, height);
-                            if worker_thread_py_sender.send(Some(frame_data)).is_err() {
-                                eprintln!("[WGC Worker Thread] Python mpsc receiver disconnected. Stopping.");
-                                break;
-                            }
-                        }
-                        Ok(None) => { // Shutdown signal from CaptureHandler::on_closed
-                            println!("[WGC Worker Thread] Received shutdown signal (None). Sending to Python channel and stopping.");
-                            let _ = worker_thread_py_sender.send(None); // Signal Python consumer
-                            break;
-                        }
-                        Err(_) => { // Crossbeam channel disconnected
-                            eprintln!("[WGC Worker Thread] Crossbeam channel disconnected. Assuming shutdown. Stopping.");
-                            let _ = worker_thread_py_sender.send(None); // Attempt to signal Python consumer
-                            break;
-                        }
-                    }
-                }
-                println!("[WGC Worker Thread] Stopped.");
-            })
-            .map_err(|e| format!("Failed to spawn WGC worker thread: {}", e))?;
-        self.wgc_worker_thread = Some(worker_thread_handle);
-
-
-        // --- Prepare and Start windows-capture API ---
-        // The `cb_sender` is given to `CaptureHandler` via `Settings` flags.
-        let capture_handler_flags = cb_sender; 
-
-        // Settings::new for windows-capture v2.0.0
-        let settings = Settings::new(
-            window,                        // item: GraphicsCaptureItem
-            Some(false),                   // cursor_capture: Option<bool> (false to disable)
-            Some(false),                   // draw_border: Option<bool> (false to disable)
-            ColorFormat::Bgra8,            // color_format
-            capture_handler_flags,         // flags: F (our CrossbeamSender)
-            Some(false),                   // force_surface_sharing: Option<bool>
-            None,                          // raw_d3d_device: Option<*mut c_void>
-            None                           // timeout_ms: Option<u32>
-        ).map_err(|e| format!("Failed to create WGC Settings (v2.0.0): {:?}", e))?;
-
-        let capture_thread_handle = thread::Builder::new()
-            .name("wgc_capture_api_thread".to_string())
-            .spawn(move || {
-                #[cfg(target_os = "windows")]
-                {
-                    // Set capture thread priority and affinity
-                    unsafe {
-                        if windows::Win32::System::Threading::SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST).is_err() {
-                            println!("[WGC_CaptureThread] Failed to set thread priority to HIGHEST (call returned error).");
-                        } else {
-                            println!("[WGC_CaptureThread] Thread priority set to HIGHEST (call returned success).");
-                        }
-                        if let Some(core_id) = capture_core_id {
-                            if core_id < (std::mem::size_of::<usize>() * 8) { // Max 64 cores for usize mask
-                                let affinity_mask = 1usize << core_id;
-                                if SetThreadAffinityMask(GetCurrentThread(), affinity_mask) == 0 {
-                                    eprintln!("[WGC Capture Thread] Failed to set thread affinity to core {}. Error: {:?}", core_id, windows::core::Error::from_win32());
-                                } else {
-                                    println!("[WGC Capture Thread] Affinity set to core {}.", core_id);
-                                }
-                            } else {
-                                eprintln!("[WGC Capture Thread] Invalid core_id {} for affinity mask.", core_id);
-                            }
-                        }
-                    }
-                }
-                println!("[WGC_CaptureThread] Starting capture event loop.");
-                if let Err(e) = CaptureHandler::start(settings) { // This blocks until capture stops
-                    eprintln!("[WGC_CaptureThread] Capture failed/stopped: {}", e);
-                    // If CaptureHandler::start errors out, on_closed might not be called.
-                    // We need to ensure the worker thread is signaled to stop.
-                    // The cb_sender (capture_handler_flags) is moved into `settings`.
-                    // If this thread exits, the sender might be dropped, which should disconnect the channel.
-                } else {
-                    println!("[WGC_CaptureThread] Capture session finished gracefully.");
-                }
-                // Note: If CaptureHandler::start returns, it means the capture session ended.
-                // on_closed should have sent None via cb_sender to the worker.
-            })
-            .map_err(|e| format!("Failed to spawn WGC capture API thread: {}", e))?;
+        // Call the free function start_wgc_capture (its signature needs to accept CaptureItem)
+        // Let's assume start_wgc_capture is refactored to accept a CaptureItem directly.
+        // pub fn start_wgc_capture(
+        //    capture_item: windows_capture::capture::CaptureItem,
+        //    python_frame_sender: StdSender<Option<FramePacket>>,
+        // ) -> Result<(JoinHandle<()>, CrossbeamSender<FramePacket>, Settings<CrossbeamSender<FramePacket>>), String>
         
-        self.wgc_capture_thread = Some(capture_thread_handle);
-        self.running = true;
+        // This free function sets up cb_channels, spawns worker, creates Settings struct
+        let (worker_handle, cb_sender_for_handler_flags, wgc_settings) = 
+            start_wgc_capture_internal_setup(capture_item, py_sender)?;
+
+        self.wgc_worker_thread_handle = Some(worker_handle);
+        self.wgc_control_sender = Some(cb_sender_for_handler_flags); // This is the cb_sender
+
+        let capture_thread_settings = wgc_settings; // Settings struct already has the cb_sender flag
+        let local_stop_event = self.stop_event.clone();
+
+        self.wgc_capture_thread_handle = Some(thread::Builder::new()
+            .name("wgc_capture_thread".into())
+            .spawn(move || {
+                println!("[WGC Capture Thread] Starting using windows-capture v2.0.0...");
+                #[cfg(target_os = "windows")]
+                unsafe {
+                    if windows::Win32::System::Threading::SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST).is_err() {
+                        println!("[WGC Capture Thread] Failed to set thread priority to HIGHEST.");
+                    }
+                    if let Some(core_id) = capture_core_id.or(CAPTURE_CORE_ID) {
+                        if SetThreadAffinityMask(GetCurrentThread(), 1 << core_id) == 0 {
+                            println!("[WGC Capture Thread] Failed to set thread affinity to core {}.", core_id);
+                        }
+                    }
+                }
+                
+                if let Err(e) = CaptureHandler::start(capture_thread_settings) {
+                    eprintln!("[WGC Capture Thread] Capture failed/stopped: {:?}", e);
+                }
+                println!("[WGC Capture Thread] Capture loop exited.");
+                local_stop_event.store(true, Ordering::SeqCst); 
+            })
+            .map_err(|e| format!("Failed to spawn WGC capture thread: {:?}", e))?);
+        
+        self.is_capturing.store(true, Ordering::SeqCst);
         Ok(())
+    }
+}
+
+// The into_internal_type() helper would be on CaptureTarget enum if start_wgc_capture expects a specific type
+// For now, assuming CaptureTarget::WindowByTitle(title) is directly usable or adapted in start_wgc_capture.
+// The `start_wgc_capture` needs to be adapted to take `CaptureTarget` or its decomposed parts.
+
+// Placeholder for CaptureTarget::into_internal_type() - this needs to be implemented on CaptureTarget
+impl CaptureTarget {
+    fn into_internal_type(self) -> Result<windows_capture::capture::CaptureItem, String> {
+        match self {
+            CaptureTarget::WindowByTitle(title) => Window::from_name(&title).map(Into::into).map_err(|e| e.to_string()),
+            CaptureTarget::FullScreen => Monitor::primary().map(Into::into).map_err(|e| e.to_string()),
+            CaptureTarget::Region{..} => Err("Region capture not yet supported for WGC direct item".to_string()),
+        }
     }
 }
 
 impl RealTimeCapture for ScreenCapture {
     fn start(&mut self, target: CaptureTarget) -> std::result::Result<(), String> {
         self.debug_print(&format!("Starting capture: {:?}", target));
-        self.target = Some(target.clone()); // Clone target for later use
-        self.stop(); // Stop any existing capture first
+        if self.is_capturing.load(Ordering::Relaxed) {
+            self.debug_print("Capture already running. Stopping first.");
+            self.stop()?; // Ensure previous capture is fully stopped
+        }
+        
+        self.target = Some(target.clone());
+        self.stop_event.store(false, Ordering::SeqCst); // Reset stop event
 
         match target {
             CaptureTarget::FullScreen => {
                 // Use scrap for fullscreen
                 let display = Display::primary().map_err(|e| e.to_string())?;
-                let width = display.width();
-                let height = display.height();
+                self.width = display.width();
+                self.height = display.height();
                 let capturer = Capturer::new(display).map_err(|e| e.to_string())?;
-                self.width = width;
-                self.height = height;
                 self.scrap_capturer = Some(capturer);
-                self.running = true;
-                self.debug_print(&format!("FullScreen capture started: {}x{}", width, height));
+                self.is_capturing.store(true, Ordering::SeqCst);
+                self.running = true; // old flag, can be removed if is_capturing is sole source of truth
+                self.debug_print(&format!("FullScreen capture started with scrap: {}x{}", self.width, self.height));
                 Ok(())
             }
             CaptureTarget::WindowByTitle(title) => {
                 #[cfg(target_os = "windows")]
                 {
-                    // Example: Pin WGC capture thread to core 2. Adjust as needed.
-                    let core_to_pin_capture_thread = Some(2); 
-                    self.start_wgc(title, core_to_pin_capture_thread)
+                    self.start_wgc_main_logic(target, None) // Pass None for core_id for now
                 }
                 #[cfg(not(target_os = "windows"))]
                 {
@@ -395,27 +377,32 @@ impl RealTimeCapture for ScreenCapture {
         }
     }
 
-    fn stop(&mut self) {
-        if self.running {
-            self.debug_print("Stopping capture...");
-            if self.scrap_capturer.is_some() {
-                self.scrap_capturer = None;
-                self.debug_print("Scrap capture stopped.");
-            }
-            // Stop WGC path if it was running
-            self.stop_wgc(); // This now handles joining both WGC threads
-            self.running = false; // Set running to false after all stop logic
-            self.debug_print("Capture fully stopped.");
+    fn stop(&mut self) -> std::result::Result<(), String> {
+        if !self.is_capturing.load(Ordering::SeqCst) && !self.running /* old flag */ {
+            self.debug_print("Stop called but capture not running.");
+            return Ok(());
         }
+        self.debug_print("Stopping capture (RealTimeCapture::stop)...");
+        
+        if self.scrap_capturer.is_some() {
+            self.scrap_capturer = None;
+            self.debug_print("Scrap capture stopped.");
+        }
+        
+        self.stop_wgc_threads(); // Handles WGC related threads and sender
+        
+        self.is_capturing.store(false, Ordering::SeqCst);
+        self.running = false; // old flag
+        self.debug_print("Capture fully stopped (RealTimeCapture::stop).");
+        Ok(())
     }
 
-    fn get_frame(&mut self) -> Option<(Vec<u8>, usize, usize)> {
-        if !self.running {
-            // println!("[ScreenCapture::get_frame] Not running, returning None."); // DEBUG
+    fn get_frame(&mut self) -> Option<(Vec<u8>, usize, usize)> { // Return type may need to be Option<FramePacket>
+        if !self.is_capturing.load(Ordering::Relaxed) {
             return None;
         }
 
-        match self.target.as_ref() { // Use as_ref to avoid moving self.target
+        match self.target.as_ref() {
             Some(CaptureTarget::FullScreen) => {
                 if let Some(capturer) = self.scrap_capturer.as_mut() {
                     match capturer.frame() {
@@ -441,7 +428,7 @@ impl RealTimeCapture for ScreenCapture {
                         Err(ref e) if e.kind() == ErrorKind::WouldBlock => None, // No new frame
                         Err(e) => {
                             eprintln!("[ScreenCapture] Frame capture error (FullScreen): {}", e);
-                            self.stop();
+                            self.stop().ok();
                             None
                         }
                     }
@@ -453,48 +440,32 @@ impl RealTimeCapture for ScreenCapture {
                 #[cfg(target_os = "windows")]
                 {
                     if let Some(rx) = self.python_frame_receiver.as_ref() {
-                        // This is now reading from the std::sync::mpsc channel fed by the WGC worker thread
-                        let mut last_frame_data: Option<(Vec<u8>, usize, usize)> = None;
-                        
-                        // Drain all immediately available frames, returning the latest.
-                        // This is similar to the previous logic but on the python_frame_receiver.
+                        let mut last_frame_data: Option<FramePacket> = None;
                         loop {
                             match rx.try_recv() {
-                                Ok(Some(frame_tuple)) => {
-                                    // println!("[ScreenCapture::get_frame] WGC Path: Received frame from Python channel. Size: {}x{}", frame_tuple.1, frame_tuple.2);
-                                    last_frame_data = Some(frame_tuple);
+                                Ok(Some(frame_packet)) => { // frame_packet is FramePacket (Vec<u8>, u32, u32)
+                                    last_frame_data = Some(frame_packet);
                                 }
-                                Ok(None) => { // Shutdown signal from worker
-                                    self.debug_print("[ScreenCapture::get_frame] WGC Path: Received STOP signal (None) from Python channel.");
-                                    last_frame_data = None; 
-                                    self.stop(); 
-                                    break; 
+                                Ok(None) => { 
+                                    self.debug_print("[get_frame] WGC Path: Received STOP signal (None) from Python channel.");
+                                    self.stop().ok(); // Attempt to stop if not already
+                                    return None; // Return None as capture is stopping/stopped
                                 }
-                                Err(mpsc::TryRecvError::Empty) => {
-                                    // println!("[ScreenCapture::get_frame] WGC Path: Python channel empty.");
-                                    break;
-                                }
+                                Err(mpsc::TryRecvError::Empty) => break,
                                 Err(mpsc::TryRecvError::Disconnected) => {
-                                    self.debug_print("[ScreenCapture::get_frame] WGC Path: Python channel DISCONNECTED.");
-                                    last_frame_data = None;
-                                    self.stop();
-                                    break;
+                                    self.debug_print("[get_frame] WGC Path: Python channel DISCONNECTED.");
+                                    self.stop().ok();
+                                    return None;
                                 }
                             }
                         }
-                        if let Some((_, width, height)) = &last_frame_data {
-                             self.width = *width; // Update dimensions based on received frame
-                             self.height = *height;
-                        }
-                        last_frame_data
-                    } else {
-                        // eprintln!("[ScreenCapture::get_frame] WGC Path: No python_frame_receiver."); // DEBUG
-                        None // No receiver exists
+                        // Convert (Vec<u8>, u32, u32) to (Vec<u8>, usize, usize) for consistent return type
+                        return last_frame_data.map(|(data, w, h)| (data, w as usize, h as usize));
                     }
                 }
                 #[cfg(not(target_os = "windows"))]
                 {
-                    None
+                    return None;
                 }
             }
             Some(CaptureTarget::Region { .. }) => {
@@ -513,9 +484,85 @@ impl RealTimeCapture for ScreenCapture {
     }
 }
 
+impl Drop for ScreenCapture {
+    fn drop(&mut self) {
+        self.debug_print("[ScreenCapture Drop] Dropping ScreenCapture instance.");
+        if self.is_capturing.load(Ordering::Relaxed) {
+            if let Err(e) = self.stop() {
+                eprintln!("[ScreenCapture Drop] Error stopping capture: {}", e);
+            }
+        }
+    }
+}
+
 // For Linux: Scaffold X11 window capture (not implemented yet)
 #[cfg(target_os = "linux")]
 mod x11_capture {
     // use x11::xlib::*;
     // TODO: Implement X11 window capture
 }
+
+// Free function for WGC setup (renamed for clarity)
+// This function will create channels, spawn the worker thread, and prepare the Settings struct.
+fn start_wgc_capture_internal_setup(
+    capture_item: windows_capture::capture::CaptureItem,
+    python_frame_sender: StdSender<Option<FramePacket>>,
+) -> Result<(JoinHandle<()>, CrossbeamSender<FramePacket>, Settings<CrossbeamSender<FramePacket>>), String> {
+
+    let (cb_sender, cb_receiver): (
+        CrossbeamSender<FramePacket>,
+        CrossbeamReceiver<FramePacket>,
+    ) = crossbeam_channel::unbounded();
+
+    let worker_thread_py_sender = python_frame_sender.clone();
+    let worker_thread_handle = thread::Builder::new()
+        .name("wgc_worker_thread".into())
+        .spawn(move || {
+            #[cfg(target_os = "windows")]
+            unsafe {
+                if windows::Win32::System::Threading::SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL).is_err() {
+                    println!("[WGC Worker Thread] Failed to set thread priority to ABOVE_NORMAL.");
+                }
+                if let Some(core_id) = WORKER_CORE_ID {
+                    if SetThreadAffinityMask(GetCurrentThread(), 1 << core_id) == 0 {
+                        println!("[WGC Worker Thread] Failed to set thread affinity to core {}.", core_id);
+                    }
+                }
+            }
+            println!("[WGC Worker Thread] Started. Waiting for frames.");
+            loop {
+                match cb_receiver.recv() {
+                    Ok(packet) => { 
+                        if worker_thread_py_sender.send(Some(packet)).is_err() {
+                            eprintln!("[WGC Worker Thread] Python mpsc receiver disconnected. Stopping.");
+                            break;
+                        }
+                    }
+                    Err(_) => {
+                        eprintln!("[WGC Worker Thread] Crossbeam channel disconnected. Stopping worker.");
+                        break;
+                    }
+                }
+            }
+            println!("[WGC Worker Thread] Stopped.");
+        })
+        .map_err(|e| format!("Failed to spawn WGC worker thread: {:?}", e))?;
+
+    let capture_handler_flags = cb_sender.clone(); 
+    
+    let settings = Settings::new(
+        capture_item,                     
+        Some(false),                   
+        Some(false),                   
+        ColorFormat::Bgra8,            
+        capture_handler_flags, // This is CrossbeamSender<FramePacket>         
+        Some(false),                   
+        None,                          
+        None                           
+    ).map_err(|e| format!("Failed to create WGC Settings (v2.0.0): {:?}", e))?;
+
+    // Return worker handle, the cb_sender (for flags/control), and settings for CaptureHandler::start
+    Ok((worker_thread_handle, cb_sender, settings))
+}
+
+
