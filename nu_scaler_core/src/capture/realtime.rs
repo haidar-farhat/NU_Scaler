@@ -45,7 +45,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows_capture::capture::{Context, GraphicsCaptureApiHandler};
 use windows_capture::frame::Frame;
 use windows_capture::graphics_capture_api::InternalCaptureControl;
-use windows_capture::settings::{ColorFormat, Settings, CursorCaptureSettings, DrawBorderSettings};
+use windows_capture::settings::{ColorFormat, Settings};
 use windows_capture::window::Window;
 use windows_capture::monitor::Monitor;
 
@@ -98,7 +98,10 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
     // v1.4.3: `new` receives Context<Self::Flags>
     fn new(context: Context<Self::Flags>) -> Result<Self, Self::Error> {
         println!("[CaptureHandler] Created (v1.4.3 API).");
-        Ok(Self { frame_sender: context.get_flags() })
+        // In v1.4.3, Context has a field 'flags' that we need to access
+        // Using pattern matching since it might be a public field
+        let frame_sender = context.flags;
+        Ok(Self { frame_sender })
     }
 
     // v1.4.3: `frame` is &mut Frame
@@ -418,7 +421,7 @@ impl RealTimeCapture for ScreenCapture {
                 self.debug_print(&format!("FullScreen capture started with scrap: {}x{}", self.width, self.height));
                 Ok(())
             }
-            CaptureTarget::WindowByTitle(title) => {
+            CaptureTarget::WindowByTitle(ref title) => { // Use ref to avoid partial move
                 #[cfg(target_os = "windows")]
                 {
                     self.start_wgc_main_logic(target, None) // Pass None for core_id for now
@@ -594,15 +597,14 @@ fn start_wgc_capture_internal_setup(
     let capture_handler_flags = cb_sender.clone(); 
     
     // Settings::new for windows-capture v1.4.3 (5 args, no Result)
-    let settings = Settings::new(
-        capture_item,                     
-        false, // CursorCapture disabled (for v1.4)
-        false, // DrawBorder disabled (for v1.4)
-        ColorFormat::Bgra8,            
-        capture_handler_flags // This is CrossbeamSender<FramePacket>, used by Context for Handler::new
-    ); 
-    // No .map_err() or ? needed here for v1.4.3 as it's a const fn returning Self
-
+    let settings = Settings {
+        item: capture_item,
+        capture_cursor: false, // Boolean for cursor capture
+        draw_border: false,    // Boolean for border drawing
+        color_format: ColorFormat::Bgra8,
+        flags: capture_handler_flags
+    };
+    
     Ok((worker_thread_handle, cb_sender, settings))
 }
 
@@ -643,14 +645,14 @@ fn start_wgc_capture_monitor(
     let capture_handler_flags = cb_sender.clone(); 
     
     // Settings::new for windows-capture v1.4.3 (5 args, no Result)
-    let settings = Settings::new(
-        monitor,                     
-        false, // CursorCapture disabled (for v1.4)
-        false, // DrawBorder disabled (for v1.4)
-        ColorFormat::Bgra8,            
-        capture_handler_flags // This is CrossbeamSender<FramePacket>, used by Context for Handler::new
-    ); 
-
+    let settings = Settings {
+        item: monitor,
+        capture_cursor: false, // Boolean for cursor capture
+        draw_border: false,    // Boolean for border drawing
+        color_format: ColorFormat::Bgra8,
+        flags: capture_handler_flags
+    };
+    
     Ok((worker_thread_handle, cb_sender, settings))
 }
 
