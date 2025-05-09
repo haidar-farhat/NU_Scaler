@@ -45,7 +45,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows_capture::capture::{Context, GraphicsCaptureApiHandler};
 use windows_capture::frame::Frame;
 use windows_capture::graphics_capture_api::InternalCaptureControl;
-use windows_capture::settings::{ColorFormat, Settings};
+use windows_capture::settings::{ColorFormat, Settings, CursorCaptureSettings, DrawBorderSettings};
 use windows_capture::window::Window;
 use windows_capture::monitor::Monitor;
 
@@ -599,8 +599,8 @@ fn start_wgc_capture_internal_setup(
     // Use new() instead of struct initialization 
     let settings = Settings::new(
         capture_item,
-        false, // cursor capture
-        false, // draw border
+        CursorCaptureSettings::Default,
+        DrawBorderSettings::Default,
         ColorFormat::Bgra8,
         capture_handler_flags
     );
@@ -647,8 +647,8 @@ fn start_wgc_capture_monitor(
     // Use new() instead of struct initialization
     let settings = Settings::new(
         monitor,
-        false, // cursor capture
-        false, // draw border
+        CursorCaptureSettings::Default,
+        DrawBorderSettings::Default,
         ColorFormat::Bgra8,
         capture_handler_flags
     );
