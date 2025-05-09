@@ -334,8 +334,8 @@ impl ScreenCapture {
                 {
                     // Set worker thread priority
                     unsafe {
-                        // Corrected: Use !.as_bool() for checking failure from SetThreadPriority
-                        if !SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL).as_bool() {
+                        // Reverted: Check SetThreadPriority against BOOL(0) for failure
+                        if SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL) == BOOL(0) {
                             println!("[WorkerThread] Failed to set thread priority to ABOVE_NORMAL.");
                         } else {
                             println!("[WorkerThread] Thread priority set to ABOVE_NORMAL.");
@@ -376,9 +376,9 @@ impl ScreenCapture {
         let capture_handler_flags = cb_sender; 
         let settings = Settings::new(
             window,
-            // Corrected: Using fully qualified path for enum variants
-            windows_capture::settings::CursorCaptureSettings::Disabled,
-            windows_capture::settings::DrawBorderSettings::Disabled,
+            // Corrected: Using direct variant name, relying on 'use' statement
+            CursorCaptureSettings::Disabled,
+            DrawBorderSettings::Disabled,
             ColorFormat::Bgra8,
             capture_handler_flags, // Pass the crossbeam sender here
         );
@@ -393,8 +393,8 @@ impl ScreenCapture {
                 {
                     // Set capture thread priority and affinity
                     unsafe {
-                        // Corrected: Use !.as_bool() for checking failure from SetThreadPriority
-                        if !SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST).as_bool() {
+                        // Reverted: Check SetThreadPriority against BOOL(0) for failure
+                        if SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST) == BOOL(0) {
                             println!("[WGC_CaptureThread] Failed to set thread priority to HIGHEST.");
                         } else {
                             println!("[WGC_CaptureThread] Thread priority set to HIGHEST.");
