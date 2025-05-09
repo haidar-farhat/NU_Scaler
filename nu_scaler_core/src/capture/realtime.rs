@@ -4,9 +4,14 @@ use scrap::{Capturer, Display /*, Frame as ScrapFrame*/};
 use std::io::ErrorKind;
 // std::sync::mpsc is still used for the final channel to Python
 use std::sync::mpsc::{self, Receiver as StdReceiver, Sender as StdSender};
-use std::sync::Mutex; // Mutex might still be needed for some shared state if any, but not for the primary frame sender
+// use std::sync::Mutex; // This was unused, removing for now. Add back if needed for other parts.
 use std::thread::{self, JoinHandle};
 use std::time::Instant;
+
+// +++ Added imports +++
+use std::cell::{Cell, RefCell}; 
+use std::fs::OpenOptions;
+use std::io::Write;
 
 // For crossbeam channel
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
@@ -388,8 +393,8 @@ impl ScreenCapture {
         let capture_handler_flags = cb_sender; 
         let settings = Settings::new(
             window,
-            CursorCaptureSettings::Disabled,  // +++ Changed from Default +++
-            DrawBorderSettings::Disabled,   // +++ Changed from Default +++
+            CursorCaptureSettings::None,  // Corrected: Assuming ::None is the intended variant
+            DrawBorderSettings::None,   // Corrected: Assuming ::None is the intended variant
             ColorFormat::Bgra8,
             capture_handler_flags, // Pass the crossbeam sender here
         );
