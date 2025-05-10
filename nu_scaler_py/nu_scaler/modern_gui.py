@@ -1570,7 +1570,10 @@ class SettingsPanel(QWidget):
         scale_40_shortcut.activated.connect(lambda: self.scale_slider.setValue(40))
 
 class InterpolationDialog(QDialog):
-    """Modal dialog for advanced interpolation settings"""
+    """
+    Enhanced modal dialog for advanced interpolation settings with
+    animated sliders, dynamic previews, and responsive layout.
+    """
     
     # Signal emitted when settings are applied
     settingsApplied = Signal(dict)
@@ -1578,9 +1581,19 @@ class InterpolationDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Advanced Interpolation Settings")
-        self.setMinimumWidth(450)
+        self.setMinimumSize(500, 500)
+        
+        # Track whether settings have changed
+        self.settings_changed = False
+        
+        # Initialize the UI
         self.initUI()
         
+        # Apply window effects
+        self.apply_effects()
+    
+    def apply_effects(self):
+        """Apply visual effects to the dialog"""
         # Apply shadow effect to the dialog
         shadow = QGraphicsDropShadowEffect()
         shadow.setBlurRadius(30)
@@ -1589,13 +1602,297 @@ class InterpolationDialog(QDialog):
         self.setGraphicsEffect(shadow)
         
     def initUI(self):
-        """Initialize the user interface"""
+        """Initialize the user interface with an improved layout and visuals"""
+        # Main layout
         layout = QVBoxLayout(self)
-        layout.setSpacing(16)
-        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(int(SPACING["xl"].replace("px", "")))
+        layout.setContentsMargins(int(SPACING["xl"].replace("px", "")), 
+                                int(SPACING["xl"].replace("px", "")),
+                                int(SPACING["xl"].replace("px", "")),
+                                int(SPACING["xl"].replace("px", "")))
         
-        # Title
+        # Title with icon
+        title_layout = QHBoxLayout()
+        
+        title_icon = QLabel()
+        title_icon.setPixmap(self._get_icon_pixmap("interpolation"))
+        title_icon.setFixedSize(32, 32)
+        
         title = QLabel("Advanced Interpolation Settings")
+        title.setStyleSheet(f"""
+            font-size: {FONTS["size_xlarge"]};
+            font-weight: {FONTS["weight_bold"]};
+            color: {COLORS["text_light"]};
+        """)
+        
+        title_layout.addWidget(title_icon)
+        title_layout.addWidget(title)
+        title_layout.addStretch()
+        
+        layout.addLayout(title_layout)
+        
+        # Description text
+        description = QLabel(
+            "These settings control how intermediate frames are generated when "
+            "frame interpolation is enabled. Adjust the parameters to balance "
+            "between smooth motion and visual artifacts."
+        )
+        description.setWordWrap(True)
+        description.setStyleSheet(f"""
+            color: {COLORS["text_medium"]};
+            font-size: {FONTS["size_normal"]};
+            margin-bottom: 10px;
+        """)
+        layout.addWidget(description)
+        
+        # Tab widget for different settings categories
+        tabs = QTabWidget()
+        tabs.setStyleSheet(f"""
+            QTabWidget::pane {{
+                border: 1px solid {COLORS["border"]};
+                border-radius: {EFFECTS["border_radius_md"]};
+                background-color: {COLORS["surface"]};
+            }}
+        """)
+        
+        # === Motion Tab ===
+        motion_tab = QWidget()
+        motion_layout = QVBoxLayout(motion_tab)
+        motion_layout.setSpacing(int(SPACING["lg"].replace("px", "")))
+        
+        # Motion Sensitivity slider with improved visuals and feedback
+        motion_frame = self._create_slider_frame(
+            "Motion Sensitivity",
+            "Controls how aggressively the algorithm detects motion. Higher values capture more subtle movements.",
+            0, 100, 50,
+            self._update_motion_label
+        )
+        self.motion_slider = motion_frame.findChild(QSlider)
+        self.motion_label = motion_frame.findChild(QLabel, "valueLabel")
+        
+        # Detail Preservation slider
+        detail_frame = self._create_slider_frame(
+            "Detail Preservation",
+            "Preserves fine details in moving areas. Higher values retain more details but may increase artifacts.",
+            0, 100, 75,
+            self._update_detail_label
+        )
+        self.detail_slider = detail_frame.findChild(QSlider)
+        self.detail_label = detail_frame.findChild(QLabel, "valueLabel")
+        
+        # Artifact Reduction slider
+        artifact_frame = self._create_slider_frame(
+            "Artifact Reduction",
+            "Reduces visual glitches in interpolated frames. Higher values are smoother but may blur details.",
+            0, 100, 25,
+            self._update_artifact_label
+        )
+        self.artifact_slider = artifact_frame.findChild(QSlider)
+        self.artifact_label = artifact_frame.findChild(QLabel, "valueLabel")
+        
+        # Add to motion tab
+        motion_layout.addWidget(motion_frame)
+        motion_layout.addWidget(detail_frame)
+        motion_layout.addWidget(artifact_frame)
+        motion_layout.addStretch(1)
+        
+        # === Shader Tab ===
+        shader_tab = QWidget()
+        shader_layout = QVBoxLayout(shader_tab)
+        shader_layout.setSpacing(int(SPACING["lg"].replace("px", "")))
+        
+        # Create a group for shader selection
+        shader_frame = QFrame()
+        shader_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS["background_medium"]};
+                border-radius: {EFFECTS["border_radius_md"]};
+                padding: 15px;
+            }}
+        """)
+        
+        shader_content_layout = QVBoxLayout(shader_frame)
+        
+        shader_title = QLabel("Interpolation Shader")
+        shader_title.setStyleSheet(f"""
+            font-weight: {FONTS["weight_bold"]};
+            font-size: {FONTS["size_medium"]};
+            color: {COLORS["text_light"]};
+            margin-bottom: 5px;
+        """)
+        shader_content_layout.addWidget(shader_title)
+        
+        shader_desc = QLabel(
+            "Select the algorithm used for generating intermediate frames. "
+            "Different shaders are optimized for specific types of content."
+        )
+        shader_desc.setWordWrap(True)
+        shader_desc.setStyleSheet(f"color: {COLORS['text_medium']};")
+        shader_content_layout.addWidget(shader_desc)
+        
+        # Radio buttons for shader selection with improved layout and icons
+        self.shader_group = QButtonGroup(self)
+        
+        # Optical Flow option
+        optical_layout = QHBoxLayout()
+        optical_icon = QLabel()
+        optical_icon.setPixmap(self._get_icon_pixmap("video"))
+        optical_icon.setFixedSize(24, 24)
+        
+        self.optical_flow_radio = QRadioButton("Optical Flow")
+        self.optical_flow_radio.setStyleSheet(f"""
+            QRadioButton {{
+                font-weight: {FONTS["weight_medium"]};
+            }}
+        """)
+        
+        optical_desc = QLabel("Best for video content. Analyzes motion between frames with high accuracy.")
+        optical_desc.setWordWrap(True)
+        optical_desc.setStyleSheet(f"color: {COLORS['text_medium']}; font-size: {FONTS['size_small']};")
+        
+        optical_layout.addWidget(optical_icon)
+        optical_layout.addWidget(self.optical_flow_radio)
+        optical_layout.addStretch()
+        
+        optical_container = QFrame()
+        optical_container_layout = QVBoxLayout(optical_container)
+        optical_container_layout.setContentsMargins(0, 0, 0, 0)
+        optical_container_layout.addLayout(optical_layout)
+        optical_container_layout.addWidget(optical_desc)
+        
+        # RIFE option
+        rife_layout = QHBoxLayout()
+        rife_icon = QLabel()
+        rife_icon.setPixmap(self._get_icon_pixmap("gaming"))
+        rife_icon.setFixedSize(24, 24)
+        
+        self.rife_radio = QRadioButton("RIFE")
+        self.rife_radio.setStyleSheet(f"""
+            QRadioButton {{
+                font-weight: {FONTS["weight_medium"]};
+            }}
+        """)
+        
+        rife_desc = QLabel("Best for gaming and CGI. Uses neural network for faster processing with good quality.")
+        rife_desc.setWordWrap(True)
+        rife_desc.setStyleSheet(f"color: {COLORS['text_medium']}; font-size: {FONTS['size_small']};")
+        
+        rife_layout.addWidget(rife_icon)
+        rife_layout.addWidget(self.rife_radio)
+        rife_layout.addStretch()
+        
+        rife_container = QFrame()
+        rife_container_layout = QVBoxLayout(rife_container)
+        rife_container_layout.setContentsMargins(0, 0, 0, 0)
+        rife_container_layout.addLayout(rife_layout)
+        rife_container_layout.addWidget(rife_desc)
+        
+        # Blend option
+        blend_layout = QHBoxLayout()
+        blend_icon = QLabel()
+        blend_icon.setPixmap(self._get_icon_pixmap("blend"))
+        blend_icon.setFixedSize(24, 24)
+        
+        self.blend_radio = QRadioButton("Simple Blend")
+        self.blend_radio.setStyleSheet(f"""
+            QRadioButton {{
+                font-weight: {FONTS["weight_medium"]};
+            }}
+        """)
+        
+        blend_desc = QLabel("Lowest GPU usage. Basic frame blending suitable for static content.")
+        blend_desc.setWordWrap(True)
+        blend_desc.setStyleSheet(f"color: {COLORS['text_medium']}; font-size: {FONTS['size_small']};")
+        
+        blend_layout.addWidget(blend_icon)
+        blend_layout.addWidget(self.blend_radio)
+        blend_layout.addStretch()
+        
+        blend_container = QFrame()
+        blend_container_layout = QVBoxLayout(blend_container)
+        blend_container_layout.setContentsMargins(0, 0, 0, 0)
+        blend_container_layout.addLayout(blend_layout)
+        blend_container_layout.addWidget(blend_desc)
+        
+        # Add to button group
+        self.shader_group.addButton(self.optical_flow_radio, 1)
+        self.shader_group.addButton(self.rife_radio, 2)
+        self.shader_group.addButton(self.blend_radio, 3)
+        
+        # Default selection
+        self.optical_flow_radio.setChecked(True)
+        
+        # Add radio containers with spacing
+        radio_layout = QVBoxLayout()
+        radio_layout.setSpacing(15)
+        radio_layout.addWidget(optical_container)
+        radio_layout.addWidget(rife_container)
+        radio_layout.addWidget(blend_container)
+        
+        shader_content_layout.addLayout(radio_layout)
+        shader_layout.addWidget(shader_frame)
+        
+        # Frame generation options
+        frames_frame = QFrame()
+        frames_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS["background_medium"]};
+                border-radius: {EFFECTS["border_radius_md"]};
+                padding: 15px;
+            }}
+        """)
+        
+        frames_layout = QVBoxLayout(frames_frame)
+        
+        frames_title = QLabel("Frame Generation")
+        frames_title.setStyleSheet(f"""
+            font-weight: {FONTS["weight_bold"]};
+            font-size: {FONTS["size_medium"]};
+            color: {COLORS["text_light"]};
+            margin-bottom: 5px;
+        """)
+        frames_layout.addWidget(frames_title)
+        
+        # Frame multiplier slider
+        self.frame_multi_slider = QSlider(Qt.Horizontal)
+        self.frame_multi_slider.setRange(1, 4)  # 1x to 4x frames
+        self.frame_multi_slider.setValue(2)     # Default 2x (doubles frames)
+        self.frame_multi_slider.setTickPosition(QSlider.TicksBelow)
+        self.frame_multi_slider.setTickInterval(1)
+        
+        self.frame_multi_label = QLabel("2× (60 → 120 FPS)")
+        self.frame_multi_label.setAlignment(Qt.AlignCenter)
+        self.frame_multi_label.setStyleSheet(f"""
+            color: {COLORS["accent_secondary"]};
+            font-weight: {FONTS["weight_bold"]};
+        """)
+        
+        self.frame_multi_slider.valueChanged.connect(self._update_frame_multi_label)
+        
+        frames_layout.addWidget(self.frame_multi_label)
+        frames_layout.addWidget(self.frame_multi_slider)
+        
+        # Add tick labels
+        ticks_layout = QHBoxLayout()
+        ticks_layout.setContentsMargins(0, 0, 0, 0)
+        
+        for i, label in enumerate(["1× (Original)", "2× (Double)", "3× (Triple)", "4× (Quadruple)"]):
+            tick_label = QLabel(label)
+            tick_label.setStyleSheet(f"color: {COLORS['text_medium']}; font-size: {FONTS['size_small']};")
+            tick_label.setAlignment(Qt.AlignCenter)
+            ticks_layout.addWidget(tick_label)
+        
+        frames_layout.addLayout(ticks_layout)
+        
+        shader_layout.addWidget(frames_frame)
+        shader_layout.addStretch(1)
+        
+        # Add tabs
+        tabs.addTab(motion_tab, "Motion Control")
+        tabs.addTab(shader_tab, "Shader & Frames")
+        
+        layout.addWidget(tabs)
+        
         title.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {COLORS['text_light']};")
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
