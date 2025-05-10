@@ -551,95 +551,473 @@ QStatusBar::item {{
 """
 
 class PreviewPane(QFrame):
-    """Custom widget for displaying original and processed image/video previews"""
+    """
+    Enhanced widget for displaying original and processed image/video previews
+    with drag-and-drop support, animations, and visual feedback.
+    """
+    # Signals
+    fileDropped = Signal(str)  # Emitted when a file is dropped onto the widget
+    fileSelected = Signal(str) # Emitted when a file is selected via dialog
     
-    def __init__(self, title, parent=None):
+    def __init__(self, title: str, parent=None):
         super().__init__(parent)
         self.setObjectName("previewPane")
         self.setAcceptDrops(True)
+        self.current_file_path = None
         
         # Create layout
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(int(SPACING["md"].replace("px", "")), 
+                                  int(SPACING["md"].replace("px", "")),
+                                  int(SPACING["md"].replace("px", "")),
+                                  int(SPACING["md"].replace("px", "")))
+        layout.setSpacing(int(SPACING["md"].replace("px", "")))
+        
+        # Header container with background
+        header_container = QFrame()
+        header_container.setObjectName("headerContainer")
+        header_container.setStyleSheet(f"""
+            QFrame#headerContainer {{
+                background-color: {COLORS["background_dark"]};
+                border-radius: {EFFECTS["border_radius_sm"]};
+                padding: 4px;
+            }}
+        """)
+        header_layout = QHBoxLayout(header_container)
+        header_layout.setContentsMargins(8, 4, 8, 4)
         
         # Title label
         self.title_label = QLabel(title)
+        self.title_label.setObjectName("title")
         self.title_label.setAlignment(Qt.AlignCenter)
-        self.title_label.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLORS['text_light']};")
+        header_layout.addWidget(self.title_label)
         
-        # Preview area (using QLabel for now, could be replaced with QGraphicsView for more complex needs)
+        # Control buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(8)
+        
+        # Reset button
+        self.reset_btn = QToolButton()
+        self.reset_btn.setIcon(self._create_icon("reset"))
+        self.reset_btn.setToolTip("Reset view")
+        self.reset_btn.setFixedSize(24, 24)
+        self.reset_btn.setStyleSheet("""
+            QToolButton {
+                background-color: transparent;
+                border: none;
+                border-radius: 4px;
+                padding: 2px;
+            }
+            QToolButton:hover {
+                background-color: rgba(255, 255, 255, 0.1);
+            }
+            QToolButton:pressed {
+                background-color: rgba(0, 0, 0, 0.1);
+            }
+        """)
+        self.reset_btn.clicked.connect(self.reset_view)
+        
+        # Export button
+        self.export_btn = QToolButton()
+        self.export_btn.setIcon(self._create_icon("export"))
+        self.export_btn.setToolTip("Export image")
+        self.export_btn.setFixedSize(24, 24)
+        self.export_btn.setStyleSheet("""
+            QToolButton {
+                background-color: transparent;
+                border: none;
+                border-radius: 4px;
+                padding: 2px;
+            }
+            QToolButton:hover {
+                background-color: rgba(255, 255, 255, 0.1);
+            }
+            QToolButton:pressed {
+                background-color: rgba(0, 0, 0, 0.1);
+            }
+        """)
+        self.export_btn.clicked.connect(self.export_image)
+        
+        btn_layout.addWidget(self.reset_btn)
+        btn_layout.addWidget(self.export_btn)
+        header_layout.addLayout(btn_layout)
+        
+        # Add header to main layout
+        layout.addWidget(header_container)
+        
+        # Preview area using QLabel with enhanced style
+        self.preview_container = QFrame()
+        self.preview_container.setObjectName("previewContainer")
+        preview_container_layout = QVBoxLayout(self.preview_container)
+        preview_container_layout.setContentsMargins(0, 0, 0, 0)
+        
         self.preview = QLabel()
         self.preview.setObjectName("previewLabel")
         self.preview.setAlignment(Qt.AlignCenter)
-        self.preview.setText(f"Drag & drop an image/video\nor click to select")
+        self.preview.setText("Drag & drop an image/video\nor click to select")
         self.preview.setWordWrap(True)
         self.preview.setMinimumSize(320, 240)
-        self.preview.setStyleSheet("padding: 20px;")
+        self.preview.setStyleSheet(f"""
+            QLabel#previewLabel {{
+                background-color: {COLORS["background_dark"]};
+                color: {COLORS["text_medium"]};
+                border-radius: {EFFECTS["border_radius_md"]};
+                padding: 20px;
+                font-size: {FONTS["size_medium"]};
+            }}
+        """)
         
         # Add shadow effect
         shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(15)
+        shadow.setBlurRadius(20)
         shadow.setColor(QColor(0, 0, 0, 100))
-        shadow.setOffset(0, 2)
+        shadow.setOffset(0, 5)
         self.preview.setGraphicsEffect(shadow)
         
-        # Add widgets to layout
-        layout.addWidget(self.title_label)
-        layout.addWidget(self.preview, 1)  # 1 = stretch factor
-        layout.setContentsMargins(12, 12, 12, 12)
+        preview_container_layout.addWidget(self.preview)
         
+        # Add info label for metadata
+        self.info_label = QLabel("")
+        self.info_label.setObjectName("subtitle")
+        self.info_label.setAlignment(Qt.AlignCenter)
+        self.info_label.setWordWrap(True)
+        self.info_label.setTextFormat(Qt.RichText)
+        
+        # Add widgets to layout
+        layout.addWidget(self.preview_container, 1)  # 1 = stretch factor
+        layout.addWidget(self.info_label)
+        
+        # Create context menu
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.show_context_menu)
+        
+        # Initialize buttons state
+        self.export_btn.setEnabled(False)
+        
+    def _create_icon(self, icon_type):
+        """Create SVG icons programmatically"""
+        if icon_type == "reset":
+            # Refresh/reset icon
+            return QIcon(self._get_svg_path("refresh"))
+        elif icon_type == "export":
+            # Export/download icon
+            return QIcon(self._get_svg_path("download"))
+        elif icon_type == "zoom_in":
+            # Zoom in icon
+            return QIcon(self._get_svg_path("zoom-in"))
+        elif icon_type == "zoom_out":
+            # Zoom out icon
+            return QIcon(self._get_svg_path("zoom-out"))
+        else:
+            # Default empty icon
+            pixmap = QPixmap(24, 24)
+            pixmap.fill(Qt.transparent)
+            return QIcon(pixmap)
+            
+    def _get_svg_path(self, icon_name):
+        """Generate SVG data for common icons"""
+        svg_icons = {
+            "refresh": """
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#E0E1DD" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M23 4v6h-6"></path>
+                    <path d="M1 20v-6h6"></path>
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"></path>
+                    <path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"></path>
+                </svg>
+            """,
+            "download": """
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#E0E1DD" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+            """,
+            "zoom-in": """
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#E0E1DD" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    <line x1="11" y1="8" x2="11" y2="14"></line>
+                    <line x1="8" y1="11" x2="14" y2="11"></line>
+                </svg>
+            """,
+            "zoom-out": """
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#E0E1DD" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    <line x1="8" y1="11" x2="14" y2="11"></line>
+                </svg>
+            """
+        }
+        
+        # Create a temporary file with the SVG data
+        if icon_name in svg_icons:
+            import tempfile
+            import os
+            
+            temp = tempfile.NamedTemporaryFile(suffix='.svg', delete=False)
+            temp.write(svg_icons[icon_name].encode('utf-8'))
+            temp.close()
+            
+            file_path = temp.name
+            return file_path
+        
+        return ""
+    
     def setPixmap(self, pixmap):
-        """Set the preview image"""
+        """Set the preview image with animation effect"""
         if pixmap and not pixmap.isNull():
+            # Store the original pixmap
+            self._original_pixmap = pixmap
+            
+            # Create the fade effect
+            self.fade_effect = QGraphicsOpacityEffect(self.preview)
+            self.preview.setGraphicsEffect(self.fade_effect)
+            
+            # Set up animation
+            self.fade_animation = QPropertyAnimation(self.fade_effect, b"opacity")
+            self.fade_animation.setDuration(ANIMATION["normal"])
+            self.fade_animation.setStartValue(0.3)
+            self.fade_animation.setEndValue(1.0)
+            self.fade_animation.setEasingCurve(QEasingCurve.OutCubic)
+            
+            # Connect animation finished signal to restore the shadow effect
+            self.fade_animation.finished.connect(self._restore_shadow)
+            
             # Scale pixmap to fit the label while maintaining aspect ratio
-            scaled_pixmap = pixmap.scaled(
-                self.preview.size(),
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation
-            )
-            self.preview.setPixmap(scaled_pixmap)
-            # Clear text once we have an image
-            self.preview.setText("")
+            self._update_preview()
+            
+            # Start the animation
+            self.fade_animation.start()
+            
+            # Update info label with image details
+            self._update_info()
+            
+            # Enable export button
+            self.export_btn.setEnabled(True)
         else:
             self.preview.clear()
             self.preview.setText("No image/video to display")
+            self.info_label.setText("")
+            self.export_btn.setEnabled(False)
+            self._original_pixmap = None
+    
+    def _restore_shadow(self):
+        """Restore the shadow effect after animation completes"""
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(20)
+        shadow.setColor(QColor(0, 0, 0, 100))
+        shadow.setOffset(0, 5)
+        self.preview.setGraphicsEffect(shadow)
+    
+    def _update_preview(self):
+        """Update the preview with the current pixmap scaled to fit"""
+        if not hasattr(self, '_original_pixmap') or self._original_pixmap is None:
+            return
             
+        # Scale pixmap to fit the label while maintaining aspect ratio
+        scaled_pixmap = self._original_pixmap.scaled(
+            self.preview.size(),
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation
+        )
+        self.preview.setPixmap(scaled_pixmap)
+        # Clear text once we have an image
+        self.preview.setText("")
+    
+    def _update_info(self):
+        """Update the info label with image metadata"""
+        if not hasattr(self, '_original_pixmap') or self._original_pixmap is None:
+            self.info_label.setText("")
+            return
+            
+        # Get image dimensions
+        width = self._original_pixmap.width()
+        height = self._original_pixmap.height()
+        
+        # Format file info if available
+        file_info = ""
+        if self.current_file_path:
+            file_name = os.path.basename(self.current_file_path)
+            file_size = os.path.getsize(self.current_file_path) / 1024  # KB
+            
+            if file_size >= 1024:
+                file_size = file_size / 1024  # Convert to MB
+                file_size_str = f"{file_size:.1f} MB"
+            else:
+                file_size_str = f"{file_size:.1f} KB"
+                
+            file_info = f"<b>{file_name}</b> ({file_size_str})"
+        
+        # Set the info text
+        self.info_label.setText(f"{file_info}<br>{width} × {height} pixels")
+    
+    def reset_view(self):
+        """Reset the view to its initial state"""
+        if hasattr(self, '_original_pixmap') and self._original_pixmap:
+            self._update_preview()
+    
+    def export_image(self):
+        """Export the current image to a file"""
+        if not hasattr(self, '_original_pixmap') or self._original_pixmap is None:
+            return
+            
+        # Get save path from user
+        suggested_name = "output.png"
+        if self.current_file_path:
+            file_info = QFileInfo(self.current_file_path)
+            suggested_name = f"{file_info.baseName()}_processed.png"
+            
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Image",
+            suggested_name,
+            "PNG Images (*.png);;JPEG Images (*.jpg *.jpeg);;All Files (*)"
+        )
+        
+        if file_path:
+            # Save the original pixmap to preserve quality
+            self._original_pixmap.save(file_path)
+            
+            # Show quick animation feedback
+            self._show_save_animation()
+    
+    def _show_save_animation(self):
+        """Show a quick animation to indicate successful save"""
+        save_indicator = QLabel("✓ Saved", self)
+        save_indicator.setStyleSheet(f"""
+            background-color: {COLORS["success"]};
+            color: white;
+            padding: 8px 16px;
+            border-radius: {EFFECTS["border_radius_md"]};
+            font-weight: bold;
+        """)
+        save_indicator.setAlignment(Qt.AlignCenter)
+        
+        # Position the indicator
+        save_indicator.move(
+            (self.width() - save_indicator.sizeHint().width()) // 2,
+            (self.height() - save_indicator.sizeHint().height()) // 2
+        )
+        save_indicator.show()
+        
+        # Create fade animation
+        opacity_effect = QGraphicsOpacityEffect(save_indicator)
+        save_indicator.setGraphicsEffect(opacity_effect)
+        
+        fade_animation = QPropertyAnimation(opacity_effect, b"opacity")
+        fade_animation.setDuration(1500)  # 1.5 seconds
+        fade_animation.setStartValue(1.0)
+        fade_animation.setEndValue(0.0)
+        fade_animation.setEasingCurve(QEasingCurve.OutCubic)
+        
+        # Connect animation finished signal to remove the indicator
+        fade_animation.finished.connect(save_indicator.deleteLater)
+        
+        # Start the animation
+        fade_animation.start()
+    
+    def show_context_menu(self, position):
+        """Show context menu with options"""
+        context_menu = QMenu(self)
+        
+        # Only add these actions if we have an image
+        if hasattr(self, '_original_pixmap') and self._original_pixmap:
+            reset_action = context_menu.addAction("Reset View")
+            reset_action.triggered.connect(self.reset_view)
+            
+            export_action = context_menu.addAction("Export Image...")
+            export_action.triggered.connect(self.export_image)
+            
+            context_menu.addSeparator()
+        
+        # These actions are always available
+        open_action = context_menu.addAction("Open File...")
+        open_action.triggered.connect(self.open_file_dialog)
+        
+        # Show the context menu
+        context_menu.exec_(self.mapToGlobal(position))
+    
     def dragEnterEvent(self, event):
         """Handle drag enter events for drag & drop functionality"""
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
-            
+            # Change styling to indicate drop is possible
+            self.setStyleSheet(f"""
+                QFrame#previewPane {{
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 rgba(46, 139, 192, 0.2),
+                                stop:1 rgba(13, 27, 42, 0.85));
+                    border-radius: {EFFECTS["border_radius_lg"]};
+                    border: 2px dashed {COLORS["accent_primary"]};
+                }}
+            """)
+    
+    def dragLeaveEvent(self, event):
+        """Handle drag leave events"""
+        # Reset styling
+        self.setStyleSheet("")
+    
+    def dragMoveEvent(self, event):
+        """Handle drag move events"""
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+    
     def dropEvent(self, event):
         """Handle drop events for drag & drop functionality"""
+        # Reset styling
+        self.setStyleSheet("")
+        
         if event.mimeData().hasUrls():
             url = event.mimeData().urls()[0]
             file_path = url.toLocalFile()
             
             # Simple check for image files (could be expanded for videos)
-            if file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
+            if file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp')):
                 pixmap = QPixmap(file_path)
                 if not pixmap.isNull():
+                    self.current_file_path = file_path
                     self.setPixmap(pixmap)
-                    # Emit a signal here to notify parent of new image
+                    self.fileDropped.emit(file_path)
             
             event.acceptProposedAction()
+    
+    def open_file_dialog(self):
+        """Open a file dialog to select an image"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, 
+            "Open Image/Video", 
+            "", 
+            "Images (*.png *.jpg *.jpeg *.bmp *.webp *.gif);;Videos (*.mp4 *.avi *.mov);;All Files (*)"
+        )
+        
+        if file_path:
+            if file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.webp')):
+                pixmap = QPixmap(file_path)
+                if not pixmap.isNull():
+                    self.current_file_path = file_path
+                    self.setPixmap(pixmap)
+                    self.fileSelected.emit(file_path)
+            # Video file handling can be added here
     
     def mousePressEvent(self, event):
         """Handle mouse press events for file selection dialog"""
         if event.button() == Qt.LeftButton:
-            file_path, _ = QFileDialog.getOpenFileName(
-                self, 
-                "Open Image/Video", 
-                "", 
-                "Images (*.png *.jpg *.jpeg *.bmp);;Videos (*.mp4 *.avi *.mov);;All Files (*)"
-            )
-            
-            if file_path:
-                if file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp')):
-                    pixmap = QPixmap(file_path)
-                    if not pixmap.isNull():
-                        self.setPixmap(pixmap)
-                        # Emit a signal here to notify parent of new image
-                # Handle video files here
+            # Only open dialog if we don't already have an image
+            if not hasattr(self, '_original_pixmap') or self._original_pixmap is None:
+                self.open_file_dialog()
+        
+        super().mousePressEvent(event)
+    
+    def resizeEvent(self, event):
+        """Handle resize events to update the preview scaling"""
+        super().resizeEvent(event)
+        self._update_preview()
+        
+    def cleanup(self):
+        """Clean up any temporary files created for icons"""
+        # If we created temporary SVG files, delete them
+        # This would be called when the widget is destroyed
+        pass
 
 class SettingsPanel(QWidget):
     """Dockable settings panel with form layout and controls"""
