@@ -2002,77 +2002,176 @@ class InterpolationDialog(QDialog):
             return "blend"
 
 class ComputeControlsPane(QWidget):
-    """Widget containing graphics & compute controls with viewport and toolbar"""
+    """
+    Enhanced widget for graphics & compute controls with data visualization,
+    performance monitoring, and interactive viewport.
+    """
+    
+    # Signals
+    debugViewToggled = Signal(bool)
+    performanceViewToggled = Signal(bool)
+    exportRequested = Signal()
+    resetRequested = Signal()
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self.initUI()
         
+        # Initialize performance data
+        self.performance_data = {
+            "gpu_usage": [0] * 60,
+            "fps": [0] * 60,
+            "vram": [0] * 60
+        }
+        
+        # Start update timer for animated display
+        self.update_timer = QTimer(self)
+        self.update_timer.timeout.connect(self.updateViewport)
+        self.update_timer.start(1000 // 30)  # 30 FPS updates
+    
     def initUI(self):
-        """Initialize the user interface"""
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(12)
+        """Initialize the user interface with improved layout and graphics"""
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(int(SPACING["md"].replace("px", "")), 
+                                    int(SPACING["md"].replace("px", "")),
+                                    int(SPACING["md"].replace("px", "")),
+                                    int(SPACING["md"].replace("px", "")))
+        main_layout.setSpacing(int(SPACING["md"].replace("px", "")))
         
-        # Title
+        # Header area with title and view options
+        header_layout = QHBoxLayout()
+        
         title = QLabel("Graphics & Compute Controls")
-        title.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLORS['text_light']};")
-        title.setAlignment(Qt.AlignCenter)
-        layout.addWidget(title)
+        title.setObjectName("title")
+        title.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         
-        # Main viewport (placeholder)
+        # View mode tabs
+        view_tabs = QTabWidget()
+        view_tabs.setObjectName("viewTabs")
+        view_tabs.setStyleSheet(f"""
+            QTabWidget#viewTabs {{
+                min-height: 150px;
+            }}
+            QTabWidget::pane {{
+                border: none;
+            }}
+        """)
+        
+        # Main viewport
         self.viewport = QGraphicsView()
+        self.viewport.setRenderHint(QPainter.Antialiasing)
+        self.viewport.setRenderHint(QPainter.SmoothPixmapTransform)
+        self.viewport.setFrameShape(QFrame.NoFrame)
+        self.viewport.setStyleSheet(f"""
+            background-color: {COLORS["background_dark"]};
+            border-radius: {EFFECTS["border_radius_md"]};
+        """)
+        
         self.scene = QGraphicsScene()
+        self.scene.setBackgroundBrush(QBrush(QColor(COLORS["background_dark"])))
         self.viewport.setScene(self.scene)
-        self.viewport.setMinimumHeight(120)
         
-        # Add shadow effect to viewport
+        # Debug view
+        self.debug_view = QGraphicsView()
+        self.debug_view.setRenderHint(QPainter.Antialiasing)
+        self.debug_view.setFrameShape(QFrame.NoFrame)
+        self.debug_view.setStyleSheet(f"""
+            background-color: {COLORS["background_dark"]};
+            border-radius: {EFFECTS["border_radius_md"]};
+        """)
+        
+        self.debug_scene = QGraphicsScene()
+        self.debug_scene.setBackgroundBrush(QBrush(QColor(COLORS["background_dark"])))
+        self.debug_view.setScene(self.debug_scene)
+        
+        # Performance view
+        self.perf_view = QGraphicsView()
+        self.perf_view.setRenderHint(QPainter.Antialiasing)
+        self.perf_view.setFrameShape(QFrame.NoFrame)
+        self.perf_view.setStyleSheet(f"""
+            background-color: {COLORS["background_dark"]};
+            border-radius: {EFFECTS["border_radius_md"]};
+        """)
+        
+        self.perf_scene = QGraphicsScene()
+        self.perf_scene.setBackgroundBrush(QBrush(QColor(COLORS["background_dark"])))
+        self.perf_view.setScene(self.perf_scene)
+        
+        # Add views to tabs
+        view_tabs.addTab(self.viewport, "Standard View")
+        view_tabs.addTab(self.debug_view, "Debug View")
+        view_tabs.addTab(self.perf_view, "Performance")
+        
+        # Add shadow effect to the viewport tabs
         shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(15)
+        shadow.setBlurRadius(20)
         shadow.setColor(QColor(0, 0, 0, 100))
-        shadow.setOffset(0, 2)
-        self.viewport.setGraphicsEffect(shadow)
+        shadow.setOffset(0, 5)
+        view_tabs.setGraphicsEffect(shadow)
         
-        layout.addWidget(self.viewport)
+        header_layout.addWidget(title)
         
-        # Toolbar
+        # Add the header and viewport to main layout
+        main_layout.addLayout(header_layout)
+        main_layout.addWidget(view_tabs, 1)  # 1 = stretch factor
+        
+        # Toolbar with stylized buttons
         toolbar_frame = QFrame()
+        toolbar_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS["background_medium"]};
+                border-radius: {EFFECTS["border_radius_md"]};
+                padding: 4px;
+            }}
+        """)
+        
         toolbar_layout = QHBoxLayout(toolbar_frame)
-        toolbar_layout.setContentsMargins(8, 8, 8, 8)
-        toolbar_layout.setSpacing(8)
+        toolbar_layout.setContentsMargins(int(SPACING["sm"].replace("px", "")), 
+                                        int(SPACING["sm"].replace("px", "")),
+                                        int(SPACING["sm"].replace("px", "")),
+                                        int(SPACING["sm"].replace("px", "")))
+        toolbar_layout.setSpacing(int(SPACING["sm"].replace("px", "")))
         
-        # Toolbar buttons
-        self.debug_btn = QPushButton("Debug View")
-        self.performance_btn = QPushButton("Performance")
-        self.export_btn = QPushButton("Export")
-        self.reset_btn = QPushButton("Reset")
+        # Toolbar buttons with icons
+        self.debug_btn = self._create_tool_button("Debug View", "debug")
+        self.debug_btn.setCheckable(True)
+        self.debug_btn.clicked.connect(lambda checked: self.debugViewToggled.emit(checked))
         
-        # Style the export button differently
-        self.export_btn.setStyleSheet(f"background-color: {COLORS['accent_secondary']};")
+        self.performance_btn = self._create_tool_button("Performance", "chart")
+        self.performance_btn.setCheckable(True)
+        self.performance_btn.clicked.connect(lambda checked: self.performanceViewToggled.emit(checked))
+        
+        self.export_btn = self._create_tool_button("Export", "export")
+        self.export_btn.setObjectName("accentButton")
+        self.export_btn.clicked.connect(self.exportRequested.emit)
+        
+        self.reset_btn = self._create_tool_button("Reset", "reset")
+        self.reset_btn.clicked.connect(self.resetRequested.emit)
+        
+        # GPU Usage indicator
+        self.gpu_indicator = QProgressBar()
+        self.gpu_indicator.setRange(0, 100)
+        self.gpu_indicator.setValue(0)
+        self.gpu_indicator.setFormat("GPU: %p%")
+        self.gpu_indicator.setTextVisible(True)
+        self.gpu_indicator.setFixedWidth(120)
+        self.gpu_indicator.setToolTip("Current GPU utilization")
+        
+        # FPS counter
+        self.fps_label = QLabel("60 FPS")
+        self.fps_label.setStyleSheet(f"""
+            background-color: {COLORS["background_dark"]};
+            color: {COLORS["accent_primary"]};
+            padding: 4px 8px;
+            border-radius: {EFFECTS["border_radius_sm"]};
+            font-weight: {FONTS["weight_bold"]};
+        """)
+        self.fps_label.setFixedWidth(70)
+        self.fps_label.setAlignment(Qt.AlignCenter)
+        self.fps_label.setToolTip("Current frames per second")
         
         toolbar_layout.addWidget(self.debug_btn)
         toolbar_layout.addWidget(self.performance_btn)
-        toolbar_layout.addStretch(1)
-        toolbar_layout.addWidget(self.export_btn)
-        toolbar_layout.addWidget(self.reset_btn)
-        
-        layout.addWidget(toolbar_frame)
-
-class MainWindow(QMainWindow):
-    """Main application window implementing the four-pane mockup design"""
-    
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("Nu_Scaler")
-        self.resize(1200, 800)
-        self.initUI()
-        
-        # Start statusbar update timer
-        self.status_timer = QTimer(self)
-        self.status_timer.timeout.connect(self.updateStatusBar)
-        self.status_timer.start(1000)  # Update every second
-        
-    def initUI(self):
         """Initialize the user interface"""
         # Set central widget
         central_widget = QWidget()
@@ -2178,16 +2277,638 @@ class MainWindow(QMainWindow):
         self.time_label.setText(f"Process Time: {process_time:.1f}ms")
         self.progress_bar.setValue(gpu_usage)
 
+class MainWindow(QMainWindow):
+    """
+    Enhanced main application window with improved layouts, animations,
+    and professional visual styling.
+    """
+    
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Nu_Scaler")
+        self.resize(1280, 800)
+        
+        # Track app state
+        self.processing_active = False
+        self.current_file = None
+        
+        # Initialize UI
+        self.initUI()
+        
+        # Set up timers
+        self.setupTimers()
+        
+        # Load initial settings
+        self.loadSettings()
+        
+        # Set up keyboard shortcuts
+        self.setupShortcuts()
+        
+        # Show a welcome message
+        self.showWelcomeMessage()
+    
+    def initUI(self):
+        """Initialize the user interface with improved layout and components"""
+        # Create menu bar with standard menus
+        self.createMenus()
+        
+        # Set central widget
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        
+        # Main layout with proper spacing
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(int(SPACING["md"].replace("px", "")), 
+                                     int(SPACING["md"].replace("px", "")),
+                                     int(SPACING["md"].replace("px", "")),
+                                     int(SPACING["md"].replace("px", "")))
+        main_layout.setSpacing(int(SPACING["md"].replace("px", "")))
+        
+        # Create splitter for preview panes
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.setHandleWidth(1)
+        splitter.setChildrenCollapsible(False)
+        
+        # Create preview panes with better styling and drop shadows
+        self.original_pane = PreviewPane("Original Input")
+        self.processed_pane = PreviewPane("Processed Output")
+        
+        # Add panes to splitter
+        splitter.addWidget(self.original_pane)
+        splitter.addWidget(self.processed_pane)
+        splitter.setSizes([int(self.width()/2), int(self.width()/2)])  # Equal initial size
+        
+        # Add splitter to main layout with stretch factor
+        main_layout.addWidget(splitter, 3)  # 3 = relative stretch factor
+        
+        # Graphics & Compute controls pane
+        self.compute_pane = ComputeControlsPane()
+        main_layout.addWidget(self.compute_pane, 1)  # 1 = relative stretch factor
+        
+        # Create settings panel as dock widget
+        self.settings_panel = SettingsPanel()
+        self.settings_dock = QDockWidget("Settings", self)
+        self.settings_dock.setWidget(self.settings_panel)
+        self.settings_dock.setFeatures(QDockWidget.DockWidgetClosable | QDockWidget.DockWidgetFloatable)
+        self.settings_dock.setAllowedAreas(Qt.RightDockWidgetArea | Qt.LeftDockWidgetArea)
+        
+        # Add dock widget to the right
+        self.addDockWidget(Qt.RightDockWidgetArea, self.settings_dock)
+        
+        # Create interpolation dialog (initially hidden)
+        self.interpolation_dialog = InterpolationDialog(self)
+        
+        # Create enhanced status bar
+        self.createStatusBar()
+        
+        # Connect signals for better interactivity
+        self.connectSignals()
+    
+    def createMenus(self):
+        """Create application menus with standard options and keyboard shortcuts"""
+        # Main menu bar
+        menu_bar = self.menuBar()
+        
+        # File menu
+        file_menu = menu_bar.addMenu("&File")
+        
+        # Open action
+        open_action = QAction("&Open Image/Video...", self)
+        open_action.setShortcut(QKeySequence.Open)
+        open_action.triggered.connect(self.openFile)
+        file_menu.addAction(open_action)
+        
+        # Save result action
+        save_action = QAction("&Save Processed Result...", self)
+        save_action.setShortcut(QKeySequence.Save)
+        save_action.triggered.connect(self.saveResult)
+        save_action.setEnabled(False)  # Initially disabled
+        self.save_action = save_action  # Store reference to update enabled state
+        file_menu.addAction(save_action)
+        
+        file_menu.addSeparator()
+        
+        # Settings submenu
+        settings_submenu = file_menu.addMenu("Settings")
+        
+        # Load settings action
+        load_settings_action = QAction("Load Settings...", self)
+        load_settings_action.triggered.connect(self.loadSettingsFromFile)
+        settings_submenu.addAction(load_settings_action)
+        
+        # Save settings action
+        save_settings_action = QAction("Save Settings...", self)
+        save_settings_action.triggered.connect(self.saveSettingsToFile)
+        settings_submenu.addAction(save_settings_action)
+        
+        file_menu.addSeparator()
+        
+        # Exit action
+        exit_action = QAction("E&xit", self)
+        exit_action.setShortcut(QKeySequence.Quit)
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+        
+        # Edit menu
+        edit_menu = menu_bar.addMenu("&Edit")
+        
+        # Copy action
+        copy_action = QAction("&Copy Processed Image", self)
+        copy_action.setShortcut(QKeySequence.Copy)
+        copy_action.triggered.connect(self.copyToClipboard)
+        copy_action.setEnabled(False)  # Initially disabled
+        self.copy_action = copy_action  # Store reference to update enabled state
+        edit_menu.addAction(copy_action)
+        
+        # View menu
+        view_menu = menu_bar.addMenu("&View")
+        
+        # Toggle settings panel action
+        toggle_settings_action = QAction("&Settings Panel", self)
+        toggle_settings_action.setCheckable(True)
+        toggle_settings_action.setChecked(True)
+        toggle_settings_action.triggered.connect(self.toggleSettingsPanel)
+        view_menu.addAction(toggle_settings_action)
+        
+        # Reset layout action
+        reset_layout_action = QAction("Reset &Layout", self)
+        reset_layout_action.triggered.connect(self.resetLayout)
+        view_menu.addAction(reset_layout_action)
+        
+        # Processing menu
+        processing_menu = menu_bar.addMenu("&Processing")
+        
+        # Start/stop processing action
+        self.toggle_processing_action = QAction("&Start Processing", self)
+        self.toggle_processing_action.setShortcut("F5")
+        self.toggle_processing_action.triggered.connect(self.toggleProcessing)
+        processing_menu.addAction(self.toggle_processing_action)
+        
+        # Advanced interpolation action
+        advanced_action = QAction("Advanced &Interpolation Settings...", self)
+        advanced_action.triggered.connect(self.showInterpolationDialog)
+        processing_menu.addAction(advanced_action)
+        
+        # Help menu
+        help_menu = menu_bar.addMenu("&Help")
+        
+        # About action
+        about_action = QAction("&About Nu_Scaler", self)
+        about_action.triggered.connect(self.showAboutDialog)
+        help_menu.addAction(about_action)
+        
+        # Documentation action
+        docs_action = QAction("&Documentation", self)
+        docs_action.triggered.connect(self.openDocumentation)
+        help_menu.addAction(docs_action)
+    
+    def createStatusBar(self):
+        """Create an enhanced status bar with animated indicators"""
+        # Create custom status bar with better styling
+        self.statusBar = QStatusBar()
+        self.statusBar.setStyleSheet(f"""
+            QStatusBar {{
+                background-color: {COLORS["background_medium"]};
+                border-top: 1px solid {COLORS["border"]};
+                padding: 2px;
+            }}
+        """)
+        self.setStatusBar(self.statusBar)
+        
+        # Add status indicators with improved styling
+        # FPS indicator
+        self.fps_label = QLabel("FPS: 0")
+        self.fps_label.setObjectName("statusLabel")
+        self.fps_label.setToolTip("Current processing frame rate")
+        
+        # GPU usage indicator
+        gpu_layout = QHBoxLayout()
+        gpu_layout.setContentsMargins(0, 0, 0, 0)
+        gpu_layout.setSpacing(4)
+        
+        gpu_text = QLabel("GPU:")
+        
+        self.gpu_progress = QProgressBar()
+        self.gpu_progress.setRange(0, 100)
+        self.gpu_progress.setValue(0)
+        self.gpu_progress.setFormat("%p%")
+        self.gpu_progress.setTextVisible(True)
+        self.gpu_progress.setMinimumWidth(80)
+        self.gpu_progress.setMaximumWidth(100)
+        self.gpu_progress.setMaximumHeight(16)
+        self.gpu_progress.setToolTip("Current GPU utilization")
+        
+        gpu_container = QWidget()
+        gpu_layout.addWidget(gpu_text)
+        gpu_layout.addWidget(self.gpu_progress)
+        gpu_container.setLayout(gpu_layout)
+        
+        # Process time indicator
+        self.time_label = QLabel("Process: 0ms")
+        self.time_label.setObjectName("statusLabel")
+        self.time_label.setToolTip("Frame processing time")
+        
+        # Overall progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFormat("%p%")
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setMaximumWidth(150)
+        self.progress_bar.setMaximumHeight(16)
+        self.progress_bar.setToolTip("Overall processing progress")
+        
+        # Status message label
+        self.status_label = QLabel("Ready")
+        self.status_label.setStyleSheet(f"color: {COLORS['text_light']};")
+        
+        # Add widgets to status bar
+        self.statusBar.addWidget(self.fps_label)
+        self.statusBar.addWidget(gpu_container)
+        self.statusBar.addWidget(self.time_label)
+        self.statusBar.addWidget(self.progress_bar)
+        self.statusBar.addPermanentWidget(self.status_label, 1)  # Stretch=1, align right
+    
+    def connectSignals(self):
+        """Connect signals to slots for all UI components"""
+        # Settings panel signals
+        self.settings_panel.advancedRequested.connect(self.showInterpolationDialog)
+        self.settings_panel.settingsChanged.connect(self.onSettingsChanged)
+        self.settings_panel.profileSelected.connect(self.onProfileSelected)
+        
+        # Interpolation dialog signals
+        self.interpolation_dialog.settingsApplied.connect(self.onInterpolationSettingsApplied)
+        
+        # Preview pane signals
+        self.original_pane.fileDropped.connect(self.onFileDropped)
+        self.original_pane.fileSelected.connect(self.onFileSelected)
+        
+        # Compute pane signals
+        self.compute_pane.debugViewToggled.connect(self.onDebugViewToggled)
+        self.compute_pane.performanceViewToggled.connect(self.onPerformanceViewToggled)
+        self.compute_pane.exportRequested.connect(self.saveResult)
+        self.compute_pane.resetRequested.connect(self.resetProcessing)
+    
+    def setupTimers(self):
+        """Set up timers for UI updates and animations"""
+        # Status bar update timer
+        self.status_timer = QTimer(self)
+        self.status_timer.timeout.connect(self.updateStatusBar)
+        self.status_timer.start(500)  # Update every 500ms
+        
+        # Processing simulation timer (for demo purposes)
+        self.process_timer = QTimer(self)
+        self.process_timer.timeout.connect(self.simulateProcessing)
+    
+    def setupShortcuts(self):
+        """Set up keyboard shortcuts for the application"""
+        # F11 for full screen toggle
+        fullscreen_shortcut = QShortcut(QKeySequence("F11"), self)
+        fullscreen_shortcut.activated.connect(self.toggleFullScreen)
+        
+        # Ctrl+R to reset processing
+        reset_shortcut = QShortcut(QKeySequence("Ctrl+R"), self)
+        reset_shortcut.activated.connect(self.resetProcessing)
+        
+        # Esc to exit fullscreen
+        esc_shortcut = QShortcut(QKeySequence("Esc"), self)
+        esc_shortcut.activated.connect(self.exitFullScreen)
+    
+    def loadSettings(self):
+        """Load application settings"""
+        # This would normally load from QSettings or a config file
+        # For now, we'll just use defaults
+        pass
+    
+    def toggleFullScreen(self):
+        """Toggle fullscreen mode"""
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
+    
+    def exitFullScreen(self):
+        """Exit fullscreen mode if active"""
+        if self.isFullScreen():
+            self.showNormal()
+    
+    def showInterpolationDialog(self):
+        """Show the advanced interpolation settings dialog"""
+        self.interpolation_dialog.exec()
+    
+    def onSettingsChanged(self, settings):
+        """Handle changes to the settings panel"""
+        # Update status
+        self.status_label.setText(f"Settings applied: {settings['method']} at {settings['scale']}x scale")
+        
+        # Enable the processing button
+        self.toggle_processing_action.setEnabled(True)
+        
+        # Additional processing logic would go here
+    
+    def onInterpolationSettingsApplied(self, settings):
+        """Handle application of interpolation settings"""
+        # Update status
+        self.status_label.setText(f"Interpolation settings applied: {settings['shader']} shader")
+        
+        # Additional processing logic would go here
+    
+    def onProfileSelected(self, profile_name):
+        """Handle selection of a preset profile"""
+        self.status_label.setText(f"Profile '{profile_name}' loaded")
+    
+    def onFileDropped(self, file_path):
+        """Handle file dropped on the original preview pane"""
+        self.current_file = file_path
+        self.status_label.setText(f"Loaded file: {os.path.basename(file_path)}")
+        
+        # Enable processing actions
+        self.toggle_processing_action.setEnabled(True)
+        
+        # If we were processing, restart with the new file
+        if self.processing_active:
+            self.stopProcessing()
+            self.startProcessing()
+    
+    def onFileSelected(self, file_path):
+        """Handle file selected through dialog"""
+        self.onFileDropped(file_path)
+    
+    def onDebugViewToggled(self, enabled):
+        """Handle debug view toggle"""
+        if enabled:
+            self.status_label.setText("Debug view enabled")
+        else:
+            self.status_label.setText("Debug view disabled")
+    
+    def onPerformanceViewToggled(self, enabled):
+        """Handle performance view toggle"""
+        if enabled:
+            self.status_label.setText("Performance monitoring enabled")
+        else:
+            self.status_label.setText("Performance monitoring disabled")
+    
+    def toggleSettingsPanel(self, visible):
+        """Toggle the visibility of the settings panel"""
+        self.settings_dock.setVisible(visible)
+    
+    def resetLayout(self):
+        """Reset the application layout to defaults"""
+        # Reset dock widgets
+        self.settings_dock.setVisible(True)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.settings_dock)
+        
+        # Reset splitter proportions
+        splitter = self.findChild(QSplitter)
+        if splitter:
+            splitter.setSizes([int(self.width()/2), int(self.width()/2)])
+        
+        self.status_label.setText("Layout reset to defaults")
+    
+    def toggleProcessing(self):
+        """Toggle processing start/stop"""
+        if self.processing_active:
+            self.stopProcessing()
+        else:
+            self.startProcessing()
+    
+    def startProcessing(self):
+        """Start the processing simulation"""
+        # Update UI state
+        self.processing_active = True
+        self.toggle_processing_action.setText("&Stop Processing")
+        self.status_label.setText("Processing started")
+        
+        # Start processing timer
+        self.process_timer.start(100)  # Update every 100ms for simulation
+        
+        # Reset progress
+        self.progress_bar.setValue(0)
+    
+    def stopProcessing(self):
+        """Stop the processing simulation"""
+        # Update UI state
+        self.processing_active = False
+        self.toggle_processing_action.setText("&Start Processing")
+        self.status_label.setText("Processing stopped")
+        
+        # Stop processing timer
+        self.process_timer.stop()
+    
+    def resetProcessing(self):
+        """Reset the processing state"""
+        # Stop processing if active
+        if self.processing_active:
+            self.stopProcessing()
+        
+        # Clear the processed pane
+        self.processed_pane.setPixmap(None)
+        
+        # Reset progress
+        self.progress_bar.setValue(0)
+        
+        # Update copy/save actions
+        self.copy_action.setEnabled(False)
+        self.save_action.setEnabled(False)
+        
+        self.status_label.setText("Processing reset")
+    
+    def simulateProcessing(self):
+        """Simulate processing for demonstration purposes"""
+        import random
+        
+        # Only proceed if we have an input image
+        if not hasattr(self.original_pane, '_original_pixmap') or self.original_pane._original_pixmap is None:
+            self.stopProcessing()
+            return
+        
+        # Increment progress
+        current_progress = self.progress_bar.value()
+        new_progress = min(100, current_progress + random.randint(1, 5))
+        self.progress_bar.setValue(new_progress)
+        
+        # When complete, update the processed image
+        if new_progress >= 100:
+            self.stopProcessing()
+            self.status_label.setText("Processing completed")
+            
+            # Create a simulated "processed" image from the original
+            if hasattr(self.original_pane, '_original_pixmap'):
+                # This is where actual processing would happen
+                # For demo, just create a modified copy of the original
+                processed_pixmap = self.original_pane._original_pixmap.copy()
+                
+                # Apply a simple brightness/contrast adjustment (just for demo)
+                image = processed_pixmap.toImage()
+                for y in range(image.height()):
+                    for x in range(image.width()):
+                        color = QColor(image.pixel(x, y))
+                        h, s, v, a = color.getHsv()
+                        
+                        # Increase saturation and value
+                        new_s = min(255, int(s * 1.2))
+                        new_v = min(255, int(v * 1.1))
+                        
+                        color.setHsv(h, new_s, new_v, a)
+                        image.setPixelColor(x, y, color)
+                
+                processed_pixmap = QPixmap.fromImage(image)
+                
+                # Update the processed pane
+                self.processed_pane.setPixmap(processed_pixmap)
+                self.processed_pane.current_file_path = None  # Clear file path as this is a generated image
+                
+                # Enable copy/save actions
+                self.copy_action.setEnabled(True)
+                self.save_action.setEnabled(True)
+    
+    def updateStatusBar(self):
+        """Update status bar with current values"""
+        if self.processing_active:
+            # Generate realistic but simulated values when processing
+            import random
+            import math
+            import time
+            
+            # Sine wave variation for more realistic appearance
+            t = time.time()
+            
+            # FPS between 45-60 with sine wave variation
+            fps = 55 + 5 * math.sin(t * 2) + random.uniform(-2, 2)
+            
+            # GPU usage between 40-90% with sine wave variation
+            gpu_usage = 65 + 20 * math.sin(t * 0.5) + random.uniform(-5, 5)
+            
+            # Process time 5-15ms with sine wave variation
+            process_time = 10 + 5 * math.sin(t * 1.5) + random.uniform(-2, 2)
+            
+            self.fps_label.setText(f"FPS: {fps:.1f}")
+            self.gpu_progress.setValue(int(gpu_usage))
+            self.time_label.setText(f"Process: {process_time:.1f}ms")
+        else:
+            # Static values when not processing
+            self.fps_label.setText("FPS: --")
+            self.gpu_progress.setValue(0)
+            self.time_label.setText("Process: --")
+    
+    def openFile(self):
+        """Open a file through menu action"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, 
+            "Open Image/Video", 
+            "", 
+            "Images (*.png *.jpg *.jpeg *.bmp *.webp);;Videos (*.mp4 *.avi *.mov);;All Files (*)"
+        )
+        
+        if file_path:
+            self.onFileSelected(file_path)
+    
+    def saveResult(self):
+        """Save the processed result"""
+        if not hasattr(self.processed_pane, '_original_pixmap') or self.processed_pane._original_pixmap is None:
+            return
+            
+        # Get save path from user
+        suggested_name = "output.png"
+        if self.current_file:
+            file_info = QFileInfo(self.current_file)
+            suggested_name = f"{file_info.baseName()}_processed.png"
+            
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Processed Image",
+            suggested_name,
+            "PNG Images (*.png);;JPEG Images (*.jpg *.jpeg);;All Files (*)"
+        )
+        
+        if file_path:
+            # Save the processed image
+            self.processed_pane._original_pixmap.save(file_path)
+            self.status_label.setText(f"Saved processed image to: {os.path.basename(file_path)}")
+    
+    def copyToClipboard(self):
+        """Copy the processed image to clipboard"""
+        if not hasattr(self.processed_pane, '_original_pixmap') or self.processed_pane._original_pixmap is None:
+            return
+            
+        # Copy to clipboard
+        from PySide6.QtGui import QGuiApplication
+        clipboard = QGuiApplication.clipboard()
+        clipboard.setPixmap(self.processed_pane._original_pixmap)
+        
+        self.status_label.setText("Copied processed image to clipboard")
+    
+    def loadSettingsFromFile(self):
+        """Load settings from a file"""
+        # This would load from a settings file
+        self.status_label.setText("Settings loaded from file")
+    
+    def saveSettingsToFile(self):
+        """Save current settings to a file"""
+        # This would save to a settings file
+        self.status_label.setText("Settings saved to file")
+    
+    def showAboutDialog(self):
+        """Show the about dialog"""
+        from PySide6.QtWidgets import QMessageBox
+        
+        QMessageBox.about(
+            self,
+            "About Nu_Scaler",
+            f"""<h1>Nu_Scaler</h1>
+            <p>Version 1.0</p>
+            <p>A real-time upscaling application for video and games.</p>
+            <p>© 2023 Nu_Scaler Team</p>"""
+        )
+    
+    def openDocumentation(self):
+        """Open the documentation"""
+        # This would open documentation in browser
+        self.status_label.setText("Opening documentation...")
+    
+    def showWelcomeMessage(self):
+        """Show a welcome message in the status bar with animation"""
+        messages = [
+            "Welcome to Nu_Scaler",
+            "Drag & drop an image to get started",
+            "Ready"
+        ]
+        
+        # Use a timer to show each message in sequence
+        for i, message in enumerate(messages):
+            QTimer.singleShot(i * 1500, lambda msg=message: self.status_label.setText(msg))
+
 def run_gui():
-    """Start the application"""
+    """Start the application with proper error handling and styling"""
     app = QApplication(sys.argv)
     
-    # Set global stylesheet
+    # Set application info
+    app.setApplicationName("Nu_Scaler")
+    app.setApplicationVersion("1.0")
+    app.setOrganizationName("Nu_Scaler Team")
+    
+    # Apply global stylesheet
     app.setStyleSheet(STYLESHEET)
     
-    window = MainWindow()
-    window.show()
-    return app.exec()
+    try:
+        # Create and show main window
+        window = MainWindow()
+        window.show()
+        
+        # Start the event loop
+        return app.exec()
+    except Exception as e:
+        from PySide6.QtWidgets import QMessageBox
+        
+        # Show error dialog
+        error_box = QMessageBox()
+        error_box.setIcon(QMessageBox.Critical)
+        error_box.setWindowTitle("Application Error")
+        error_box.setText("An error occurred while starting Nu_Scaler")
+        error_box.setDetailedText(str(e))
+        error_box.exec()
+        
+        return 1
 
 if __name__ == "__main__":
     sys.exit(run_gui()) 
