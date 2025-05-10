@@ -2034,10 +2034,91 @@ class MainWindow(QMainWindow):
 
     def apply_theme(self):
         self.setStyleSheet("""
-            QMainWindow { background: #181818; }
-            QLabel { font-family: 'Segoe UI', 'Arial', sans-serif; }
-            QListWidget::item:selected { background: #444; color: #fff; }
-            QFrame[frameShape=\"4\"] { border: 1px solid #444; border-radius: 8px; }
+            QMainWindow {
+                background-color: #0D1B2A;
+            }
+            QWidget {
+                color: #E0E1DD;
+                font-family: 'Segoe UI', Arial, sans-serif;
+            }
+            QLabel {
+                color: #E0E1DD;
+            }
+            QPushButton {
+                background-color: #2E8BC0;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 5px 15px;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background-color: #3498db;
+            }
+            QPushButton:disabled {
+                background-color: #1B263B;
+                color: #666;
+            }
+            QComboBox, QSpinBox {
+                background-color: #1B263B;
+                color: #E0E1DD;
+                border: 1px solid #2E8BC0;
+                border-radius: 4px;
+                padding: 2px;
+            }
+            QSlider::groove:horizontal {
+                border: 1px solid #2E8BC0;
+                height: 8px;
+                background: #1B263B;
+                margin: 2px 0;
+                border-radius: 4px;
+            }
+            QSlider::handle:horizontal {
+                background: #2E8BC0;
+                border: 1px solid #2E8BC0;
+                width: 18px;
+                margin: -2px 0;
+                border-radius: 9px;
+            }
+            QCheckBox {
+                spacing: 5px;
+            }
+            QCheckBox::indicator {
+                width: 18px;
+                height: 18px;
+                border: 1px solid #2E8BC0;
+                border-radius: 3px;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #2E8BC0;
+            }
+            QProgressBar {
+                border: 1px solid #2E8BC0;
+                border-radius: 4px;
+                text-align: center;
+                background-color: #1B263B;
+            }
+            QProgressBar::chunk {
+                background-color: #2E8BC0;
+                border-radius: 3px;
+            }
+            QStatusBar {
+                background-color: #1B263B;
+                color: #E0E1DD;
+            }
+            QListWidget {
+                background: #232323;
+                color: #bbb;
+                font-size: 16px;
+            }
+            QListWidget::item:selected {
+                background: #2E8BC0;
+                color: #fff;
+            }
+            QFrame[frameShape='4'] {
+                border: 1px solid #2E8BC0;
+                border-radius: 8px;
+            }
         """)
 
     def show_about_dialog(self):
