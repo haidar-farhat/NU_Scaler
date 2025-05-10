@@ -1020,111 +1020,554 @@ class PreviewPane(QFrame):
         pass
 
 class SettingsPanel(QWidget):
-    """Dockable settings panel with form layout and controls"""
+    """
+    Enhanced dockable settings panel with form layout, tooltips, and animations.
+    Provides more granular control over upscaling parameters.
+    """
     
     # Signals
     settingsChanged = Signal(dict)  # Emitted when settings change
     advancedRequested = Signal()    # Emitted when advanced button is clicked
+    profileSelected = Signal(str)   # Emitted when a profile is selected
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        
+        # Setup UI
         self.initUI()
         
+        # Setup keyboard shortcuts
+        self.setup_shortcuts()
+        
+        # Load default profiles
+        self.load_default_profiles()
+        
     def initUI(self):
-        """Initialize the user interface"""
-        layout = QVBoxLayout(self)
+        """Initialize the user interface with improved layout and style"""
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(int(SPACING["md"].replace("px", "")), 
+                                      int(SPACING["md"].replace("px", "")),
+                                      int(SPACING["md"].replace("px", "")),
+                                      int(SPACING["md"].replace("px", "")))
+        main_layout.setSpacing(int(SPACING["md"].replace("px", "")))
         
+        # Add scroll area for small screens
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.NoFrame)
+        
+        # Container widget for the scroll area
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(int(SPACING["lg"].replace("px", "")))
+        
+        # ====== Profile Selection ======
+        profile_frame = QFrame()
+        profile_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS["surface"]};
+                border-radius: {EFFECTS["border_radius_md"]};
+                padding: 4px;
+            }}
+        """)
+        
+        profile_layout = QVBoxLayout(profile_frame)
+        profile_layout.setContentsMargins(int(SPACING["sm"].replace("px", "")), 
+                                        int(SPACING["sm"].replace("px", "")),
+                                        int(SPACING["sm"].replace("px", "")),
+                                        int(SPACING["sm"].replace("px", "")))
+        
+        profile_header = QHBoxLayout()
+        
+        profile_title = QLabel("Preset Profiles")
+        profile_title.setStyleSheet(f"""
+            font-size: {FONTS["size_medium"]};
+            font-weight: {FONTS["weight_bold"]};
+        """)
+        
+        self.profile_combo = QComboBox()
+        self.profile_combo.setToolTip("Select a predefined profile for common scenarios")
+        
+        profile_header.addWidget(profile_title)
+        profile_header.addStretch()
+        
+        profile_selector = QHBoxLayout()
+        profile_selector.addWidget(self.profile_combo, 1)
+        
+        save_profile_btn = QPushButton("Save")
+        save_profile_btn.setFixedWidth(60)
+        save_profile_btn.setToolTip("Save current settings as a new profile")
+        save_profile_btn.clicked.connect(self.save_current_profile)
+        
+        profile_selector.addWidget(save_profile_btn)
+        
+        profile_layout.addLayout(profile_header)
+        profile_layout.addLayout(profile_selector)
+        
+        container_layout.addWidget(profile_frame)
+        
+        # ====== Upscaling Settings ======
         # Create form layout for settings
-        form_layout = QFormLayout()
-        form_layout.setSpacing(16)
-        form_layout.setContentsMargins(12, 12, 12, 12)
+        form_frame = QFrame()
+        form_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS["surface"]};
+                border-radius: {EFFECTS["border_radius_md"]};
+                padding: 4px;
+            }}
+        """)
         
-        # Upscaling method
+        form_layout = QFormLayout(form_frame)
+        form_layout.setSpacing(int(SPACING["lg"].replace("px", "")))
+        form_layout.setContentsMargins(int(SPACING["md"].replace("px", "")), 
+                                     int(SPACING["md"].replace("px", "")),
+                                     int(SPACING["md"].replace("px", "")),
+                                     int(SPACING["md"].replace("px", "")))
+        form_layout.setLabelAlignment(Qt.AlignLeft)
+        form_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        
+        settings_title = QLabel("Upscaling Settings")
+        settings_title.setStyleSheet(f"""
+            font-size: {FONTS["size_medium"]};
+            font-weight: {FONTS["weight_bold"]};
+        """)
+        form_layout.addRow(settings_title)
+        
+        # Upscaling method with improved styling
         self.method_combo = QComboBox()
         self.method_combo.addItems(["WGPU Bilinear", "WGPU Nearest", "DLSS"])
-        form_layout.addRow("Upscaling Method:", self.method_combo)
+        self.method_combo.setToolTip(
+            "Select upscaling algorithm:\n"
+            "• WGPU Bilinear: Smooth interpolation, good all-around\n"
+            "• WGPU Nearest: Pixel-perfect for pixel art\n"
+            "• DLSS: NVIDIA's AI upscaling (requires compatible GPU)"
+        )
+        method_label = QLabel("Upscaling Method:")
+        method_label.setBuddy(self.method_combo)
+        form_layout.addRow(method_label, self.method_combo)
         
         # Quality preset
         self.quality_combo = QComboBox()
         self.quality_combo.addItems(["Ultra", "Quality", "Balanced", "Performance"])
-        form_layout.addRow("Quality Preset:", self.quality_combo)
+        self.quality_combo.setToolTip(
+            "Quality vs. performance tradeoff:\n"
+            "• Ultra: Maximum quality, highest GPU usage\n"
+            "• Quality: High quality with good performance\n"
+            "• Balanced: Good balance of quality and speed\n"
+            "• Performance: Fastest option with acceptable quality"
+        )
+        quality_label = QLabel("Quality Preset:")
+        quality_label.setBuddy(self.quality_combo)
+        form_layout.addRow(quality_label, self.quality_combo)
         
-        # Scale factor
-        scale_layout = QHBoxLayout()
+        # Scale factor with improved slider
+        scale_layout = QVBoxLayout()
+        
+        scale_header = QHBoxLayout()
+        self.scale_value_label = QLabel("2.0×")
+        self.scale_value_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.scale_value_label.setMinimumWidth(40)
+        self.scale_value_label.setStyleSheet(f"""
+            color: {COLORS["accent_secondary"]};
+            font-weight: {FONTS['weight_bold']};
+        """)
+        
+        scale_header.addWidget(QLabel("Scale Factor:"))
+        scale_header.addStretch()
+        scale_header.addWidget(self.scale_value_label)
+        
+        scale_layout.addLayout(scale_header)
+        
         self.scale_slider = QSlider(Qt.Horizontal)
         self.scale_slider.setRange(10, 40)  # 1.0x to 4.0x
         self.scale_slider.setValue(20)      # Default 2.0x
-        self.scale_label = QLabel("2.0×")
-        self.scale_slider.valueChanged.connect(
-            lambda: self.scale_label.setText(f"{self.scale_slider.value()/10.0:.1f}×")
-        )
-        scale_layout.addWidget(self.scale_slider)
-        scale_layout.addWidget(self.scale_label)
-        form_layout.addRow("Scale Factor:", scale_layout)
+        self.scale_slider.setTickPosition(QSlider.TicksBelow)
+        self.scale_slider.setTickInterval(5)
+        self.scale_slider.setToolTip("Drag to adjust the scaling factor (1.0x to 4.0x)")
         
-        # GPU Batch Size
+        # Use a more sophisticated function to update the label with animations
+        self.scale_slider.valueChanged.connect(self.update_scale_label)
+        
+        scale_marks = QHBoxLayout()
+        scale_marks.setContentsMargins(0, 0, 0, 0)
+        for mark, pos in [("1.0×", 0), ("2.0×", 33), ("3.0×", 66), ("4.0×", 100)]:
+            mark_label = QLabel(mark)
+            mark_label.setStyleSheet(f"color: {COLORS['text_medium']}; font-size: {FONTS['size_small']};")
+            mark_label.setAlignment(Qt.AlignCenter)
+            scale_marks.addWidget(mark_label, pos)
+        
+        scale_layout.addWidget(self.scale_slider)
+        scale_layout.addLayout(scale_marks)
+        form_layout.addRow("", scale_layout)
+        
+        # GPU Batch Size with more useful range and tooltip
+        batch_layout = QHBoxLayout()
         self.batch_size_spin = QSpinBox()
         self.batch_size_spin.setRange(1, 16)
         self.batch_size_spin.setValue(1)
-        form_layout.addRow("GPU Batch Size:", self.batch_size_spin)
+        self.batch_size_spin.setToolTip(
+            "Number of frames to process in each GPU batch\n"
+            "Higher values improve performance but use more VRAM"
+        )
         
-        # Checkboxes
+        # Add presets next to the spin box
+        batch_label = QLabel("GPU Batch Size:")
+        
+        batch_presets = QHBoxLayout()
+        for preset in [1, 4, 8]:
+            preset_btn = QPushButton(str(preset))
+            preset_btn.setFixedWidth(30)
+            preset_btn.setFixedHeight(26)
+            preset_btn.setStyleSheet("""
+                QPushButton {
+                    padding: 2px;
+                    font-size: 9pt;
+                }
+            """)
+            preset_btn.clicked.connect(lambda checked, p=preset: self.batch_size_spin.setValue(p))
+            batch_presets.addWidget(preset_btn)
+        
+        batch_layout.addWidget(self.batch_size_spin)
+        batch_layout.addLayout(batch_presets)
+        form_layout.addRow(batch_label, batch_layout)
+        
+        # Advanced Options Section
+        advanced_title = QLabel("Advanced Options")
+        advanced_title.setStyleSheet(f"""
+            font-size: {FONTS["size_medium"]};
+            font-weight: {FONTS["weight_bold"]};
+            margin-top: 10px;
+        """)
+        form_layout.addRow(advanced_title)
+        
+        # Checkboxes with improved styling and tooltips
+        options_layout = QVBoxLayout()
+        options_layout.setSpacing(int(SPACING["md"].replace("px", "")))
+        
         self.use_tensor_cores = QCheckBox("Use Tensor Cores (NVIDIA GPUs)")
+        self.use_tensor_cores.setToolTip(
+            "Enable hardware acceleration with NVIDIA Tensor Cores\n"
+            "Only available on RTX series GPUs"
+        )
+        
         self.enable_interpolation = QCheckBox("Enable Frame Interpolation")
+        self.enable_interpolation.setToolTip(
+            "Generate intermediate frames to increase smoothness\n"
+            "Useful for video content but increases processing time"
+        )
+        
         self.auto_optimize = QCheckBox("Auto-Optimize for GPU")
+        self.auto_optimize.setToolTip(
+            "Automatically adjust settings based on your GPU capabilities\n"
+            "Recommended for best performance"
+        )
+        self.auto_optimize.setChecked(True)
         
-        form_layout.addRow("", self.use_tensor_cores)
-        form_layout.addRow("", self.enable_interpolation)
-        form_layout.addRow("", self.auto_optimize)
+        self.reduce_memory = QCheckBox("Reduce Memory Usage")
+        self.reduce_memory.setToolTip(
+            "Optimize memory usage at the cost of slightly lower performance\n"
+            "Useful for systems with limited VRAM"
+        )
         
-        # Add form to main layout
-        layout.addLayout(form_layout)
+        options_layout.addWidget(self.use_tensor_cores)
+        options_layout.addWidget(self.enable_interpolation)
+        options_layout.addWidget(self.auto_optimize)
+        options_layout.addWidget(self.reduce_memory)
         
-        # Advanced button
+        form_layout.addRow("", options_layout)
+        
+        container_layout.addWidget(form_frame)
+        
+        # Advanced settings button
         self.advanced_btn = QPushButton("Advanced Interpolation Settings...")
+        self.advanced_btn.setObjectName("accentButton")
+        self.advanced_btn.setToolTip("Configure detailed interpolation parameters")
         self.advanced_btn.clicked.connect(self.advancedRequested.emit)
-        layout.addWidget(self.advanced_btn)
+        self.advanced_btn.setIcon(self._create_icon("settings"))
+        
+        # Apply button
+        self.apply_btn = QPushButton("Apply Settings")
+        self.apply_btn.setToolTip("Apply current settings to the upscaler")
+        self.apply_btn.clicked.connect(self.apply_settings)
+        self.apply_btn.setIcon(self._create_icon("check"))
+        
+        # Add buttons to main layout
+        button_layout = QHBoxLayout()
+        button_layout.addWidget(self.advanced_btn)
+        button_layout.addWidget(self.apply_btn)
+        
+        container_layout.addLayout(button_layout)
+        
+        # Add stretch to push everything to the top
+        container_layout.addStretch(1)
+        
+        # Add container to scroll area
+        scroll_area.setWidget(container)
+        main_layout.addWidget(scroll_area)
         
         # Enable/disable logic
         self.method_combo.currentTextChanged.connect(self.updateControlState)
         self.enable_interpolation.toggled.connect(self.updateControlState)
+        self.auto_optimize.toggled.connect(self.updateControlState)
         
-        # Add stretch to push everything to the top
-        layout.addStretch(1)
+        # Connect signals for settings changes
+        self.method_combo.currentTextChanged.connect(lambda: self.on_setting_changed("method"))
+        self.quality_combo.currentTextChanged.connect(lambda: self.on_setting_changed("quality"))
+        self.scale_slider.valueChanged.connect(lambda: self.on_setting_changed("scale"))
+        self.batch_size_spin.valueChanged.connect(lambda: self.on_setting_changed("batch_size"))
+        self.use_tensor_cores.toggled.connect(lambda: self.on_setting_changed("use_tensor_cores"))
+        self.enable_interpolation.toggled.connect(lambda: self.on_setting_changed("enable_interpolation"))
+        self.auto_optimize.toggled.connect(lambda: self.on_setting_changed("auto_optimize"))
+        self.reduce_memory.toggled.connect(lambda: self.on_setting_changed("reduce_memory"))
         
-        # Connect signals
-        self.method_combo.currentTextChanged.connect(self.emitSettingsChanged)
-        self.quality_combo.currentTextChanged.connect(self.emitSettingsChanged)
-        self.scale_slider.valueChanged.connect(self.emitSettingsChanged)
-        self.batch_size_spin.valueChanged.connect(self.emitSettingsChanged)
-        self.use_tensor_cores.toggled.connect(self.emitSettingsChanged)
-        self.enable_interpolation.toggled.connect(self.emitSettingsChanged)
-        self.auto_optimize.toggled.connect(self.emitSettingsChanged)
+        # Profile selection changes
+        self.profile_combo.currentTextChanged.connect(self.load_profile)
         
         # Initial state update
         self.updateControlState()
+    
+    def _create_icon(self, icon_type):
+        """Create SVG icons programmatically"""
+        svg_icons = {
+            "settings": """
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#E0E1DD" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                </svg>
+            """,
+            "check": """
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#E0E1DD" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="20 6 9 17 4 12"></polyline>
+                </svg>
+            """
+        }
         
+        if icon_type in svg_icons:
+            import tempfile
+            
+            temp = tempfile.NamedTemporaryFile(suffix='.svg', delete=False)
+            temp.write(svg_icons[icon_type].encode('utf-8'))
+            temp.close()
+            
+            file_path = temp.name
+            return QIcon(file_path)
+        
+        return QIcon()
+    
+    def update_scale_label(self, value=None):
+        """Update the scale label with the current slider value and animation"""
+        if value is None:
+            value = self.scale_slider.value()
+            
+        scale_value = value / 10.0
+        
+        # Update the label with a smooth color transition based on value
+        # Higher values get a more prominent color
+        color_intensity = min(1.0, (scale_value - 1.0) / 3.0 * 1.5)
+        
+        # Interpolate between text color and accent color
+        r1, g1, b1 = int(COLORS["text_light"][1:3], 16), int(COLORS["text_light"][3:5], 16), int(COLORS["text_light"][5:7], 16)
+        r2, g2, b2 = int(COLORS["accent_secondary"][1:3], 16), int(COLORS["accent_secondary"][3:5], 16), int(COLORS["accent_secondary"][5:7], 16)
+        
+        r = int(r1 + (r2 - r1) * color_intensity)
+        g = int(g1 + (g2 - g1) * color_intensity)
+        b = int(b1 + (b2 - b1) * color_intensity)
+        
+        color_hex = f"#{r:02x}{g:02x}{b:02x}"
+        
+        # Create an emphasized style for higher values
+        font_size = 10 + min(4, (scale_value - 1.0) * 2)
+        
+        self.scale_value_label.setStyleSheet(f"""
+            color: {color_hex};
+            font-weight: {FONTS['weight_bold']};
+            font-size: {font_size}pt;
+        """)
+        
+        self.scale_value_label.setText(f"{scale_value:.1f}×")
+    
     def updateControlState(self):
         """Update enabled/disabled state of controls based on current selections"""
         # Tensor cores only available with DLSS
         is_dlss = self.method_combo.currentText() == "DLSS"
         self.use_tensor_cores.setEnabled(is_dlss)
         
-        # Advanced button only enabled if interpolation is enabled
+        # Advanced interpolation button only enabled if interpolation is enabled
         self.advanced_btn.setEnabled(self.enable_interpolation.isChecked())
         
-    def emitSettingsChanged(self):
-        """Emit signal with current settings as dictionary"""
-        settings = {
+        # If auto-optimize is checked, disable some manual settings
+        auto_optimize = self.auto_optimize.isChecked()
+        self.batch_size_spin.setEnabled(not auto_optimize)
+        
+        # Update apply button style based on whether settings have changed
+        self.apply_btn.setStyleSheet(f"""
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 {COLORS['accent_secondary']},
+                        stop:1 {COLORS['secondary_pressed']});
+        """)
+    
+    def on_setting_changed(self, setting_name):
+        """Called when any setting is changed"""
+        # Update control states
+        self.updateControlState()
+        
+        # You can implement additional logic here if needed
+        # For now, we don't emit settingsChanged on every change,
+        # but wait for the Apply button to be clicked
+    
+    def apply_settings(self):
+        """Apply the current settings and emit the settingsChanged signal"""
+        settings = self.get_current_settings()
+        
+        # Provide visual feedback
+        self.apply_btn.setEnabled(False)
+        self.apply_btn.setText("Applied!")
+        
+        # Reset button after delay
+        QTimer.singleShot(1000, lambda: self.apply_btn.setText("Apply Settings"))
+        QTimer.singleShot(1000, lambda: self.apply_btn.setEnabled(True))
+        
+        # Emit signal with settings
+        self.settingsChanged.emit(settings)
+    
+    def get_current_settings(self):
+        """Get the current settings as a dictionary"""
+        return {
             "method": self.method_combo.currentText(),
             "quality": self.quality_combo.currentText(),
             "scale": self.scale_slider.value() / 10.0,
             "batch_size": self.batch_size_spin.value(),
             "use_tensor_cores": self.use_tensor_cores.isChecked(),
             "enable_interpolation": self.enable_interpolation.isChecked(),
-            "auto_optimize": self.auto_optimize.isChecked()
+            "auto_optimize": self.auto_optimize.isChecked(),
+            "reduce_memory": self.reduce_memory.isChecked()
         }
-        self.settingsChanged.emit(settings)
+    
+    def load_default_profiles(self):
+        """Load default profiles"""
+        self.profiles = {
+            "Gaming": {
+                "method": "DLSS" if hasattr(self.method_combo, "_items") and "DLSS" in self.method_combo._items else "WGPU Bilinear",
+                "quality": "Performance",
+                "scale": 2.0,
+                "batch_size": 1,
+                "use_tensor_cores": True,
+                "enable_interpolation": False,
+                "auto_optimize": True,
+                "reduce_memory": False
+            },
+            "Video": {
+                "method": "WGPU Bilinear",
+                "quality": "Quality",
+                "scale": 1.5,
+                "batch_size": 4,
+                "use_tensor_cores": False,
+                "enable_interpolation": True,
+                "auto_optimize": True,
+                "reduce_memory": False
+            },
+            "Low-End Hardware": {
+                "method": "WGPU Bilinear",
+                "quality": "Performance",
+                "scale": 1.3,
+                "batch_size": 1,
+                "use_tensor_cores": False,
+                "enable_interpolation": False,
+                "auto_optimize": True,
+                "reduce_memory": True
+            },
+            "Max Quality": {
+                "method": "WGPU Bilinear",
+                "quality": "Ultra",
+                "scale": 2.5,
+                "batch_size": 1,
+                "use_tensor_cores": True,
+                "enable_interpolation": True,
+                "auto_optimize": False,
+                "reduce_memory": False
+            }
+        }
+        
+        # Populate the combobox
+        self.profile_combo.clear()
+        self.profile_combo.addItem("Custom")
+        for profile_name in self.profiles.keys():
+            self.profile_combo.addItem(profile_name)
+    
+    def load_profile(self, profile_name):
+        """Load a profile and apply its settings"""
+        if profile_name == "Custom" or profile_name not in self.profiles:
+            return
+            
+        profile = self.profiles[profile_name]
+        
+        # Block signals during updates to avoid triggering change events
+        self.blockSignals(True)
+        
+        # Update UI controls
+        self.method_combo.setCurrentText(profile["method"])
+        self.quality_combo.setCurrentText(profile["quality"])
+        self.scale_slider.setValue(int(profile["scale"] * 10))
+        self.update_scale_label()
+        self.batch_size_spin.setValue(profile["batch_size"])
+        self.use_tensor_cores.setChecked(profile["use_tensor_cores"])
+        self.enable_interpolation.setChecked(profile["enable_interpolation"])
+        self.auto_optimize.setChecked(profile["auto_optimize"])
+        self.reduce_memory.setChecked(profile["reduce_memory"])
+        
+        # Unblock signals
+        self.blockSignals(False)
+        
+        # Update control states
+        self.updateControlState()
+        
+        # Emit signal
+        self.profileSelected.emit(profile_name)
+    
+    def save_current_profile(self):
+        """Save current settings as a new profile"""
+        from PySide6.QtWidgets import QInputDialog
+        
+        profile_name, ok = QInputDialog.getText(
+            self, 
+            "Save Profile", 
+            "Profile name:", 
+            text="My Profile"
+        )
+        
+        if ok and profile_name:
+            # Save current settings
+            self.profiles[profile_name] = self.get_current_settings()
+            
+            # Add to combo box if not exists
+            if self.profile_combo.findText(profile_name) == -1:
+                self.profile_combo.addItem(profile_name)
+            
+            # Select the new profile
+            self.profile_combo.setCurrentText(profile_name)
+    
+    def setup_shortcuts(self):
+        """Setup keyboard shortcuts"""
+        # Apply settings with Ctrl+Enter
+        apply_shortcut = QShortcut(QKeySequence("Ctrl+Return"), self)
+        apply_shortcut.activated.connect(self.apply_settings)
+        
+        # Reset scale to 1.0x with Ctrl+1
+        scale_10_shortcut = QShortcut(QKeySequence("Ctrl+1"), self)
+        scale_10_shortcut.activated.connect(lambda: self.scale_slider.setValue(10))
+        
+        # Set scale to 2.0x with Ctrl+2
+        scale_20_shortcut = QShortcut(QKeySequence("Ctrl+2"), self)
+        scale_20_shortcut.activated.connect(lambda: self.scale_slider.setValue(20))
+        
+        # Set scale to 3.0x with Ctrl+3
+        scale_30_shortcut = QShortcut(QKeySequence("Ctrl+3"), self)
+        scale_30_shortcut.activated.connect(lambda: self.scale_slider.setValue(30))
+        
+        # Set scale to 4.0x with Ctrl+4
+        scale_40_shortcut = QShortcut(QKeySequence("Ctrl+4"), self)
+        scale_40_shortcut.activated.connect(lambda: self.scale_slider.setValue(40))
 
 class InterpolationDialog(QDialog):
     """Modal dialog for advanced interpolation settings"""
