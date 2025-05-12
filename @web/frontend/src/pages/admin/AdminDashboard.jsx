@@ -13,18 +13,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useToast } from '../../components/ToastContext';
 import { useDataExport } from '../../features/admin/useDataExport';
 import adminApiService from '../../api/adminApi';
-
-const exportBtnStyle = {
-  marginRight: 8,
-  marginBottom: 8,
-  padding: '6px 16px',
-  borderRadius: 4,
-  border: 'none',
-  background: '#007bff',
-  color: '#fff',
-  fontWeight: 500,
-  cursor: 'pointer',
-};
+import '../../styles/admin.css';
 
 const AdminDashboard = () => {
   const dispatch = useDispatch();
@@ -156,13 +145,11 @@ const AdminDashboard = () => {
 
   if (authLoading) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-center">
-          <div className="spinner-border animate-spin inline-block w-8 h-8 border-4 rounded-full text-blue-600 mb-4" role="status">
-            <span className="visually-hidden">Loading...</span>
-          </div>
-          <p className="text-lg">Verifying admin access...</p>
+      <div className="admin-loading">
+        <div className="admin-loading-spinner" role="status">
+          <span className="visually-hidden">Loading...</span>
         </div>
+        <p className="ml-3 text-lg">Verifying admin access...</p>
       </div>
     );
   }
@@ -172,16 +159,17 @@ const AdminDashboard = () => {
   }
 
   return (
-    <div className="p-6">
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+    <div className="admin-container">
+      <div className="admin-grid">
         <SummaryCards title="Total Reviews" value={reviews.length} icon="⭐" />
         <SummaryCards title="Bug Reports" value={bugReports.length} icon="🐞" />
         <SummaryCards title="Surveys" value={surveys.length} icon="🖥️" />
         <SummaryCards title="New Users" value={userGrowth.length} icon="👤" />
       </div>
-      <div style={{ marginBottom: 8 }}>
+
+      <div className="admin-filters">
         <button
-          style={exportBtnStyle}
+          className="export-button"
           onClick={() => exportData('reviews', 'csv')}
           disabled={exportLoading}
           aria-busy={exportLoading}
@@ -190,19 +178,32 @@ const AdminDashboard = () => {
           {exportLoading ? 'Exporting...' : 'Export Reviews CSV'}
         </button>
       </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {reviewsLoading ? <div>Loading reviews...</div> : reviewsError ? <div className="text-red-600">{reviewsError}</div> :
-          <ReviewsTable
-            reviews={reviews}
-            meta={reviewsMeta}
-            loading={reviewsLoading}
-            onFilter={handleReviewsFilter}
-            onPageChange={handleReviewsPage}
-          />}
-        <div>
-          <div style={{ marginBottom: 8 }}>
+        <div className="admin-table-container">
+          {reviewsLoading ? (
+            <div className="admin-loading">
+              <div className="admin-loading-spinner" />
+            </div>
+          ) : reviewsError ? (
+            <div className="admin-error">
+              <p className="admin-error-message">{reviewsError}</p>
+            </div>
+          ) : (
+            <ReviewsTable
+              reviews={reviews}
+              meta={reviewsMeta}
+              loading={reviewsLoading}
+              onFilter={handleReviewsFilter}
+              onPageChange={handleReviewsPage}
+            />
+          )}
+        </div>
+
+        <div className="admin-table-container">
+          <div className="admin-filters">
             <button
-              style={exportBtnStyle}
+              className="export-button"
               onClick={() => exportData('bugReports', 'csv')}
               disabled={exportLoading}
               aria-busy={exportLoading}
@@ -211,43 +212,79 @@ const AdminDashboard = () => {
               {exportLoading ? 'Exporting...' : 'Export Bug Reports CSV'}
             </button>
           </div>
-          {bugReportsLoading ? <div>Loading bug reports...</div> : bugReportsError ? <div className="text-red-600">{bugReportsError}</div> :
+          {bugReportsLoading ? (
+            <div className="admin-loading">
+              <div className="admin-loading-spinner" />
+            </div>
+          ) : bugReportsError ? (
+            <div className="admin-error">
+              <p className="admin-error-message">{bugReportsError}</p>
+            </div>
+          ) : (
             <BugReportsTable
               bugReports={bugReports}
               meta={bugReportsMeta}
               loading={bugReportsLoading}
               onFilter={handleBugReportsFilter}
               onPageChange={handleBugReportsPage}
-            />}
+            />
+          )}
         </div>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
-        <div>
-          <div style={{ marginBottom: 8 }}>
-            <button
-              style={exportBtnStyle}
-              onClick={() => exportData('surveys', 'csv')}
-              disabled={exportLoading}
-              aria-busy={exportLoading}
-              title="Export all surveys as CSV"
-            >
-              {exportLoading ? 'Exporting...' : 'Export Surveys CSV'}
-            </button>
+
+      <div className="admin-table-container">
+        <div className="admin-filters">
+          <button
+            className="export-button"
+            onClick={() => exportData('surveys', 'csv')}
+            disabled={exportLoading}
+            aria-busy={exportLoading}
+            title="Export all surveys as CSV"
+          >
+            {exportLoading ? 'Exporting...' : 'Export Surveys CSV'}
+          </button>
+        </div>
+        {surveysLoading ? (
+          <div className="admin-loading">
+            <div className="admin-loading-spinner" />
           </div>
-          {surveysLoading ? <div>Loading surveys...</div> : surveysError ? <div className="text-red-600">{surveysError}</div> :
-            <SurveysTable
-              surveys={surveys}
-              meta={surveysMeta}
-              loading={surveysLoading}
-              onFilter={handleSurveysFilter}
-              onPageChange={handleSurveysPage}
-            />}
-        </div>
-        {userGrowthLoading ? <div>Loading user growth...</div> : userGrowthError ? <div className="text-red-600">{userGrowthError}</div> : <UserGrowthChart data={userGrowth} />}
+        ) : surveysError ? (
+          <div className="admin-error">
+            <p className="admin-error-message">{surveysError}</p>
+          </div>
+        ) : (
+          <SurveysTable
+            surveys={surveys}
+            meta={surveysMeta}
+            loading={surveysLoading}
+            onFilter={handleSurveysFilter}
+            onPageChange={handleSurveysPage}
+          />
+        )}
       </div>
-      {exportError && <div style={{ color: 'red', marginTop: 8 }}>{exportError}</div>}
-      <div style={{ marginBottom: 24 }}>
-        <Link to="/admin/users" style={{ fontWeight: 'bold', color: '#007bff', textDecoration: 'none' }}>
+
+      <div className="admin-chart-container">
+        {userGrowthLoading ? (
+          <div className="admin-loading">
+            <div className="admin-loading-spinner" />
+          </div>
+        ) : userGrowthError ? (
+          <div className="admin-error">
+            <p className="admin-error-message">{userGrowthError}</p>
+          </div>
+        ) : (
+          <UserGrowthChart data={userGrowth} />
+        )}
+      </div>
+
+      {exportError && (
+        <div className="admin-error">
+          <p className="admin-error-message">{exportError}</p>
+        </div>
+      )}
+
+      <div className="mt-6">
+        <Link to="/admin/users" className="admin-button">
           Manage Users
         </Link>
       </div>
