@@ -183,7 +183,7 @@
   }
 
   .admin-loading-spinner {
-    @apply animate-spin rounded-full h-8 w-8 border-3 border-transparent border-t-indigo-600 border-r-indigo-600 shadow-md;
+    @apply animate-spin rounded-full h-8 w-8 border-[3px] border-transparent border-t-indigo-600 border-r-indigo-600 shadow-md;
   }
 
   /* Error and Success Messages */
