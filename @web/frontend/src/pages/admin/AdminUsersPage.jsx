@@ -1,136 +1,312 @@
 import React, { useEffect, useState } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
+import { useSelector, useDispatch } from 'react-redux';
+import { Link } from 'react-router-dom';
 import { fetchUsers, updateUserRole, updateUserStatus } from '../../features/admin/usersSlice';
 import { useToast } from '../../components/ToastContext';
-import ConfirmDialog from '../../components/ConfirmDialog';
 import '../../styles/admin.css';
 
-export default function AdminUsersPage() {
+const AdminUsersPage = () => {
   const dispatch = useDispatch();
-  const { users, loading, error } = useSelector(state => state.adminUsers);
-  const { user } = useSelector(state => state.auth);
+  const { list: users, loading, error, meta } = useSelector(state => state.users);
   const { showToast } = useToast();
-  const [dialog, setDialog] = useState({ open: false, type: '', targetUser: null });
+  const [filters, setFilters] = useState({
+    search: '',
+    role: '',
+    status: '',
+    sortBy: 'created_at',
+    sortOrder: 'desc'
+  });
+  const [confirmDialog, setConfirmDialog] = useState({
+    show: false,
+    userId: null,
+    action: null,
+    targetState: null
+  });
 
   useEffect(() => {
-    console.log('AdminUsersPage mounted, dispatching fetchUsers');
-    dispatch(fetchUsers())
-      .unwrap()
-      .then(data => {
-        console.log('Users fetched successfully:', data);
-      })
-      .catch(e => {
-        console.error('Error fetching users:', e);
-        showToast(e.message || 'Failed to load users', 'error');
-      });
-  }, [dispatch, showToast]);
+    dispatch(fetchUsers());
+  }, [dispatch]);
 
-  const openDialog = (type, targetUser) => setDialog({ open: true, type, targetUser });
-  const closeDialog = () => setDialog({ open: false, type: '', targetUser: null });
-
-  const handleConfirm = async () => {
-    const { type, targetUser } = dialog;
-    if (!targetUser) return closeDialog();
-    try {
-      if (type === 'role') {
-        await dispatch(updateUserRole({ userId: targetUser.id, is_admin: !targetUser.is_admin })).unwrap();
-        showToast(`User ${targetUser.is_admin ? 'demoted' : 'promoted'} successfully.`, 'success');
-      } else if (type === 'status') {
-        await dispatch(updateUserStatus({ userId: targetUser.id, is_active: !targetUser.is_active })).unwrap();
-        showToast(`User ${targetUser.is_active ? 'deactivated' : 'activated'} successfully.`, 'success');
-      }
-    } catch (e) {
-      showToast(e.message || 'Action failed', 'error');
-    }
-    closeDialog();
+  const handleFilterChange = (e) => {
+    const { name, value } = e.target;
+    setFilters(prev => ({
+      ...prev,
+      [name]: value
+    }));
   };
 
-  let dialogMessage = '';
-  if (dialog.open && dialog.targetUser) {
-    if (dialog.type === 'role') {
-      dialogMessage = dialog.targetUser.is_admin
-        ? 'Are you sure you want to demote this admin to user?'
-        : 'Are you sure you want to promote this user to admin?';
-    } else if (dialog.type === 'status') {
-      dialogMessage = dialog.targetUser.is_active
-        ? 'Are you sure you want to deactivate this user?'
-        : 'Are you sure you want to activate this user?';
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    dispatch(fetchUsers(filters));
+  };
+
+  const handleSort = (field) => {
+    const newOrder = filters.sortBy === field && filters.sortOrder === 'asc' ? 'desc' : 'asc';
+    setFilters(prev => ({
+      ...prev,
+      sortBy: field,
+      sortOrder: newOrder
+    }));
+    dispatch(fetchUsers({
+      ...filters,
+      sortBy: field,
+      sortOrder: newOrder
+    }));
+  };
+
+  const handlePageChange = (page) => {
+    dispatch(fetchUsers({
+      ...filters,
+      page
+    }));
+  };
+
+  const confirmAction = (userId, action, targetState) => {
+    setConfirmDialog({
+      show: true,
+      userId,
+      action,
+      targetState
+    });
+  };
+
+  const handleConfirm = async () => {
+    try {
+      const { userId, action, targetState } = confirmDialog;
+      
+      if (action === 'role') {
+        await dispatch(updateUserRole({ userId, role: targetState })).unwrap();
+        showToast(`User role updated to ${targetState}`, 'success');
+      } else if (action === 'status') {
+        await dispatch(updateUserStatus({ userId, status: targetState })).unwrap();
+        showToast(`User ${targetState === 'active' ? 'activated' : 'deactivated'} successfully`, 'success');
+      }
+      
+      setConfirmDialog({ show: false, userId: null, action: null, targetState: null });
+      dispatch(fetchUsers(filters));
+    } catch (error) {
+      showToast(error.message || 'An error occurred', 'error');
     }
-  }
+  };
+
+  const handleCancel = () => {
+    setConfirmDialog({ show: false, userId: null, action: null, targetState: null });
+  };
 
   return (
     <div className="admin-container">
-      <h2 className="text-2xl font-bold mb-6">User Management</h2>
-      
-      {loading && (
-        <div className="admin-loading">
-          <div className="admin-loading-spinner" />
-        </div>
-      )}
-      
-      {error && (
-        <div className="admin-error">
-          <p className="admin-error-message">{error.message || error}</p>
-        </div>
-      )}
-
-      <div className="admin-table-container">
-        <table className="admin-table">
-          <thead className="admin-table-header">
-            <tr>
-              <th>Name</th>
-              <th>Email</th>
-              <th>Role</th>
-              <th>Status</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody className="admin-table-body">
-            {users.map(u => (
-              <tr key={u.id} className={`admin-table-row ${!u.is_active ? 'bg-red-50' : ''}`}>
-                <td className="admin-table-cell">{u.name}</td>
-                <td className="admin-table-cell">{u.email}</td>
-                <td className="admin-table-cell">
-                  <span className={`status-badge ${u.is_admin ? 'status-badge-active' : 'status-badge-pending'}`}>
-                    {u.is_admin ? 'Admin' : 'User'}
-                  </span>
-                </td>
-                <td className="admin-table-cell">
-                  <span className={`status-badge ${u.is_active ? 'status-badge-active' : 'status-badge-inactive'}`}>
-                    {u.is_active ? 'Active' : 'Inactive'}
-                  </span>
-                </td>
-                <td className="admin-table-cell">
-                  <button
-                    className={`admin-button ${u.is_admin ? 'admin-button-secondary' : ''}`}
-                    onClick={() => u.id !== user.id && openDialog('role', u)}
-                    disabled={u.id === user.id}
-                    title={u.id === user.id ? 'Cannot change your own role' : u.is_admin ? 'Demote to user' : 'Promote to admin'}
-                  >
-                    {u.is_admin ? 'Demote' : 'Promote'}
-                  </button>
-                  <button
-                    className={`admin-button ${u.is_active ? 'admin-button-danger' : ''}`}
-                    onClick={() => u.id !== user.id && openDialog('status', u)}
-                    disabled={u.id === user.id}
-                    title={u.id === user.id ? 'Cannot change your own status' : u.is_active ? 'Deactivate' : 'Activate'}
-                  >
-                    {u.is_active ? 'Deactivate' : 'Activate'}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="flex justify-between items-center mb-8">
+        <h1 className="text-3xl font-bold bg-gradient-to-r from-indigo-600 to-blue-500 bg-clip-text text-transparent">
+          User Management
+        </h1>
+        <Link to="/admin" className="admin-button-secondary">
+          <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+          </svg>
+          Back to Dashboard
+        </Link>
       </div>
 
-      <ConfirmDialog
-        isOpen={dialog.open}
-        onClose={closeDialog}
-        onConfirm={handleConfirm}
-        title={dialog.type === 'role' ? 'Change User Role' : 'Change User Status'}
-        message={dialogMessage}
-      />
+      <div className="admin-table-container">
+        <form onSubmit={handleSubmit} className="admin-filters">
+          <div className="flex flex-wrap gap-4">
+            <div className="flex-1 min-w-[200px]">
+              <input
+                type="text"
+                name="search"
+                value={filters.search}
+                onChange={handleFilterChange}
+                placeholder="Search users..."
+                className="admin-filter-input"
+              />
+            </div>
+            <div className="w-[150px]">
+              <select
+                name="role"
+                value={filters.role}
+                onChange={handleFilterChange}
+                className="admin-filter-input"
+              >
+                <option value="">All Roles</option>
+                <option value="admin">Admin</option>
+                <option value="moderator">Moderator</option>
+                <option value="user">User</option>
+              </select>
+            </div>
+            <div className="w-[150px]">
+              <select
+                name="status"
+                value={filters.status}
+                onChange={handleFilterChange}
+                className="admin-filter-input"
+              >
+                <option value="">All Status</option>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </div>
+            <button type="submit" className="admin-button">
+              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              Filter
+            </button>
+          </div>
+        </form>
+
+        {loading ? (
+          <div className="admin-loading">
+            <div className="admin-loading-spinner" />
+          </div>
+        ) : error ? (
+          <div className="admin-error">
+            <p className="admin-error-message">{error}</p>
+          </div>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="admin-table">
+                <thead className="admin-table-header">
+                  <tr>
+                    <th onClick={() => handleSort('id')} className="cursor-pointer">
+                      ID
+                      {filters.sortBy === 'id' && (
+                        <span className="ml-1">{filters.sortOrder === 'asc' ? '↑' : '↓'}</span>
+                      )}
+                    </th>
+                    <th onClick={() => handleSort('name')} className="cursor-pointer">
+                      Name
+                      {filters.sortBy === 'name' && (
+                        <span className="ml-1">{filters.sortOrder === 'asc' ? '↑' : '↓'}</span>
+                      )}
+                    </th>
+                    <th onClick={() => handleSort('email')} className="cursor-pointer">
+                      Email
+                      {filters.sortBy === 'email' && (
+                        <span className="ml-1">{filters.sortOrder === 'asc' ? '↑' : '↓'}</span>
+                      )}
+                    </th>
+                    <th onClick={() => handleSort('role')} className="cursor-pointer">
+                      Role
+                      {filters.sortBy === 'role' && (
+                        <span className="ml-1">{filters.sortOrder === 'asc' ? '↑' : '↓'}</span>
+                      )}
+                    </th>
+                    <th onClick={() => handleSort('status')} className="cursor-pointer">
+                      Status
+                      {filters.sortBy === 'status' && (
+                        <span className="ml-1">{filters.sortOrder === 'asc' ? '↑' : '↓'}</span>
+                      )}
+                    </th>
+                    <th onClick={() => handleSort('created_at')} className="cursor-pointer">
+                      Created
+                      {filters.sortBy === 'created_at' && (
+                        <span className="ml-1">{filters.sortOrder === 'asc' ? '↑' : '↓'}</span>
+                      )}
+                    </th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="admin-table-body">
+                  {users.map(user => (
+                    <tr key={user.id} className="admin-table-row">
+                      <td className="admin-table-cell">{user.id}</td>
+                      <td className="admin-table-cell">{user.name}</td>
+                      <td className="admin-table-cell">{user.email}</td>
+                      <td className="admin-table-cell">
+                        <select
+                          className="admin-form-input"
+                          value={user.role}
+                          onChange={() => confirmAction(user.id, 'role', user.role === 'admin' ? 'user' : 'admin')}
+                        >
+                          <option value="admin">Admin</option>
+                          <option value="moderator">Moderator</option>
+                          <option value="user">User</option>
+                        </select>
+                      </td>
+                      <td className="admin-table-cell">
+                        <span className={`status-badge ${user.status === 'active' ? 'status-badge-active' : 'status-badge-inactive'}`}>
+                          {user.status}
+                        </span>
+                      </td>
+                      <td className="admin-table-cell">{new Date(user.created_at).toLocaleDateString()}</td>
+                      <td className="admin-table-cell">
+                        <div className="flex space-x-2">
+                          <button
+                            onClick={() => confirmAction(user.id, 'status', user.status === 'active' ? 'inactive' : 'active')}
+                            className={user.status === 'active' ? 'admin-button-danger' : 'admin-button'}
+                          >
+                            {user.status === 'active' ? (
+                              <>
+                                <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                                </svg>
+                                Deactivate
+                              </>
+                            ) : (
+                              <>
+                                <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                Activate
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {meta && (
+              <div className="admin-pagination">
+                <button
+                  onClick={() => handlePageChange(meta.current_page - 1)}
+                  disabled={meta.current_page === 1}
+                  className="admin-pagination-button"
+                >
+                  Previous
+                </button>
+                <span className="text-sm text-slate-700">
+                  Page {meta.current_page} of {meta.last_page}
+                </span>
+                <button
+                  onClick={() => handlePageChange(meta.current_page + 1)}
+                  disabled={meta.current_page === meta.last_page}
+                  className="admin-pagination-button"
+                >
+                  Next
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {confirmDialog.show && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="admin-form max-w-lg w-full">
+            <h2 className="text-xl font-bold mb-4">Confirm Action</h2>
+            <p className="mb-6">
+              {confirmDialog.action === 'role' 
+                ? `Are you sure you want to change this user's role to ${confirmDialog.targetState}?` 
+                : `Are you sure you want to ${confirmDialog.targetState === 'active' ? 'activate' : 'deactivate'} this user?`}
+            </p>
+            <div className="flex justify-end gap-4">
+              <button onClick={handleCancel} className="admin-button-secondary">
+                Cancel
+              </button>
+              <button onClick={handleConfirm} className="admin-button">
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
-} 
+};
+
+export default AdminUsersPage; 
