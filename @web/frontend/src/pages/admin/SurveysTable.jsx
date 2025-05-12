@@ -1,169 +1,173 @@
 import React, { useState } from 'react';
+import { useDispatch } from 'react-redux';
+import { fetchSurveys } from '../../features/admin/surveysSlice';
 import '../../styles/admin.css';
 
-const ALL_COLUMNS = [
-  { key: 'os', label: 'OS' },
-  { key: 'gpu_model', label: 'GPU' },
-  { key: 'ram_size', label: 'RAM' },
-  { key: 'date', label: 'Date' },
-  { key: 'additional_info', label: 'Info' },
-];
+const SurveysTable = ({ surveys, meta, loading, onFilter, onPageChange }) => {
+  const dispatch = useDispatch();
+  const [filters, setFilters] = useState({
+    search: '',
+    status: '',
+    sortBy: 'created_at',
+    sortOrder: 'desc'
+  });
 
-const SurveysTable = ({ surveys, meta = {}, onFilter, onPageChange, loading }) => {
-  const [search, setSearch] = useState('');
-  const [os, setOs] = useState('');
-  const [gpu, setGpu] = useState('');
-  const [minRam, setMinRam] = useState('');
-  const [fromDate, setFromDate] = useState('');
-  const [toDate, setToDate] = useState('');
-  const [visibleCols, setVisibleCols] = useState(ALL_COLUMNS.map(c => c.key));
-  const [showCols, setShowCols] = useState(false);
-  const [sortBy, setSortBy] = useState('');
-  const [sortDir, setSortDir] = useState('asc');
+  const handleFilterChange = (e) => {
+    const { name, value } = e.target;
+    setFilters(prev => ({ ...prev, [name]: value }));
+  };
 
-  const handleFilter = (e) => {
+  const handleSubmit = (e) => {
     e.preventDefault();
-    onFilter({ search, os, gpu_model: gpu, min_ram: minRam, from_date: fromDate, to_date: toDate, page: 1, sort_by: sortBy, sort_dir: sortDir });
+    onFilter(filters);
   };
 
-  const handleSort = (col) => {
-    let dir = 'asc';
-    if (sortBy === col) dir = sortDir === 'asc' ? 'desc' : 'asc';
-    setSortBy(col);
-    setSortDir(dir);
-    onFilter({ search, os, gpu_model: gpu, min_ram: minRam, from_date: fromDate, to_date: toDate, page: 1, sort_by: col, sort_dir: dir });
+  const handleSort = (field) => {
+    const newOrder = filters.sortBy === field && filters.sortOrder === 'asc' ? 'desc' : 'asc';
+    setFilters(prev => ({ ...prev, sortBy: field, sortOrder: newOrder }));
+    onFilter({ ...filters, sortBy: field, sortOrder: newOrder });
   };
 
-  const toggleCol = (col) => {
-    setVisibleCols(cols => cols.includes(col) ? cols.filter(c => c !== col) : [...cols, col]);
+  const getStatusBadgeClass = (status) => {
+    switch (status) {
+      case 'completed':
+        return 'status-badge-success';
+      case 'in_progress':
+        return 'status-badge-warning';
+      case 'pending':
+        return 'status-badge-info';
+      default:
+        return 'status-badge-default';
+    }
   };
+
+  if (loading) {
+    return (
+      <div className="admin-loading">
+        <div className="admin-loading-spinner" />
+      </div>
+    );
+  }
 
   return (
-    <div>
-      <div className="admin-filters">
-        <div className="column-selector">
-          <button
-            type="button"
-            className="admin-button-secondary"
-            onClick={() => setShowCols(v => !v)}
-          >
-            Columns
-          </button>
-          {showCols && (
-            <div className="column-selector-menu">
-              {ALL_COLUMNS.map(col => (
-                <div key={col.key} className="column-selector-item">
-                  <label className="flex items-center">
-                    <input
-                      type="checkbox"
-                      checked={visibleCols.includes(col.key)}
-                      onChange={() => toggleCol(col.key)}
-                      className="mr-2"
-                    />
-                    {col.label}
-                  </label>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <form onSubmit={handleFilter} className="flex flex-wrap gap-4">
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search info..."
-            className="admin-filter-input"
-          />
-          <input
-            value={os}
-            onChange={e => setOs(e.target.value)}
-            placeholder="OS"
-            className="admin-filter-input"
-          />
-          <input
-            value={gpu}
-            onChange={e => setGpu(e.target.value)}
-            placeholder="GPU Model"
-            className="admin-filter-input"
-          />
-          <input
-            type="number"
-            value={minRam}
-            onChange={e => setMinRam(e.target.value)}
-            placeholder="Min RAM (GB)"
-            className="admin-filter-input w-32"
-          />
-          <input
-            type="date"
-            value={fromDate}
-            onChange={e => setFromDate(e.target.value)}
-            className="admin-filter-input"
-          />
-          <input
-            type="date"
-            value={toDate}
-            onChange={e => setToDate(e.target.value)}
-            className="admin-filter-input"
-          />
+    <div className="admin-table-wrapper">
+      <form onSubmit={handleSubmit} className="admin-filters">
+        <div className="flex flex-wrap gap-4">
+          <div className="flex-1 min-w-[200px]">
+            <input
+              type="text"
+              name="search"
+              value={filters.search}
+              onChange={handleFilterChange}
+              placeholder="Search surveys..."
+              className="admin-filter-input"
+            />
+          </div>
+          <div className="w-[200px]">
+            <select
+              name="status"
+              value={filters.status}
+              onChange={handleFilterChange}
+              className="admin-filter-input"
+            >
+              <option value="">All Status</option>
+              <option value="completed">Completed</option>
+              <option value="in_progress">In Progress</option>
+              <option value="pending">Pending</option>
+            </select>
+          </div>
           <button type="submit" className="admin-button">
+            <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
             Filter
           </button>
-        </form>
-      </div>
+        </div>
+      </form>
 
       <div className="admin-table-container">
         <table className="admin-table">
-          <thead className="admin-table-header">
+          <thead>
             <tr>
-              {ALL_COLUMNS.map(col => (
-                visibleCols.includes(col.key) && (
-                  <th
-                    key={col.key}
-                    onClick={() => handleSort(col.key)}
-                    className="cursor-pointer hover:bg-gray-100"
-                  >
-                    {col.label}
-                    {sortBy === col.key && (
-                      <span className="ml-1">{sortDir === 'asc' ? '↑' : '↓'}</span>
-                    )}
-                  </th>
-                )
-              ))}
+              <th onClick={() => handleSort('id')} className="cursor-pointer hover:bg-slate-50">
+                ID
+                {filters.sortBy === 'id' && (
+                  <span className="ml-1">{filters.sortOrder === 'asc' ? '↑' : '↓'}</span>
+                )}
+              </th>
+              <th onClick={() => handleSort('user_name')} className="cursor-pointer hover:bg-slate-50">
+                User
+                {filters.sortBy === 'user_name' && (
+                  <span className="ml-1">{filters.sortOrder === 'asc' ? '↑' : '↓'}</span>
+                )}
+              </th>
+              <th onClick={() => handleSort('hardware_type')} className="cursor-pointer hover:bg-slate-50">
+                Hardware Type
+                {filters.sortBy === 'hardware_type' && (
+                  <span className="ml-1">{filters.sortOrder === 'asc' ? '↑' : '↓'}</span>
+                )}
+              </th>
+              <th onClick={() => handleSort('status')} className="cursor-pointer hover:bg-slate-50">
+                Status
+                {filters.sortBy === 'status' && (
+                  <span className="ml-1">{filters.sortOrder === 'asc' ? '↑' : '↓'}</span>
+                )}
+              </th>
+              <th onClick={() => handleSort('created_at')} className="cursor-pointer hover:bg-slate-50">
+                Created At
+                {filters.sortBy === 'created_at' && (
+                  <span className="ml-1">{filters.sortOrder === 'asc' ? '↑' : '↓'}</span>
+                )}
+              </th>
+              <th>Actions</th>
             </tr>
           </thead>
-          <tbody className="admin-table-body">
+          <tbody>
             {surveys.map(survey => (
-              <tr key={survey.id} className="admin-table-row">
-                {ALL_COLUMNS.map(col => (
-                  visibleCols.includes(col.key) && (
-                    <td key={col.key} className="admin-table-cell">
-                      {survey[col.key]}
-                    </td>
-                  )
-                ))}
+              <tr key={survey.id} className="hover:bg-slate-50 transition-colors">
+                <td>{survey.id}</td>
+                <td>{survey.user_name}</td>
+                <td>{survey.hardware_type}</td>
+                <td>
+                  <span className={`status-badge ${getStatusBadgeClass(survey.status)}`}>
+                    {survey.status}
+                  </span>
+                </td>
+                <td>{new Date(survey.created_at).toLocaleDateString()}</td>
+                <td>
+                  <button
+                    onClick={() => {/* Add view details handler */}}
+                    className="admin-button-secondary"
+                  >
+                    <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                    View
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
 
-      {meta.total_pages > 1 && (
+      {meta && (
         <div className="admin-pagination">
           <button
-            className="admin-pagination-button"
             onClick={() => onPageChange(meta.current_page - 1)}
             disabled={meta.current_page === 1}
+            className="admin-button-secondary"
           >
             Previous
           </button>
-          <span className="text-sm text-gray-700">
-            Page {meta.current_page} of {meta.total_pages}
+          <span className="admin-pagination-text">
+            Page {meta.current_page} of {meta.last_page}
           </span>
           <button
-            className="admin-pagination-button"
             onClick={() => onPageChange(meta.current_page + 1)}
-            disabled={meta.current_page === meta.total_pages}
+            disabled={meta.current_page === meta.last_page}
+            className="admin-button-secondary"
           >
             Next
           </button>
