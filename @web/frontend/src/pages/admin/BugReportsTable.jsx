@@ -1,101 +1,237 @@
 import React, { useState } from 'react';
+import { useDispatch } from 'react-redux';
+import { fetchBugReports } from '../../features/admin/bugReportsSlice';
+import '../../styles/admin.css';
 
-const ALL_COLUMNS = [
-  { key: 'severity', label: 'Severity' },
-  { key: 'category', label: 'Category' },
-  { key: 'description', label: 'Description' },
-  { key: 'date', label: 'Date' },
-];
+const BugReportsTable = ({ bugReports, meta, loading, onFilter, onPageChange }) => {
+  const dispatch = useDispatch();
+  const [filters, setFilters] = useState({
+    search: '',
+    status: '',
+    severity: '',
+    sortBy: 'created_at',
+    sortOrder: 'desc'
+  });
 
-const BugReportsTable = ({ bugReports, meta = {}, onFilter, onPageChange, loading }) => {
-  const [search, setSearch] = useState('');
-  const [severity, setSeverity] = useState('');
-  const [category, setCategory] = useState('');
-  const [fromDate, setFromDate] = useState('');
-  const [toDate, setToDate] = useState('');
-  const [visibleCols, setVisibleCols] = useState(ALL_COLUMNS.map(c => c.key));
-  const [showCols, setShowCols] = useState(false);
-  const [sortBy, setSortBy] = useState('');
-  const [sortDir, setSortDir] = useState('asc');
+  const handleFilterChange = (e) => {
+    const { name, value } = e.target;
+    setFilters(prev => ({ ...prev, [name]: value }));
+  };
 
-  const handleFilter = (e) => {
+  const handleSubmit = (e) => {
     e.preventDefault();
-    onFilter({ search, severity, category, from_date: fromDate, to_date: toDate, page: 1, sort_by: sortBy, sort_dir: sortDir });
+    onFilter(filters);
   };
 
-  const handleSort = (col) => {
-    let dir = 'asc';
-    if (sortBy === col) dir = sortDir === 'asc' ? 'desc' : 'asc';
-    setSortBy(col);
-    setSortDir(dir);
-    onFilter({ search, severity, category, from_date: fromDate, to_date: toDate, page: 1, sort_by: col, sort_dir: dir });
+  const handleSort = (field) => {
+    const newOrder = filters.sortBy === field && filters.sortOrder === 'asc' ? 'desc' : 'asc';
+    setFilters(prev => ({ ...prev, sortBy: field, sortOrder: newOrder }));
+    onFilter({ ...filters, sortBy: field, sortOrder: newOrder });
   };
 
-  const toggleCol = (col) => {
-    setVisibleCols(cols => cols.includes(col) ? cols.filter(c => c !== col) : [...cols, col]);
+  const getStatusBadgeClass = (status) => {
+    switch (status?.toLowerCase()) {
+      case 'open':
+        return 'status-badge-warning';
+      case 'in progress':
+        return 'status-badge-info';
+      case 'resolved':
+        return 'status-badge-success';
+      case 'closed':
+        return 'status-badge-inactive';
+      default:
+        return 'status-badge-default';
+    }
   };
+
+  const getSeverityBadgeClass = (severity) => {
+    switch (severity?.toLowerCase()) {
+      case 'critical':
+        return 'status-badge-danger';
+      case 'high':
+        return 'status-badge-warning';
+      case 'medium':
+        return 'status-badge-info';
+      case 'low':
+        return 'status-badge-success';
+      default:
+        return 'status-badge-default';
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="admin-loading">
+        <div className="admin-loading-spinner" />
+      </div>
+    );
+  }
 
   return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-        <button type="button" onClick={() => setShowCols(v => !v)} style={{ padding: '4px 12px' }}>Columns</button>
-        {showCols && (
-          <div style={{ background: '#fff', border: '1px solid #ddd', borderRadius: 4, padding: 8, position: 'absolute', zIndex: 10 }}>
-            {ALL_COLUMNS.map(col => (
-              <label key={col.key} style={{ display: 'block', marginBottom: 4 }}>
-                <input type="checkbox" checked={visibleCols.includes(col.key)} onChange={() => toggleCol(col.key)} /> {col.label}
-              </label>
-            ))}
+    <div className="admin-table-wrapper">
+      <form onSubmit={handleSubmit} className="admin-filters">
+        <div className="flex flex-wrap gap-4">
+          <div className="flex-1 min-w-[200px]">
+            <input
+              type="text"
+              name="search"
+              value={filters.search}
+              onChange={handleFilterChange}
+              placeholder="Search bug reports..."
+              className="admin-filter-input"
+            />
           </div>
-        )}
-      </div>
-      <form onSubmit={handleFilter} style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search description..." style={{ padding: 4 }} />
-        <select value={severity} onChange={e => setSeverity(e.target.value)} style={{ padding: 4 }}>
-          <option value="">All Severities</option>
-          {['critical','high','medium','low'].map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
-        <input value={category} onChange={e => setCategory(e.target.value)} placeholder="Category" style={{ padding: 4 }} />
-        <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} style={{ padding: 4 }} />
-        <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} style={{ padding: 4 }} />
-        <button type="submit" style={{ padding: '4px 12px' }}>Filter</button>
+          <div className="w-[150px]">
+            <select
+              name="status"
+              value={filters.status}
+              onChange={handleFilterChange}
+              className="admin-filter-input"
+            >
+              <option value="">All Status</option>
+              <option value="open">Open</option>
+              <option value="in progress">In Progress</option>
+              <option value="resolved">Resolved</option>
+              <option value="closed">Closed</option>
+            </select>
+          </div>
+          <div className="w-[150px]">
+            <select
+              name="severity"
+              value={filters.severity}
+              onChange={handleFilterChange}
+              className="admin-filter-input"
+            >
+              <option value="">All Severity</option>
+              <option value="critical">Critical</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
+          </div>
+          <button type="submit" className="admin-button">
+            <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            Filter
+          </button>
+        </div>
       </form>
-      <table className="min-w-full bg-white rounded shadow mt-4">
-        <thead>
-          <tr>
-            {ALL_COLUMNS.filter(col => visibleCols.includes(col.key)).map(col => (
-              <th
-                key={col.key}
-                className="p-2 cursor-pointer select-none"
-                onClick={() => handleSort(col.key)}
-                style={{ userSelect: 'none' }}
-              >
-                {col.label}
-                {sortBy === col.key && (sortDir === 'asc' ? ' ▲' : ' ▼')}
+
+      <div className="admin-table-container">
+        <table className="admin-table">
+          <thead className="admin-table-header">
+            <tr>
+              <th onClick={() => handleSort('id')} className="cursor-pointer">
+                ID
+                {filters.sortBy === 'id' && (
+                  <span className="ml-1">{filters.sortOrder === 'asc' ? '↑' : '↓'}</span>
+                )}
               </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {bugReports.map((b) => (
-            <tr key={b.id}>
-              {visibleCols.includes('severity') && <td className="p-2">{b.severity}</td>}
-              {visibleCols.includes('category') && <td className="p-2">{b.category}</td>}
-              {visibleCols.includes('description') && <td className="p-2">{b.description.slice(0, 40)}...</td>}
-              {visibleCols.includes('date') && <td className="p-2">{new Date(b.created_at).toLocaleDateString()}</td>}
+              <th onClick={() => handleSort('user_name')} className="cursor-pointer">
+                User
+                {filters.sortBy === 'user_name' && (
+                  <span className="ml-1">{filters.sortOrder === 'asc' ? '↑' : '↓'}</span>
+                )}
+              </th>
+              <th onClick={() => handleSort('title')} className="cursor-pointer">
+                Title
+                {filters.sortBy === 'title' && (
+                  <span className="ml-1">{filters.sortOrder === 'asc' ? '↑' : '↓'}</span>
+                )}
+              </th>
+              <th onClick={() => handleSort('status')} className="cursor-pointer">
+                Status
+                {filters.sortBy === 'status' && (
+                  <span className="ml-1">{filters.sortOrder === 'asc' ? '↑' : '↓'}</span>
+                )}
+              </th>
+              <th onClick={() => handleSort('severity')} className="cursor-pointer">
+                Severity
+                {filters.sortBy === 'severity' && (
+                  <span className="ml-1">{filters.sortOrder === 'asc' ? '↑' : '↓'}</span>
+                )}
+              </th>
+              <th onClick={() => handleSort('created_at')} className="cursor-pointer">
+                Date
+                {filters.sortBy === 'created_at' && (
+                  <span className="ml-1">{filters.sortOrder === 'asc' ? '↑' : '↓'}</span>
+                )}
+              </th>
+              <th>Actions</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-      <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center' }}>
-        <button onClick={() => onPageChange(meta.current_page - 1)} disabled={meta.current_page <= 1 || loading}>Prev</button>
-        <span>Page {meta.current_page || 1} of {meta.last_page || 1}</span>
-        <button onClick={() => onPageChange(meta.current_page + 1)} disabled={meta.current_page >= meta.last_page || loading}>Next</button>
-        <select value={meta.per_page || 15} onChange={e => onFilter({ per_page: e.target.value, page: 1 })}>
-          {[10, 15, 25, 50, 100].map(n => <option key={n} value={n}>{n} / page</option>)}
-        </select>
+          </thead>
+          <tbody className="admin-table-body">
+            {bugReports.map(report => (
+              <tr key={report.id} className="admin-table-row">
+                <td className="admin-table-cell">{report.id}</td>
+                <td className="admin-table-cell">{report.user_name}</td>
+                <td className="admin-table-cell">
+                  <div className="max-w-xs truncate">{report.title}</div>
+                </td>
+                <td className="admin-table-cell">
+                  <span className={`status-badge ${getStatusBadgeClass(report.status)}`}>
+                    {report.status}
+                  </span>
+                </td>
+                <td className="admin-table-cell">
+                  <span className={`status-badge ${getSeverityBadgeClass(report.severity)}`}>
+                    {report.severity}
+                  </span>
+                </td>
+                <td className="admin-table-cell">{new Date(report.created_at).toLocaleDateString()}</td>
+                <td className="admin-table-cell">
+                  <div className="flex space-x-2">
+                    <button
+                      onClick={() => {/* View details */}}
+                      className="admin-button-secondary"
+                    >
+                      <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
+                      View
+                    </button>
+                    <button
+                      onClick={() => {/* Update status */}}
+                      className="admin-button"
+                    >
+                      <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                      Update
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
+
+      {meta && (
+        <div className="admin-pagination">
+          <button
+            onClick={() => onPageChange(meta.current_page - 1)}
+            disabled={meta.current_page === 1}
+            className="admin-pagination-button"
+          >
+            Previous
+          </button>
+          <span className="text-sm text-slate-700">
+            Page {meta.current_page} of {meta.last_page}
+          </span>
+          <button
+            onClick={() => onPageChange(meta.current_page + 1)}
+            disabled={meta.current_page === meta.last_page}
+            className="admin-pagination-button"
+          >
+            Next
+          </button>
+        </div>
+      )}
     </div>
   );
 };
+
 export default BugReportsTable; 
