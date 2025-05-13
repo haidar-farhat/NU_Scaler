@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  # Frontend (React) - development only, builds happen locally
+  frontend:
+    build:
+      context: ./@web/frontend
+      dockerfile: Dockerfile
+    volumes:
+      - ./@web/frontend:/app
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+    depends_on:
+      - backend
+
+  # Backend (Laravel)
+  backend:
+    build:
+      context: ./@web/server/laravel_app
+      dockerfile: Dockerfile
+    volumes:
+      - ./@web/server/laravel_app:/var/www/html
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+    environment:
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_DATABASE: nu_scaler
+      DB_USERNAME: nu_scaler_user
+      DB_PASSWORD: password
+
+  # Database (MySQL)
+  db:
+    image: mysql:8.0
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_DATABASE: nu_scaler
+      MYSQL_USER: nu_scaler_user
+      MYSQL_PASSWORD: password
+      MYSQL_ROOT_PASSWORD: root_password
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+volumes:
+  mysql_data: 
