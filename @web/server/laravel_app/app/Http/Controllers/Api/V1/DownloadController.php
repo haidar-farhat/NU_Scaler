@@ -97,10 +97,10 @@ class DownloadController extends Controller
                 }
             }
 
-            // The path to the exe file
-            $exePath = base_path('../../releases/NuScaler.exe');
+            // Use the verified file path
+            $exePath = 'C:/Nu_Scaler/NU_Scaler/releases/NuScaler.exe';
 
-            if (!File::exists($exePath)) {
+            if (!file_exists($exePath)) {
                 Log::error('Download file not found during download attempt', [
                     'path' => $exePath
                 ]);
@@ -140,7 +140,8 @@ class DownloadController extends Controller
 
             return response()->json([
                 'message' => 'Failed to process download',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
             ], 500);
         }
     }
@@ -180,10 +181,16 @@ class DownloadController extends Controller
     public function getPublicDownloadLink(): JsonResponse
     {
         try {
-            // The path to the exe file
-            $exePath = base_path('../../releases/NuScaler.exe');
+            // Use the verified exe file path
+            $exePath = 'C:/Nu_Scaler/NU_Scaler/releases/NuScaler.exe';
 
-            if (!File::exists($exePath)) {
+            // Log the paths for debugging
+            Log::info('Looking for exe file', [
+                'exe_path' => $exePath,
+                'file_exists' => file_exists($exePath)
+            ]);
+
+            if (!file_exists($exePath)) {
                 Log::error('Download file not found in public link', [
                     'path' => $exePath
                 ]);
@@ -194,11 +201,8 @@ class DownloadController extends Controller
                 ], 404);
             }
 
-            // Create a direct download link without encryption
-            $downloadUrl = route('api.v1.download.file', [
-                'platform' => 'windows',
-                'token' => 'public-access'
-            ]);
+            // Create a direct download link
+            $downloadUrl = route('api.v1.download.direct');
 
             $downloadInfo = [
                 'message' => 'Public download link generated successfully.',
@@ -206,7 +210,8 @@ class DownloadController extends Controller
                 'version' => '2.1.0',
                 'size_mb' => round(File::size($exePath) / (1024 * 1024), 2),
                 'expires_at' => now()->addDay()->toIso8601String(),
-                'is_public' => true
+                'is_public' => true,
+                'file_path' => $exePath
             ];
 
             return response()->json($downloadInfo);
@@ -218,6 +223,49 @@ class DownloadController extends Controller
 
             return response()->json([
                 'message' => 'Failed to generate download link',
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ], 500);
+        }
+    }
+
+    /**
+     * Direct download of the NuScaler.exe file without token requirement
+     *
+     * @return BinaryFileResponse|JsonResponse
+     */
+    public function downloadDirectFile()
+    {
+        try {
+            // Use the verified file path
+            $exePath = 'C:/Nu_Scaler/NU_Scaler/releases/NuScaler.exe';
+
+            if (!file_exists($exePath)) {
+                Log::error('Direct download file not found at verified path', [
+                    'path' => $exePath
+                ]);
+                return response()->json(['message' => 'File not found'], 404);
+            }
+
+            // Log anonymous download
+            Log::info('Direct download initiated', [
+                'ip' => request()->ip(),
+                'file_size' => File::size($exePath)
+            ]);
+
+            // Return the file as a download
+            return response()->download($exePath, 'NuScaler.exe', [
+                'Content-Type' => 'application/octet-stream',
+                'Content-Disposition' => 'attachment; filename="NuScaler.exe"'
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Direct download error', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to process direct download',
                 'error' => $e->getMessage()
             ], 500);
         }

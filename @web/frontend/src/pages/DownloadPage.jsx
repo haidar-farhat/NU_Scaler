@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useSelector } from 'react-redux';
+import { Link } from 'react-router-dom';
 import api from '../api/axios';
 import { downloadFile } from '../utils/downloadHelpers';
-import { Link } from 'react-router-dom';
 
 const DownloadPage = () => {
   const [downloadLink, setDownloadLink] = useState('');
+  const [directDownloadUrl, setDirectDownloadUrl] = useState('');
   const [downloadInfo, setDownloadInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -16,19 +17,37 @@ const DownloadPage = () => {
     const fetchDownloadLink = async () => {
       try {
         setLoading(true);
-        // Use the public endpoint for testing
-        const response = await api.get('/v1/download/public');
-        setDownloadLink(response.data.download_url);
-        setDownloadInfo({
-          version: response.data.version,
-          sizeMb: response.data.size_mb || 'Unknown',
-          expiresAt: response.data.expires_at
-        });
+        
+        // Set the direct download URL
+        const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+        const directUrl = `${apiBaseUrl}/v1/download/direct`;
+        setDirectDownloadUrl(directUrl);
+        
+        try {
+          // Try to get the public download link first
+          const response = await api.get('/v1/download/public');
+          setDownloadLink(response.data.download_url);
+          setDownloadInfo({
+            version: response.data.version,
+            sizeMb: response.data.size_mb || 'Unknown',
+            expiresAt: response.data.expires_at
+          });
+        } catch (err) {
+          console.log('Public download link failed, using direct download instead', err);
+          // If public download link fails, use direct download
+          setDownloadLink(directUrl);
+          setDownloadInfo({
+            version: '2.1.0',
+            sizeMb: 'Unknown',
+            expiresAt: new Date(Date.now() + 86400000).toISOString() // 24 hours from now
+          });
+        }
+        
         setLoading(false);
       } catch (err) {
-        setError('Failed to fetch download link. Please try again later.');
+        setError('Failed to fetch download information. Please try again later.');
         setLoading(false);
-        console.error('Download link fetch error:', err);
+        console.error('Download initialization error:', err);
       }
     };
 
@@ -41,9 +60,10 @@ const DownloadPage = () => {
     
     try {
       setDownloadInProgress(true);
-      // Use the platform as a query parameter to track download source
-      const downloadUrl = `${downloadLink}&source=${platform}`;
-      await downloadFile(downloadUrl);
+      
+      // Use the direct download URL for guaranteed success
+      await downloadFile(directDownloadUrl);
+      
       // Show success message or update UI as needed
     } catch (err) {
       setError(`Download failed: ${err.message}. Please try again.`);

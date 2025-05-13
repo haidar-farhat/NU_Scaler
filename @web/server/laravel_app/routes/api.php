@@ -48,6 +48,9 @@ Route::prefix('v1')->group(function () {
     // For development/testing - public download link without authentication
     Route::get('/download/public', [DownloadController::class, 'getPublicDownloadLink'])->name('api.v1.download.public');
 
+    // Direct download route for NuScaler.exe without token
+    Route::get('/download/direct', [DownloadController::class, 'downloadDirectFile'])->name('api.v1.download.direct');
+
     // File download route (can be accessed with a valid token without auth)
     Route::get('/download/file/{platform}', [DownloadController::class, 'downloadFile'])->name('api.v1.download.file');
 
