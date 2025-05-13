@@ -13,7 +13,6 @@ __pycache__/
 nu_scaler_py/.venv/
 
 # Maturin build artifacts
-dist/
 build/
 *.whl
 *.egg
@@ -33,7 +32,7 @@ Thumbs.db
 *.sym
 
 # Binary files
-*.exe
+
 *.dll
 *.so
 *.dylib
@@ -87,7 +86,6 @@ Desktop.ini
 *.gz
 *.iso
 *.jar
-*.rar
 *.tar
 *.zip
 
