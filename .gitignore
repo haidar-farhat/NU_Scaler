@@ -78,7 +78,7 @@ Desktop.ini
 **/build/
 **/bin/
 **/obj/
-**/dist/
+
 
 # Package files
 *.7z
