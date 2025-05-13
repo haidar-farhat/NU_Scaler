@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useSelector } from 'react-redux';
 import api from '../api/axios';
 import { downloadFile } from '../utils/downloadHelpers';
+import { Link } from 'react-router-dom';
 
 const DownloadPage = () => {
   const [downloadLink, setDownloadLink] = useState('');
@@ -108,12 +109,23 @@ const DownloadPage = () => {
               <p className="text-gray-700 mb-4">
                 Thank you for being a valued user of Nu Scaler. You have access to download our premium upscaling software.
               </p>
-              <p className="text-gray-700 mb-2">
-                <strong>Your License:</strong> Personal Use
-              </p>
-              <p className="text-gray-700">
-                <strong>User:</strong> {user?.name || 'Authenticated User'}
-              </p>
+              {user ? (
+                <>
+                  <p className="text-gray-700 mb-2">
+                    <strong>Your License:</strong> Personal Use
+                  </p>
+                  <p className="text-gray-700">
+                    <strong>User:</strong> {user.name}
+                  </p>
+                </>
+              ) : (
+                <p className="text-gray-700 mb-2">
+                  <strong>License Type:</strong> Free Trial 
+                  <span className="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                    <Link to="/login" className="text-blue-600 hover:text-blue-800 ml-1">Sign in</Link> for full version
+                  </span>
+                </p>
+              )}
             </div>
 
             <div className="bg-gray-50 p-6 rounded-lg mb-8">
