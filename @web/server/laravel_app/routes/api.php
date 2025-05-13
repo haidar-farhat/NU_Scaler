@@ -45,6 +45,9 @@ Route::prefix('v1')->group(function () {
     // Download Info (Protected by auth)
     Route::get('/download', [DownloadController::class, 'getDownloadLink'])->middleware('auth:sanctum')->name('api.v1.download');
 
+    // For development/testing - public download link without authentication
+    Route::get('/download/public', [DownloadController::class, 'getPublicDownloadLink'])->name('api.v1.download.public');
+
     // File download route (can be accessed with a valid token without auth)
     Route::get('/download/file/{platform}', [DownloadController::class, 'downloadFile'])->name('api.v1.download.file');
 

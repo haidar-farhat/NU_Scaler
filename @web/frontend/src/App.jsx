@@ -1,5 +1,5 @@
 import React, { Suspense, lazy } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, createBrowserRouter, RouterProvider } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import { ToastProvider } from './components/ToastContext';
 
@@ -24,55 +24,92 @@ const LoadingSpinner = () => (
   </div>
 );
 
+// Use future flags to prevent warnings
+const router = createBrowserRouter([
+  {
+    path: "/",
+    element: (
+      <>
+        <Navbar />
+        <Suspense fallback={<LoadingSpinner />}>
+          <LandingPage />
+        </Suspense>
+      </>
+    )
+  },
+  {
+    path: "/login",
+    element: (
+      <>
+        <Navbar />
+        <Suspense fallback={<LoadingSpinner />}>
+          <LoginPage />
+        </Suspense>
+      </>
+    )
+  },
+  {
+    path: "/register",
+    element: (
+      <>
+        <Navbar />
+        <Suspense fallback={<LoadingSpinner />}>
+          <RegisterPage />
+        </Suspense>
+      </>
+    )
+  },
+  {
+    path: "/download",
+    element: (
+      <>
+        <Navbar />
+        <Suspense fallback={<LoadingSpinner />}>
+          <ProtectedRoute>
+            <DownloadPage />
+          </ProtectedRoute>
+        </Suspense>
+      </>
+    )
+  },
+  {
+    path: "/admin",
+    element: (
+      <>
+        <Navbar />
+        <Suspense fallback={<LoadingSpinner />}>
+          <ProtectedRoute role="admin">
+            <AdminDashboard />
+          </ProtectedRoute>
+        </Suspense>
+      </>
+    )
+  },
+  {
+    path: "/admin/users",
+    element: (
+      <>
+        <Navbar />
+        <Suspense fallback={<LoadingSpinner />}>
+          <ProtectedRoute role="admin">
+            <AdminUsersPage />
+          </ProtectedRoute>
+        </Suspense>
+      </>
+    )
+  }
+], {
+  // Use future flags to prevent warnings
+  future: {
+    v7_startTransition: true,
+    v7_relativeSplatPath: true
+  }
+});
+
 function App() {
   return (
     <ToastProvider>
-      <BrowserRouter>
-        <Navbar />
-        {/* <Layout> You could wrap Routes in a Layout component */}
-        <Suspense fallback={<LoadingSpinner />}>
-          <Routes>
-            {/* Public Routes */}
-            <Route path="/" element={<LandingPage />} />
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/register" element={<RegisterPage />} />
-
-            {/* Protected Routes */}
-            <Route 
-              path="/download" 
-              element={
-                <ProtectedRoute>
-                  <DownloadPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route 
-              path="/admin" 
-              element={
-                <ProtectedRoute role="admin">
-                  <AdminDashboard />
-                </ProtectedRoute>
-              }
-            />
-            
-            {/* Add Admin Users Route */}
-            <Route 
-              path="/admin/users" 
-              element={
-                <ProtectedRoute role="admin">
-                  <AdminUsersPage />
-                </ProtectedRoute>
-              }
-            />
-            
-            {/* Add other routes here */}
-
-            {/* Optional: 404 Not Found Route */}
-            {/* <Route path="*" element={<NotFoundPage />} /> */}
-          </Routes>
-        </Suspense>
-        {/* </Layout> */}
-      </BrowserRouter>
+      <RouterProvider router={router} />
     </ToastProvider>
   );
 }

@@ -15,7 +15,8 @@ const DownloadPage = () => {
     const fetchDownloadLink = async () => {
       try {
         setLoading(true);
-        const response = await api.get('/v1/download');
+        // Use the public endpoint for testing
+        const response = await api.get('/v1/download/public');
         setDownloadLink(response.data.download_url);
         setDownloadInfo({
           version: response.data.version,

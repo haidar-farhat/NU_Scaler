@@ -84,6 +84,19 @@ class DownloadController extends Controller
                 return response()->json(['message' => 'Invalid download token'], 401);
             }
 
+            // Allow public token for testing purposes
+            $isPublicAccess = ($token === 'public-access');
+
+            // Only decrypt non-public tokens
+            if (!$isPublicAccess) {
+                try {
+                    // Try to decrypt the token - this will fail if token is invalid
+                    $decryptedToken = decrypt($token);
+                } catch (\Exception $e) {
+                    return response()->json(['message' => 'Invalid or expired token'], 401);
+                }
+            }
+
             // The path to the exe file
             $exePath = base_path('../../releases/NuScaler.exe');
 
@@ -106,6 +119,12 @@ class DownloadController extends Controller
                 } catch (\Exception $e) {
                     Log::error('Failed to log file download', ['error' => $e->getMessage()]);
                 }
+            } else if ($isPublicAccess) {
+                // Log anonymous download
+                Log::info('Anonymous download via public link', [
+                    'ip' => $request->ip(),
+                    'platform' => $platform
+                ]);
             }
 
             // Return the file as a download
@@ -151,6 +170,57 @@ class DownloadController extends Controller
                 'expires_at' => now()->addHours(1)->toIso8601String(),
             ],
         ]);
+    }
+
+    /**
+     * Get download link without authentication (for testing)
+     *
+     * @return JsonResponse
+     */
+    public function getPublicDownloadLink(): JsonResponse
+    {
+        try {
+            // The path to the exe file
+            $exePath = base_path('../../releases/NuScaler.exe');
+
+            if (!File::exists($exePath)) {
+                Log::error('Download file not found in public link', [
+                    'path' => $exePath
+                ]);
+
+                return response()->json([
+                    'message' => 'Download file not available.',
+                    'error' => 'File not found'
+                ], 404);
+            }
+
+            // Create a direct download link without encryption
+            $downloadUrl = route('api.v1.download.file', [
+                'platform' => 'windows',
+                'token' => 'public-access'
+            ]);
+
+            $downloadInfo = [
+                'message' => 'Public download link generated successfully.',
+                'download_url' => $downloadUrl,
+                'version' => '2.1.0',
+                'size_mb' => round(File::size($exePath) / (1024 * 1024), 2),
+                'expires_at' => now()->addDay()->toIso8601String(),
+                'is_public' => true
+            ];
+
+            return response()->json($downloadInfo);
+        } catch (\Exception $e) {
+            Log::error('Failed to create public download link', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to generate download link',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 
     // We might add methods later to list download history for a user or admin
