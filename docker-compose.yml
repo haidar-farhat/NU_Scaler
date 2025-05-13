@@ -1,21 +1,6 @@
 version: '3.8'
 
 services:
-  # Frontend (React) - development only, builds happen locally
-  frontend:
-    build:
-      context: ./@web/frontend
-      dockerfile: Dockerfile
-    volumes:
-      - ./@web/frontend:/app
-      - /app/node_modules
-    ports:
-      - "5173:5173"
-    environment:
-      - CHOKIDAR_USEPOLLING=true
-    depends_on:
-      - backend
-
   # Backend (Laravel)
   backend:
     build:
