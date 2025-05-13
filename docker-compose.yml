@@ -23,7 +23,7 @@ services:
   db:
     image: mysql:8.0
     ports:
-      - "3306:3306"
+      - "3307:3306"
     environment:
       MYSQL_DATABASE: nu_scaler
       MYSQL_USER: nu_scaler_user
