@@ -2,73 +2,49 @@ import { useState, useEffect } from 'react';
 import { useSelector } from 'react-redux';
 import { Link } from 'react-router-dom';
 import api from '../api/axios';
-import { downloadFile } from '../utils/downloadHelpers';
 
 const DownloadPage = () => {
-  const [downloadLink, setDownloadLink] = useState('');
-  const [directDownloadUrl, setDirectDownloadUrl] = useState('');
-  const [downloadInfo, setDownloadInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [downloadInfo, setDownloadInfo] = useState(null);
   const [downloadInProgress, setDownloadInProgress] = useState(false);
   const { user } = useSelector((state) => state.auth);
+  
+  // Direct download URL - no need for API calls to get this
+  const directDownloadUrl = 'http://localhost:8000/api/v1/download/direct';
 
   useEffect(() => {
-    const fetchDownloadLink = async () => {
-      try {
-        setLoading(true);
-        
-        // Set the direct download URL
-        const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
-        const directUrl = `${apiBaseUrl}/v1/download/direct`;
-        setDirectDownloadUrl(directUrl);
-        
-        try {
-          // Try to get the public download link first
-          const response = await api.get('/v1/download/public');
-          setDownloadLink(response.data.download_url);
-          setDownloadInfo({
-            version: response.data.version,
-            sizeMb: response.data.size_mb || 'Unknown',
-            expiresAt: response.data.expires_at
-          });
-        } catch (err) {
-          console.log('Public download link failed, using direct download instead', err);
-          // If public download link fails, use direct download
-          setDownloadLink(directUrl);
-          setDownloadInfo({
-            version: '2.1.0',
-            sizeMb: 'Unknown',
-            expiresAt: new Date(Date.now() + 86400000).toISOString() // 24 hours from now
-          });
-        }
-        
-        setLoading(false);
-      } catch (err) {
-        setError('Failed to fetch download information. Please try again later.');
-        setLoading(false);
-        console.error('Download initialization error:', err);
-      }
-    };
-
-    fetchDownloadLink();
+    // Set some basic download info
+    setDownloadInfo({
+      version: '2.1.0',
+      sizeMb: 223, // We know this from checking the file
+      expiresAt: new Date(Date.now() + 86400000).toISOString() // 24 hours from now
+    });
+    setLoading(false);
   }, []);
 
-  // Handle file download with our custom helper
+  // Handle file download directly
   const handleDownload = async (e, platform) => {
-    e.preventDefault(); // Prevent default anchor behavior
+    e.preventDefault();
     
     try {
       setDownloadInProgress(true);
       
-      // Use the direct download URL for guaranteed success
-      await downloadFile(directDownloadUrl);
+      // Create a hidden anchor element to trigger the download
+      const link = document.createElement('a');
+      link.href = directDownloadUrl;
+      link.download = 'NuScaler.exe';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
       
-      // Show success message or update UI as needed
+      // Wait a bit before resetting the download state
+      setTimeout(() => {
+        setDownloadInProgress(false);
+      }, 1000);
     } catch (err) {
       setError(`Download failed: ${err.message}. Please try again.`);
       console.error('Download error:', err);
-    } finally {
       setDownloadInProgress(false);
     }
   };
@@ -220,7 +196,7 @@ const DownloadPage = () => {
                 </div>
                 <div className="ml-3">
                   <p className="text-sm text-yellow-700">
-                    These download links will expire in 24 hours. If you need to download again after this period, please return to this page.
+                    Download size is approximately 223MB. Make sure you have a stable internet connection.
                   </p>
                 </div>
               </div>
