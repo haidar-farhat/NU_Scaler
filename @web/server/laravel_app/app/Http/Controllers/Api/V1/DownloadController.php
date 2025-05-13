@@ -7,13 +7,14 @@ use Illuminate\Http\Request;
 use App\Models\DownloadLog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class DownloadController extends Controller
 {
     /**
      * Handle a request for the application download link.
-     *
-     * Logs the attempt and returns a (placeholder) link or file info.
      *
      * @param Request $request
      * @return JsonResponse
@@ -35,14 +36,94 @@ class DownloadController extends Controller
             ]);
         }
 
+        // Generate a signed download URL
+        $exePath = base_path('../../releases/NuScaler.exe');
+
+        if (!File::exists($exePath)) {
+            Log::error('Download file not found', [
+                'path' => $exePath,
+                'user_id' => $user->id
+            ]);
+
+            return response()->json([
+                'message' => 'Download file not available.',
+                'error' => 'File not found'
+            ], 404);
+        }
+
+        // Create a signed URL for the download
+        $downloadUrl = route('api.v1.download.file', [
+            'platform' => 'windows',
+            'token' => encrypt($user->id . '_' . now()->timestamp)
+        ]);
+
         $downloadInfo = [
             'message' => 'Download link generated successfully.',
-            'download_url' => 'https://example.com/downloads/nuscaler-latest',
+            'download_url' => $downloadUrl,
             'version' => '2.1.0',
+            'size_mb' => round(File::size($exePath) / (1024 * 1024), 2),
             'expires_at' => now()->addDay()->toIso8601String(),
         ];
 
         return response()->json($downloadInfo);
+    }
+
+    /**
+     * Serve the actual executable file for download
+     *
+     * @param Request $request
+     * @param string $platform
+     * @return BinaryFileResponse|JsonResponse
+     */
+    public function downloadFile(Request $request, string $platform)
+    {
+        try {
+            // Validate the token
+            $token = $request->query('token');
+            if (!$token) {
+                return response()->json(['message' => 'Invalid download token'], 401);
+            }
+
+            // The path to the exe file
+            $exePath = base_path('../../releases/NuScaler.exe');
+
+            if (!File::exists($exePath)) {
+                Log::error('Download file not found during download attempt', [
+                    'path' => $exePath
+                ]);
+                return response()->json(['message' => 'File not found'], 404);
+            }
+
+            // Log the actual download
+            if ($request->user()) {
+                try {
+                    DownloadLog::create([
+                        'user_id' => $request->user()->id,
+                        'ip_address' => $request->ip(),
+                        'platform' => $platform,
+                        'downloaded' => true
+                    ]);
+                } catch (\Exception $e) {
+                    Log::error('Failed to log file download', ['error' => $e->getMessage()]);
+                }
+            }
+
+            // Return the file as a download
+            return response()->download($exePath, 'NuScaler.exe', [
+                'Content-Type' => 'application/octet-stream',
+                'Content-Disposition' => 'attachment; filename="NuScaler.exe"'
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Download error', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to process download',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 
     /**

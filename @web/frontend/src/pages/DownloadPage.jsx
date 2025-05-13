@@ -1,11 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useSelector } from 'react-redux';
 import api from '../api/axios';
+import { downloadFile } from '../utils/downloadHelpers';
 
 const DownloadPage = () => {
   const [downloadLink, setDownloadLink] = useState('');
+  const [downloadInfo, setDownloadInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [downloadInProgress, setDownloadInProgress] = useState(false);
   const { user } = useSelector((state) => state.auth);
 
   useEffect(() => {
@@ -14,6 +17,11 @@ const DownloadPage = () => {
         setLoading(true);
         const response = await api.get('/v1/download');
         setDownloadLink(response.data.download_url);
+        setDownloadInfo({
+          version: response.data.version,
+          sizeMb: response.data.size_mb || 'Unknown',
+          expiresAt: response.data.expires_at
+        });
         setLoading(false);
       } catch (err) {
         setError('Failed to fetch download link. Please try again later.');
@@ -24,6 +32,24 @@ const DownloadPage = () => {
 
     fetchDownloadLink();
   }, []);
+
+  // Handle file download with our custom helper
+  const handleDownload = async (e, platform) => {
+    e.preventDefault(); // Prevent default anchor behavior
+    
+    try {
+      setDownloadInProgress(true);
+      // Use the platform as a query parameter to track download source
+      const downloadUrl = `${downloadLink}&source=${platform}`;
+      await downloadFile(downloadUrl);
+      // Show success message or update UI as needed
+    } catch (err) {
+      setError(`Download failed: ${err.message}. Please try again.`);
+      console.error('Download error:', err);
+    } finally {
+      setDownloadInProgress(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -92,42 +118,54 @@ const DownloadPage = () => {
             <div className="bg-gray-50 p-6 rounded-lg mb-8">
               <h3 className="text-lg font-semibold text-gray-900 mb-3">Available Downloads</h3>
               <div className="space-y-4">
-                <div className="flex items-center justify-between border-b pb-4">
-                  <div>
-                    <p className="font-medium">Nu Scaler for Windows</p>
-                    <p className="text-sm text-gray-500">v2.1.0 (64-bit)</p>
+                {downloadInProgress ? (
+                  <div className="flex items-center justify-center p-4">
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600 mr-3"></div>
+                    <p className="text-indigo-600">Download in progress...</p>
                   </div>
-                  <a
-                    href={`${downloadLink}&platform=windows`}
-                    className="bg-indigo-600 text-white py-2 px-4 rounded hover:bg-indigo-700 transition duration-200"
-                  >
-                    Download
-                  </a>
-                </div>
-                <div className="flex items-center justify-between border-b pb-4">
-                  <div>
-                    <p className="font-medium">Nu Scaler for macOS</p>
-                    <p className="text-sm text-gray-500">v2.1.0 (Universal)</p>
-                  </div>
-                  <a
-                    href={`${downloadLink}&platform=macos`}
-                    className="bg-indigo-600 text-white py-2 px-4 rounded hover:bg-indigo-700 transition duration-200"
-                  >
-                    Download
-                  </a>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-medium">Nu Scaler for Linux</p>
-                    <p className="text-sm text-gray-500">v2.1.0 (.deb package)</p>
-                  </div>
-                  <a
-                    href={`${downloadLink}&platform=linux`}
-                    className="bg-indigo-600 text-white py-2 px-4 rounded hover:bg-indigo-700 transition duration-200"
-                  >
-                    Download
-                  </a>
-                </div>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between border-b pb-4">
+                      <div>
+                        <p className="font-medium">Nu Scaler for Windows</p>
+                        <p className="text-sm text-gray-500">v{downloadInfo?.version || '2.1.0'} (64-bit)</p>
+                        {downloadInfo?.sizeMb && (
+                          <p className="text-sm text-gray-500">{downloadInfo.sizeMb} MB</p>
+                        )}
+                      </div>
+                      <button
+                        onClick={(e) => handleDownload(e, 'windows')}
+                        className="bg-indigo-600 text-white py-2 px-4 rounded hover:bg-indigo-700 transition duration-200"
+                      >
+                        Download
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between border-b pb-4">
+                      <div>
+                        <p className="font-medium">Nu Scaler for macOS</p>
+                        <p className="text-sm text-gray-500">v{downloadInfo?.version || '2.1.0'} (Universal)</p>
+                      </div>
+                      <button
+                        onClick={(e) => handleDownload(e, 'macos')}
+                        className="bg-indigo-600 text-white py-2 px-4 rounded hover:bg-indigo-700 transition duration-200"
+                      >
+                        Download
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-medium">Nu Scaler for Linux</p>
+                        <p className="text-sm text-gray-500">v{downloadInfo?.version || '2.1.0'} (.deb package)</p>
+                      </div>
+                      <button
+                        onClick={(e) => handleDownload(e, 'linux')}
+                        className="bg-indigo-600 text-white py-2 px-4 rounded hover:bg-indigo-700 transition duration-200"
+                      >
+                        Download
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 

@@ -15,6 +15,8 @@ return new class extends Migration
             $table->id();
             $table->foreignId('user_id')->constrained()->cascadeOnDelete(); // Link to users table
             $table->ipAddress('ip_address')->nullable(); // Store the IP address
+            $table->string('platform')->nullable(); // Operating system platform
+            $table->boolean('downloaded')->default(false); // Whether the file was actually downloaded
             $table->timestamp('created_at')->useCurrent(); // Only need created_at
             // No updated_at needed for logs
         });

@@ -23,7 +23,18 @@ class DownloadLog extends Model
     protected $fillable = [
         'user_id',
         'ip_address',
+        'platform',
+        'downloaded',
         // created_at is handled automatically
+    ];
+
+    /**
+     * The attributes that should be cast.
+     *
+     * @var array<string, string>
+     */
+    protected $casts = [
+        'downloaded' => 'boolean',
     ];
 
     /**
