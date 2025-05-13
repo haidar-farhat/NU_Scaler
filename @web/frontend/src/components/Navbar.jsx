@@ -64,16 +64,15 @@ const Navbar = () => {
                 Home
               </Link>
               
-              {isAuthenticated && (
-                <Link 
-                  to="/download" 
-                  className={`text-sm font-medium transition-colors duration-200 hover:text-indigo-600 ${
-                    isActive('/download') ? 'text-indigo-600' : 'text-gray-700'
-                  }`}
-                >
-                  Download
-                </Link>
-              )}
+              {/* Download link now available for all users */}
+              <Link 
+                to="/download" 
+                className={`text-sm font-medium transition-colors duration-200 hover:text-indigo-600 ${
+                  isActive('/download') ? 'text-indigo-600' : 'text-gray-700'
+                }`}
+              >
+                Download
+              </Link>
               
               {user?.is_admin && (
                 <Link 
@@ -163,16 +162,15 @@ const Navbar = () => {
               Home
             </Link>
             
-            {isAuthenticated && (
-              <Link 
-                to="/download" 
-                className={`block py-3 px-4 text-sm font-medium rounded-lg ${
-                  isActive('/download') ? 'bg-indigo-50 text-indigo-600' : 'text-gray-700 hover:bg-gray-50'
-                }`}
-              >
-                Download
-              </Link>
-            )}
+            {/* Download link now available for all users in mobile menu too */}
+            <Link 
+              to="/download" 
+              className={`block py-3 px-4 text-sm font-medium rounded-lg ${
+                isActive('/download') ? 'bg-indigo-50 text-indigo-600' : 'text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              Download
+            </Link>
             
             {user?.is_admin && (
               <Link 

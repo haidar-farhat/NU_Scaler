@@ -65,9 +65,7 @@ const router = createBrowserRouter([
       <>
         <Navbar />
         <Suspense fallback={<LoadingSpinner />}>
-          <ProtectedRoute>
-            <DownloadPage />
-          </ProtectedRoute>
+          <DownloadPage />
         </Suspense>
       </>
     )
