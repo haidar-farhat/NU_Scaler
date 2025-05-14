@@ -21,8 +21,20 @@ export const login = createAsyncThunk(
   'auth/login',
   async (credentials, { rejectWithValue }) => {
     try {
-      // First get the CSRF cookie from Laravel Sanctum
-      await axios.get('http://localhost:8000/sanctum/csrf-cookie', { withCredentials: true });
+      const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+      
+      // First get the CSRF cookie from Laravel Sanctum using the correct base URL
+      console.log('Fetching CSRF cookie...');
+      try {
+        await axios.get(`${baseURL}/sanctum/csrf-cookie`, { 
+          withCredentials: true 
+        });
+        console.log('Initial CSRF setup: success');
+      } catch (csrfError) {
+        console.error('Failed to fetch CSRF cookie:', csrfError);
+        console.log('Initial CSRF setup: failed');
+        // Continue anyway - some setups don't require CSRF
+      }
       
       console.log('Attempting login with credentials:', credentials);
       const response = await api.post('/v1/login', credentials);
