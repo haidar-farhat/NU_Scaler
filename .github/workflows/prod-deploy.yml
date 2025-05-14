@@ -28,11 +28,10 @@ jobs:
             # Pull latest code
             git pull origin main
             
-            # Create/update .env file
+            # Create basic .env file
             cat > @web/server/laravel_app/.env << 'EOL'
             APP_NAME=NuScaler
             APP_ENV=production
-            APP_KEY=${{ secrets.PROD_APP_KEY }}
             APP_DEBUG=false
             APP_URL=${{ secrets.PROD_APP_URL }}
             
@@ -59,6 +58,17 @@ jobs:
             
             # Start Docker containers
             docker-compose up -d
+            
+            # Check if APP_KEY is already set in production
+            APP_KEY=$(docker exec -i nu_scaler-backend-1 grep -P '^APP_KEY=' /var/www/html/.env | cut -d= -f2)
+            
+            # Generate application key only if not already set
+            if [ -z "$APP_KEY" ]; then
+              echo "Generating new application key..."
+              docker exec -i nu_scaler-backend-1 php artisan key:generate
+            else
+              echo "Using existing application key"
+            fi
             
             # Run migrations carefully in production
             docker exec -i nu_scaler-backend-1 php artisan migrate --force
