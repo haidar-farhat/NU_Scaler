@@ -14,6 +14,19 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 class DownloadController extends Controller
 {
     /**
+     * The path to the releases directory
+     */
+    protected $releasesPath;
+
+    /**
+     * Constructor to set up the releases path
+     */
+    public function __construct()
+    {
+        $this->releasesPath = base_path('../../@releases');
+    }
+
+    /**
      * Handle a request for the application download link.
      *
      * @param Request $request
@@ -36,8 +49,8 @@ class DownloadController extends Controller
             ]);
         }
 
-        // Generate a signed download URL
-        $exePath = base_path('../../releases/NuScaler.exe');
+        // Generate a download URL using the @releases directory
+        $exePath = $this->releasesPath . '/NuScaler.exe';
 
         if (!File::exists($exePath)) {
             Log::error('Download file not found', [
@@ -97,8 +110,8 @@ class DownloadController extends Controller
                 }
             }
 
-            // Use the verified file path
-            $exePath = 'C:/Nu_Scaler/NU_Scaler/releases/NuScaler.exe';
+            // Use the @releases directory path
+            $exePath = $this->releasesPath . '/NuScaler.exe';
 
             if (!file_exists($exePath)) {
                 Log::error('Download file not found during download attempt', [
@@ -159,15 +172,18 @@ class DownloadController extends Controller
         // 2. Generate a signed URL for the S3/storage download
         // 3. Return download details and URL
 
-        // TODO: Implement actual download URL generation
-        // For now, return a stub response
+        // Use the @releases directory for download info
+        $exePath = $this->releasesPath . '/NuScaler.exe';
+        $version = '2.1.0'; // This could be read from a version file in the releases directory
+        $size = File::exists($exePath) ? round(File::size($exePath) / (1024 * 1024), 2) : 0;
+
         return response()->json([
             'message' => 'Download information retrieved successfully',
             'download' => [
-                'version' => '1.0.0',
-                'size_mb' => 24.5,
+                'version' => $version,
+                'size_mb' => $size,
                 'release_date' => '2025-05-02',
-                'url' => 'https://downloads.nu-scaler.com/releases/nu-scaler-1.0.0.zip',
+                'download_url' => route('api.v1.download'),
                 'expires_at' => now()->addHours(1)->toIso8601String(),
             ],
         ]);
@@ -181,8 +197,8 @@ class DownloadController extends Controller
     public function getPublicDownloadLink(): JsonResponse
     {
         try {
-            // Use the verified exe file path
-            $exePath = 'C:/Nu_Scaler/NU_Scaler/releases/NuScaler.exe';
+            // Use the @releases directory path
+            $exePath = $this->releasesPath . '/NuScaler.exe';
 
             // Log the paths for debugging
             Log::info('Looking for exe file', [
@@ -237,8 +253,8 @@ class DownloadController extends Controller
     public function downloadDirectFile()
     {
         try {
-            // Use the verified file path
-            $exePath = 'C:/Nu_Scaler/NU_Scaler/releases/NuScaler.exe';
+            // Use the @releases directory path
+            $exePath = $this->releasesPath . '/NuScaler.exe';
 
             if (!file_exists($exePath)) {
                 Log::error('Direct download file not found at verified path', [
