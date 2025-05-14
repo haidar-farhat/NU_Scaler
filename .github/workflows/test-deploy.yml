@@ -70,8 +70,8 @@ jobs:
             # Start Docker containers
             docker-compose up -d
             
-            # Generate application key and update .env file
-            docker exec -i nu_scaler-backend-1 php artisan key:generate
+            # Generate application key and update .env file - fix path issue
+            docker exec -i nu_scaler-backend-1 php artisan key:generate --env=/var/www/html/.env
             
             # Run migrations
             docker exec -i nu_scaler-backend-1 php artisan migrate --force

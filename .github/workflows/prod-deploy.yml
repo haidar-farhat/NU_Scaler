@@ -82,14 +82,14 @@ jobs:
               
               if [ ! -z "$APP_KEY" ]; then
                 # Use existing key if it exists
-                docker exec -i nu_scaler-backend-1 sed -i "s/APP_KEY=/APP_KEY=$APP_KEY/" .env
+                docker exec -i nu_scaler-backend-1 sed -i "s/APP_KEY=/APP_KEY=$APP_KEY/" /var/www/html/.env
               else
                 # Generate new key if no existing key
-                docker exec -i nu_scaler-backend-1 php artisan key:generate
+                docker exec -i nu_scaler-backend-1 php artisan key:generate --env=/var/www/html/.env
               fi
             else
               # No backup, generate new key
-              docker exec -i nu_scaler-backend-1 php artisan key:generate
+              docker exec -i nu_scaler-backend-1 php artisan key:generate --env=/var/www/html/.env
             fi
             
             # Run migrations
