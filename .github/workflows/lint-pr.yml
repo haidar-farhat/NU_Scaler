@@ -1,8 +1,10 @@
-name: Lint Pull Request
+name: Laravel Lint and Test
 
 on:
   pull_request:
-    branches: [main, testing]
+    branches: [ main, testing ]
+    paths:
+      - '@web/server/laravel_app/**'
 
 jobs:
   laravel-lint:
@@ -35,10 +37,19 @@ jobs:
       - name: Install dependencies
         run: composer install --prefer-dist --no-progress
 
-      - name: Generate test .env file
+      - name: Generate test .env file and setup for tests
         run: |
           cp .env.example .env || echo "No .env.example found"
           echo "APP_KEY=base64:$(openssl rand -base64 32)" >> .env
+          
+          # Create empty Vite manifest for tests to fix frontend tests
+          mkdir -p public/build
+          echo '{}' > public/build/manifest.json
+          
+          # Set up test database (SQLite)
+          touch database/database.sqlite
+          echo "DB_CONNECTION=sqlite" >> .env
+          echo "DB_DATABASE=database/database.sqlite" >> .env
       
       - name: PHP Code Sniffer
         run: ./vendor/bin/phpcs --standard=PSR12 app || true

@@ -1,0 +1,81 @@
+name: Test Server Deployment
+
+on:
+  push:
+    branches:
+      - testing  # Adjust this branch name as needed
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Test Server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.TEST_SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script: |
+            cd /var/www/NU_Scaler
+            
+            # Stop nginx
+            sudo systemctl stop nginx
+            
+            # Stop Docker containers
+            docker-compose down
+            
+            # Pull latest code
+            git pull origin testing
+            
+            # Create basic .env file
+            cat > @web/server/laravel_app/.env << 'EOL'
+            APP_NAME=NuScaler
+            APP_ENV=testing
+            APP_DEBUG=true
+            APP_URL=${{ secrets.TEST_APP_URL }}
+            
+            LOG_CHANNEL=stack
+            LOG_LEVEL=debug
+            
+            DB_CONNECTION=mysql
+            DB_HOST=db
+            DB_PORT=3306
+            DB_DATABASE=${{ secrets.TEST_DB_DATABASE }}
+            DB_USERNAME=${{ secrets.TEST_DB_USERNAME }}
+            DB_PASSWORD=${{ secrets.TEST_DB_PASSWORD }}
+            
+            BROADCAST_DRIVER=log
+            CACHE_DRIVER=file
+            FILESYSTEM_DISK=local
+            QUEUE_CONNECTION=sync
+            SESSION_DRIVER=file
+            SESSION_LIFETIME=120
+            
+            # Add any other environment variables here
+            ${{ secrets.TEST_ADDITIONAL_ENV_VARS }}
+            EOL
+            
+            # Create empty Vite manifest for tests
+            mkdir -p @web/server/laravel_app/public/build
+            echo '{}' > @web/server/laravel_app/public/build/manifest.json
+            
+            # Start Docker containers
+            docker-compose up -d
+            
+            # Generate application key and update .env file
+            docker exec -i nu_scaler-backend-1 php artisan key:generate
+            
+            # Run migrations
+            docker exec -i nu_scaler-backend-1 php artisan migrate --force
+            
+            # Clear Laravel caches
+            docker exec -i nu_scaler-backend-1 php artisan config:clear
+            docker exec -i nu_scaler-backend-1 php artisan cache:clear
+            docker exec -i nu_scaler-backend-1 php artisan route:clear
+            docker exec -i nu_scaler-backend-1 php artisan view:clear
+            
+            # Restart nginx
+            sudo systemctl start nginx
+            
+            echo "Test deployment completed" 

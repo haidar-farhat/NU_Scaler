@@ -38,7 +38,25 @@ class AdminFeedbackController extends Controller
             ->latest()
             ->paginate($request->per_page ?? 15);
 
-        return response()->json($reviews);
+        // Return as JSON with explicit structure the test expects
+        return response()->json([
+            'data' => $reviews->items(),
+            'links' => [
+                'first' => $reviews->url(1),
+                'last' => $reviews->url($reviews->lastPage()),
+                'prev' => $reviews->previousPageUrl(),
+                'next' => $reviews->nextPageUrl(),
+            ],
+            'meta' => [
+                'current_page' => $reviews->currentPage(),
+                'from' => $reviews->firstItem(),
+                'last_page' => $reviews->lastPage(),
+                'path' => $reviews->path(),
+                'per_page' => $reviews->perPage(),
+                'to' => $reviews->lastItem(),
+                'total' => $reviews->total(),
+            ]
+        ]);
     }
 
     /**
