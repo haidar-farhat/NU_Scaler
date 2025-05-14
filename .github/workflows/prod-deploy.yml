@@ -3,7 +3,7 @@ name: Production Server Deployment
 on:
   push:
     branches:
-      - main  # Adjust this branch name if you use 'master' or another name
+      - main  # Adjust this branch name as needed
 
 jobs:
   deploy:
@@ -28,7 +28,12 @@ jobs:
             # Pull latest code
             git pull origin main
             
-            # Create basic .env file
+            # Backup existing .env file if exists
+            if [ -f @web/server/laravel_app/.env ]; then
+              cp @web/server/laravel_app/.env @web/server/laravel_app/.env.backup
+            fi
+            
+            # Create .env file
             cat > @web/server/laravel_app/.env << 'EOL'
             APP_NAME=NuScaler
             APP_ENV=production
@@ -36,7 +41,7 @@ jobs:
             APP_URL=${{ secrets.PROD_APP_URL }}
             
             LOG_CHANNEL=stack
-            LOG_LEVEL=error
+            LOG_LEVEL=warning
             
             DB_CONNECTION=mysql
             DB_HOST=db
@@ -56,24 +61,34 @@ jobs:
             ${{ secrets.PROD_ADDITIONAL_ENV_VARS }}
             EOL
             
+            # Create empty Vite manifest for tests and production
+            mkdir -p @web/server/laravel_app/public/build
+            echo '{}' > @web/server/laravel_app/public/build/manifest.json
+            
             # Start Docker containers
             docker-compose up -d
             
-            # Check if APP_KEY is already set in production
-            APP_KEY=$(docker exec -i nu_scaler-backend-1 grep -P '^APP_KEY=' /var/www/html/.env | cut -d= -f2)
-            
-            # Generate application key only if not already set
-            if [ -z "$APP_KEY" ]; then
-              echo "Generating new application key..."
-              docker exec -i nu_scaler-backend-1 php artisan key:generate
+            # Handle app key - keep existing one if available
+            if [ -f @web/server/laravel_app/.env.backup ]; then
+              # Extract APP_KEY from backup
+              APP_KEY=$(grep APP_KEY= @web/server/laravel_app/.env.backup | cut -d '=' -f2)
+              
+              if [ ! -z "$APP_KEY" ]; then
+                # Use existing key if it exists
+                docker exec -i nu_scaler-backend-1 sed -i "s/APP_KEY=/APP_KEY=$APP_KEY/" .env
+              else
+                # Generate new key if no existing key
+                docker exec -i nu_scaler-backend-1 php artisan key:generate
+              fi
             else
-              echo "Using existing application key"
+              # No backup, generate new key
+              docker exec -i nu_scaler-backend-1 php artisan key:generate
             fi
             
-            # Run migrations carefully in production
+            # Run migrations
             docker exec -i nu_scaler-backend-1 php artisan migrate --force
             
-            # Optimize for production
+            # Optimize Laravel for production
             docker exec -i nu_scaler-backend-1 php artisan config:cache
             docker exec -i nu_scaler-backend-1 php artisan route:cache
             docker exec -i nu_scaler-backend-1 php artisan view:cache

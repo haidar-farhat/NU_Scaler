@@ -56,6 +56,10 @@ jobs:
             ${{ secrets.TEST_ADDITIONAL_ENV_VARS }}
             EOL
             
+            # Create empty Vite manifest for tests
+            mkdir -p @web/server/laravel_app/public/build
+            echo '{}' > @web/server/laravel_app/public/build/manifest.json
+            
             # Start Docker containers
             docker-compose up -d
             

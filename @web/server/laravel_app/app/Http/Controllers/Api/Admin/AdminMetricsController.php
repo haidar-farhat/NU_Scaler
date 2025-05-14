@@ -210,4 +210,19 @@ class AdminMetricsController extends Controller
             'version' => '1.0',
         ]);
     }
+
+    /**
+     * Get the distribution of review ratings.
+     *
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function reviewsDistribution(): JsonResponse
+    {
+        $distribution = Review::select('rating', DB::raw('count(*) as count'))
+            ->groupBy('rating')
+            ->orderBy('rating')
+            ->get();
+
+        return response()->json($distribution);
+    }
 }

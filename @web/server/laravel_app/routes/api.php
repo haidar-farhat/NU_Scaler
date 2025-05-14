@@ -107,6 +107,7 @@ Route::prefix('admin')->name('api.admin.')
         // Metrics and Analytics
         Route::get('/metrics/dashboard', [AdminMetricsController::class, 'dashboard'])->name('metrics.dashboard');
         Route::get('/metrics/reviews', [AdminMetricsController::class, 'reviewMetrics'])->name('metrics.reviews');
+        Route::get('/metrics/reviews-distribution', [AdminMetricsController::class, 'reviewsDistribution'])->name('metrics.reviews-distribution');
         Route::get('/metrics/bug-reports', [AdminMetricsController::class, 'bugReportMetrics'])->name('metrics.bug-reports');
         Route::get('/metrics/hardware-surveys', [AdminMetricsController::class, 'hardwareSurveyMetrics'])->name('metrics.hardware-surveys');
         Route::get('/metrics/user-growth', [AdminMetricsController::class, 'userGrowthTrends'])->name('metrics.user-growth');

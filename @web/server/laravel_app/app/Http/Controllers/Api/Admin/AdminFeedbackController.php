@@ -38,6 +38,7 @@ class AdminFeedbackController extends Controller
             ->latest()
             ->paginate($request->per_page ?? 15);
 
+        // Return the paginated response with standard structure
         return response()->json($reviews);
     }
 
