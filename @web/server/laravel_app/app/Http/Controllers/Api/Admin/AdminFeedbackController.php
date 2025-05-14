@@ -38,24 +38,23 @@ class AdminFeedbackController extends Controller
             ->latest()
             ->paginate($request->per_page ?? 15);
 
-        // Return as JSON with explicit structure the test expects
+        // Return with the exact structure the test expects
+        // The test expects current_page, total, per_page at the root level
         return response()->json([
             'data' => $reviews->items(),
+            'current_page' => $reviews->currentPage(),
+            'from' => $reviews->firstItem(),
+            'last_page' => $reviews->lastPage(),
+            'path' => $reviews->path(),
+            'per_page' => $reviews->perPage(),
+            'to' => $reviews->lastItem(),
+            'total' => $reviews->total(),
             'links' => [
                 'first' => $reviews->url(1),
                 'last' => $reviews->url($reviews->lastPage()),
                 'prev' => $reviews->previousPageUrl(),
                 'next' => $reviews->nextPageUrl(),
             ],
-            'meta' => [
-                'current_page' => $reviews->currentPage(),
-                'from' => $reviews->firstItem(),
-                'last_page' => $reviews->lastPage(),
-                'path' => $reviews->path(),
-                'per_page' => $reviews->perPage(),
-                'to' => $reviews->lastItem(),
-                'total' => $reviews->total(),
-            ]
         ]);
     }
 
@@ -98,7 +97,25 @@ class AdminFeedbackController extends Controller
             ->latest()
             ->paginate($request->per_page ?? 15);
 
-        return response()->json($bugReports);
+        // Return as JSON with explicit structure the test expects
+        return response()->json([
+            'data' => $bugReports->items(),
+            'links' => [
+                'first' => $bugReports->url(1),
+                'last' => $bugReports->url($bugReports->lastPage()),
+                'prev' => $bugReports->previousPageUrl(),
+                'next' => $bugReports->nextPageUrl(),
+            ],
+            'meta' => [
+                'current_page' => $bugReports->currentPage(),
+                'from' => $bugReports->firstItem(),
+                'last_page' => $bugReports->lastPage(),
+                'path' => $bugReports->path(),
+                'per_page' => $bugReports->perPage(),
+                'to' => $bugReports->lastItem(),
+                'total' => $bugReports->total(),
+            ]
+        ]);
     }
 
     /**
@@ -143,7 +160,25 @@ class AdminFeedbackController extends Controller
             ->latest()
             ->paginate($request->per_page ?? 15);
 
-        return response()->json($hardwareSurveys);
+        // Return as JSON with explicit structure the test expects
+        return response()->json([
+            'data' => $hardwareSurveys->items(),
+            'links' => [
+                'first' => $hardwareSurveys->url(1),
+                'last' => $hardwareSurveys->url($hardwareSurveys->lastPage()),
+                'prev' => $hardwareSurveys->previousPageUrl(),
+                'next' => $hardwareSurveys->nextPageUrl(),
+            ],
+            'meta' => [
+                'current_page' => $hardwareSurveys->currentPage(),
+                'from' => $hardwareSurveys->firstItem(),
+                'last_page' => $hardwareSurveys->lastPage(),
+                'path' => $hardwareSurveys->path(),
+                'per_page' => $hardwareSurveys->perPage(),
+                'to' => $hardwareSurveys->lastItem(),
+                'total' => $hardwareSurveys->total(),
+            ]
+        ]);
     }
 
     /**
