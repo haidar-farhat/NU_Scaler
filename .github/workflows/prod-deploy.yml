@@ -75,6 +75,11 @@ jobs:
             SESSION_DRIVER=file
             SESSION_LIFETIME=120
             
+            # Session and CORS settings
+            SESSION_DOMAIN=$(echo "${{ secrets.PROD_APP_URL }}" | sed -E 's/https?:\/\///')
+            SANCTUM_STATEFUL_DOMAINS=$(echo "${{ secrets.PROD_APP_URL }}" | sed -E 's/https?:\/\///')
+            SESSION_SECURE_COOKIE=true
+            
             # Additional env vars
             ${{ secrets.PROD_ADDITIONAL_ENV_VARS }}
             EOL
