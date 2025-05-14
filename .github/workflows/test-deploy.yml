@@ -35,13 +35,16 @@ jobs:
             # Pull latest code
             git pull origin testing
             
-            # Create basic .env file with explicit variables (not using EOL with quotes)
+            # Generate an APP_KEY securely
+            APP_KEY_VALUE="base64:$(openssl rand -base64 32)"
+            
+            # Create basic .env file with proper variable expansion
             cat > @web/server/laravel_app/.env << EOL
             APP_NAME=NuScaler
             APP_ENV=testing
             APP_DEBUG=true
-            APP_URL=${TEST_APP_URL}
-            APP_KEY=base64:$(openssl rand -base64 32)
+            APP_URL=${{ secrets.TEST_APP_URL }}
+            APP_KEY=${APP_KEY_VALUE}
             
             LOG_CHANNEL=stack
             LOG_LEVEL=debug
@@ -49,9 +52,9 @@ jobs:
             DB_CONNECTION=mysql
             DB_HOST=db
             DB_PORT=3306
-            DB_DATABASE=${TEST_DB_DATABASE}
-            DB_USERNAME=${TEST_DB_USERNAME}
-            DB_PASSWORD=${TEST_DB_PASSWORD}
+            DB_DATABASE=${{ secrets.TEST_DB_DATABASE }}
+            DB_USERNAME=${{ secrets.TEST_DB_USERNAME }}
+            DB_PASSWORD=${{ secrets.TEST_DB_PASSWORD }}
             
             BROADCAST_DRIVER=log
             CACHE_DRIVER=file
@@ -61,7 +64,7 @@ jobs:
             SESSION_LIFETIME=120
             
             # Additional env vars
-            ${TEST_ADDITIONAL_ENV_VARS}
+            ${{ secrets.TEST_ADDITIONAL_ENV_VARS }}
             EOL
             
             # Create empty Vite manifest for tests
@@ -71,21 +74,24 @@ jobs:
             # Start Docker containers
             docker-compose up -d
             
+            # Get the Laravel container name
+            CONTAINER_NAME=$(docker-compose ps -q backend)
+            
             # Copy .env into the container
-            docker cp @web/server/laravel_app/.env nu_scaler-backend-1:/var/www/html/.env
+            docker cp @web/server/laravel_app/.env nu_scaler-backend-1:/var/www/html/.env 2>/dev/null || docker cp @web/server/laravel_app/.env ${CONTAINER_NAME}:/var/www/html/.env || docker cp @web/server/laravel_app/.env nu_scaler_backend_1:/var/www/html/.env
             
             # Reload configuration
-            docker exec -i nu_scaler-backend-1 php artisan config:clear
+            docker exec -i nu_scaler-backend-1 php artisan config:clear 2>/dev/null || docker exec -i ${CONTAINER_NAME} php artisan config:clear || docker exec -i nu_scaler_backend_1 php artisan config:clear
             
             # Run migrations
-            docker exec -i nu_scaler-backend-1 php artisan migrate --force
+            docker exec -i nu_scaler-backend-1 php artisan migrate --force 2>/dev/null || docker exec -i ${CONTAINER_NAME} php artisan migrate --force || docker exec -i nu_scaler_backend_1 php artisan migrate --force
             
             # Clear Laravel caches
-            docker exec -i nu_scaler-backend-1 php artisan cache:clear
-            docker exec -i nu_scaler-backend-1 php artisan route:clear
-            docker exec -i nu_scaler-backend-1 php artisan view:clear
+            docker exec -i nu_scaler-backend-1 php artisan cache:clear 2>/dev/null || docker exec -i ${CONTAINER_NAME} php artisan cache:clear || docker exec -i nu_scaler_backend_1 php artisan cache:clear
+            docker exec -i nu_scaler-backend-1 php artisan route:clear 2>/dev/null || docker exec -i ${CONTAINER_NAME} php artisan route:clear || docker exec -i nu_scaler_backend_1 php artisan route:clear
+            docker exec -i nu_scaler-backend-1 php artisan view:clear 2>/dev/null || docker exec -i ${CONTAINER_NAME} php artisan view:clear || docker exec -i nu_scaler_backend_1 php artisan view:clear
             
             # Restart nginx
             sudo systemctl start nginx
             
-            echo "Test deployment completed" 
+            echo "Test deployment completed with APP_KEY: ${APP_KEY_VALUE}" 

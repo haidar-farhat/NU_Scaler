@@ -42,13 +42,21 @@ jobs:
               EXISTING_APP_KEY=$(grep APP_KEY= @web/server/laravel_app/.env.backup | cut -d '=' -f2)
             fi
             
-            # Create .env file with explicit variables (not using quotes with EOL)
+            # Generate a new key if not found in backup
+            if [ -z "$EXISTING_APP_KEY" ]; then
+              APP_KEY_VALUE="base64:$(openssl rand -base64 32)"
+            else
+              APP_KEY_VALUE="$EXISTING_APP_KEY"
+              echo "Using existing APP_KEY: $APP_KEY_VALUE"
+            fi
+            
+            # Create .env file with proper variable expansion
             cat > @web/server/laravel_app/.env << EOL
             APP_NAME=NuScaler
             APP_ENV=production
             APP_DEBUG=false
-            APP_URL=${PROD_APP_URL}
-            APP_KEY=${EXISTING_APP_KEY:-base64:$(openssl rand -base64 32)}
+            APP_URL=${{ secrets.PROD_APP_URL }}
+            APP_KEY=${APP_KEY_VALUE}
             
             LOG_CHANNEL=stack
             LOG_LEVEL=warning
@@ -56,9 +64,9 @@ jobs:
             DB_CONNECTION=mysql
             DB_HOST=db
             DB_PORT=3306
-            DB_DATABASE=${PROD_DB_DATABASE}
-            DB_USERNAME=${PROD_DB_USERNAME}
-            DB_PASSWORD=${PROD_DB_PASSWORD}
+            DB_DATABASE=${{ secrets.PROD_DB_DATABASE }}
+            DB_USERNAME=${{ secrets.PROD_DB_USERNAME }}
+            DB_PASSWORD=${{ secrets.PROD_DB_PASSWORD }}
             
             BROADCAST_DRIVER=log
             CACHE_DRIVER=file
@@ -68,7 +76,7 @@ jobs:
             SESSION_LIFETIME=120
             
             # Additional env vars
-            ${PROD_ADDITIONAL_ENV_VARS}
+            ${{ secrets.PROD_ADDITIONAL_ENV_VARS }}
             EOL
             
             # Create empty Vite manifest for production
@@ -78,22 +86,25 @@ jobs:
             # Start Docker containers
             docker-compose up -d
             
+            # Get the Laravel container name
+            CONTAINER_NAME=$(docker-compose ps -q backend)
+            
             # Copy updated .env into the container
-            docker cp @web/server/laravel_app/.env nu_scaler-backend-1:/var/www/html/.env
+            docker cp @web/server/laravel_app/.env nu_scaler-backend-1:/var/www/html/.env 2>/dev/null || docker cp @web/server/laravel_app/.env ${CONTAINER_NAME}:/var/www/html/.env || docker cp @web/server/laravel_app/.env nu_scaler_backend_1:/var/www/html/.env
             
             # Reload configuration
-            docker exec -i nu_scaler-backend-1 php artisan config:clear
+            docker exec -i nu_scaler-backend-1 php artisan config:clear 2>/dev/null || docker exec -i ${CONTAINER_NAME} php artisan config:clear || docker exec -i nu_scaler_backend_1 php artisan config:clear
             
             # Run migrations
-            docker exec -i nu_scaler-backend-1 php artisan migrate --force
+            docker exec -i nu_scaler-backend-1 php artisan migrate --force 2>/dev/null || docker exec -i ${CONTAINER_NAME} php artisan migrate --force || docker exec -i nu_scaler_backend_1 php artisan migrate --force
             
             # Optimize Laravel for production
-            docker exec -i nu_scaler-backend-1 php artisan config:cache
-            docker exec -i nu_scaler-backend-1 php artisan route:cache
-            docker exec -i nu_scaler-backend-1 php artisan view:cache
+            docker exec -i nu_scaler-backend-1 php artisan config:cache 2>/dev/null || docker exec -i ${CONTAINER_NAME} php artisan config:cache || docker exec -i nu_scaler_backend_1 php artisan config:cache
+            docker exec -i nu_scaler-backend-1 php artisan route:cache 2>/dev/null || docker exec -i ${CONTAINER_NAME} php artisan route:cache || docker exec -i nu_scaler_backend_1 php artisan route:cache
+            docker exec -i nu_scaler-backend-1 php artisan view:cache 2>/dev/null || docker exec -i ${CONTAINER_NAME} php artisan view:cache || docker exec -i nu_scaler_backend_1 php artisan view:cache
             
             # Restart nginx
             sudo systemctl start nginx
             
-            echo "Production deployment completed" 
+            echo "Production deployment completed with APP_KEY: ${APP_KEY_VALUE}" 
 
