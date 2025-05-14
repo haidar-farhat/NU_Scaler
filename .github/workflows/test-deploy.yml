@@ -25,6 +25,13 @@ jobs:
             # Stop Docker containers
             docker-compose down
             
+            # Handle local changes before pulling
+            # Option 1: Reset local changes (discards all local changes)
+            git reset --hard
+            
+            # Option 2: Alternatively, stash changes if you want to keep them
+            # git stash
+            
             # Pull latest code
             git pull origin testing
             
