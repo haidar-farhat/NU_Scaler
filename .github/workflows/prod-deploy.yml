@@ -80,5 +80,6 @@ jobs:
             
             # Restart nginx
             sudo systemctl start nginx
-            
+
             echo "Production deployment completed" 
+

@@ -50,4 +50,6 @@ jobs:
         run: ./vendor/bin/phpstan analyse app --level=5 || true
       
       - name: Run PHPUnit Tests
+
         run: ./vendor/bin/phpunit --testdox 
+
