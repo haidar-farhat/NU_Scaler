@@ -81,14 +81,14 @@ jobs:
               APP_KEY=$(grep APP_KEY= @web/server/laravel_app/.env.backup | cut -d '=' -f2)
               
               if [ ! -z "$APP_KEY" ]; then
-                # Use existing key
-                sed -i "s/APP_KEY=/APP_KEY=$APP_KEY/" @web/server/laravel_app/.env
+                # Use existing key with proper delimiter for sed
+                sed -i "s|APP_KEY=|APP_KEY=$APP_KEY|" @web/server/laravel_app/.env
                 echo "Using existing application key: $APP_KEY"
               else
                 # Generate new key
                 APP_KEY=$(docker exec -i nu_scaler-backend-1 php artisan key:generate --show)
                 if [ ! -z "$APP_KEY" ]; then
-                  sed -i "s/APP_KEY=/APP_KEY=$APP_KEY/" @web/server/laravel_app/.env
+                  sed -i "s|APP_KEY=|APP_KEY=$APP_KEY|" @web/server/laravel_app/.env
                   echo "Generated new application key: $APP_KEY"
                 fi
               fi
@@ -96,7 +96,7 @@ jobs:
               # No backup, generate new key
               APP_KEY=$(docker exec -i nu_scaler-backend-1 php artisan key:generate --show)
               if [ ! -z "$APP_KEY" ]; then
-                sed -i "s/APP_KEY=/APP_KEY=$APP_KEY/" @web/server/laravel_app/.env
+                sed -i "s|APP_KEY=|APP_KEY=$APP_KEY|" @web/server/laravel_app/.env
                 echo "Generated new application key: $APP_KEY"
               fi
             fi

@@ -73,8 +73,8 @@ jobs:
             # Generate a key and add it directly to .env file
             APP_KEY=$(docker exec -i nu_scaler-backend-1 php artisan key:generate --show)
             if [ ! -z "$APP_KEY" ]; then
-              # Update .env with the generated key
-              sed -i "s/APP_KEY=/APP_KEY=$APP_KEY/" @web/server/laravel_app/.env
+              # Update .env with the generated key - using different delimiter for sed
+              sed -i "s|APP_KEY=|APP_KEY=$APP_KEY|" @web/server/laravel_app/.env
               
               # Copy updated .env into the container
               docker cp @web/server/laravel_app/.env nu_scaler-backend-1:/var/www/html/.env
