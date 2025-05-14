@@ -38,14 +38,17 @@ jobs:
             # Backup existing .env file if exists
             if [ -f @web/server/laravel_app/.env ]; then
               cp @web/server/laravel_app/.env @web/server/laravel_app/.env.backup
+              # Extract existing APP_KEY if available
+              EXISTING_APP_KEY=$(grep APP_KEY= @web/server/laravel_app/.env.backup | cut -d '=' -f2)
             fi
             
-            # Create .env file
-            cat > @web/server/laravel_app/.env << 'EOL'
+            # Create .env file with explicit variables (not using quotes with EOL)
+            cat > @web/server/laravel_app/.env << EOL
             APP_NAME=NuScaler
             APP_ENV=production
             APP_DEBUG=false
-            APP_URL=${{ secrets.PROD_APP_URL }}
+            APP_URL=${PROD_APP_URL}
+            APP_KEY=${EXISTING_APP_KEY:-base64:$(openssl rand -base64 32)}
             
             LOG_CHANNEL=stack
             LOG_LEVEL=warning
@@ -53,9 +56,9 @@ jobs:
             DB_CONNECTION=mysql
             DB_HOST=db
             DB_PORT=3306
-            DB_DATABASE=${{ secrets.PROD_DB_DATABASE }}
-            DB_USERNAME=${{ secrets.PROD_DB_USERNAME }}
-            DB_PASSWORD=${{ secrets.PROD_DB_PASSWORD }}
+            DB_DATABASE=${PROD_DB_DATABASE}
+            DB_USERNAME=${PROD_DB_USERNAME}
+            DB_PASSWORD=${PROD_DB_PASSWORD}
             
             BROADCAST_DRIVER=log
             CACHE_DRIVER=file
@@ -64,45 +67,22 @@ jobs:
             SESSION_DRIVER=file
             SESSION_LIFETIME=120
             
-            # Add any other environment variables here
-            ${{ secrets.PROD_ADDITIONAL_ENV_VARS }}
+            # Additional env vars
+            ${PROD_ADDITIONAL_ENV_VARS}
             EOL
             
-            # Create empty Vite manifest for tests and production
+            # Create empty Vite manifest for production
             mkdir -p @web/server/laravel_app/public/build
             echo '{}' > @web/server/laravel_app/public/build/manifest.json
             
             # Start Docker containers
             docker-compose up -d
             
-            # Handle app key - keep existing one if available
-            if [ -f @web/server/laravel_app/.env.backup ]; then
-              # Extract APP_KEY from backup
-              APP_KEY=$(grep APP_KEY= @web/server/laravel_app/.env.backup | cut -d '=' -f2)
-              
-              if [ ! -z "$APP_KEY" ]; then
-                # Use existing key with proper delimiter for sed
-                sed -i "s|APP_KEY=|APP_KEY=$APP_KEY|" @web/server/laravel_app/.env
-                echo "Using existing application key: $APP_KEY"
-              else
-                # Generate new key
-                APP_KEY=$(docker exec -i nu_scaler-backend-1 php artisan key:generate --show)
-                if [ ! -z "$APP_KEY" ]; then
-                  sed -i "s|APP_KEY=|APP_KEY=$APP_KEY|" @web/server/laravel_app/.env
-                  echo "Generated new application key: $APP_KEY"
-                fi
-              fi
-            else
-              # No backup, generate new key
-              APP_KEY=$(docker exec -i nu_scaler-backend-1 php artisan key:generate --show)
-              if [ ! -z "$APP_KEY" ]; then
-                sed -i "s|APP_KEY=|APP_KEY=$APP_KEY|" @web/server/laravel_app/.env
-                echo "Generated new application key: $APP_KEY"
-              fi
-            fi
-            
             # Copy updated .env into the container
             docker cp @web/server/laravel_app/.env nu_scaler-backend-1:/var/www/html/.env
+            
+            # Reload configuration
+            docker exec -i nu_scaler-backend-1 php artisan config:clear
             
             # Run migrations
             docker exec -i nu_scaler-backend-1 php artisan migrate --force
