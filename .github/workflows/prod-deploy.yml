@@ -1,0 +1,74 @@
+name: Production Server Deployment
+
+on:
+  push:
+    branches:
+      - main  # Adjust this branch name if you use 'master' or another name
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Production Server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.PROD_SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script: |
+            cd /var/www/NU_Scaler
+            
+            # Stop nginx
+            sudo systemctl stop nginx
+            
+            # Stop Docker containers
+            docker-compose down
+            
+            # Pull latest code
+            git pull origin main
+            
+            # Create/update .env file
+            cat > @web/server/laravel_app/.env << 'EOL'
+            APP_NAME=NuScaler
+            APP_ENV=production
+            APP_KEY=${{ secrets.PROD_APP_KEY }}
+            APP_DEBUG=false
+            APP_URL=${{ secrets.PROD_APP_URL }}
+            
+            LOG_CHANNEL=stack
+            LOG_LEVEL=error
+            
+            DB_CONNECTION=mysql
+            DB_HOST=db
+            DB_PORT=3306
+            DB_DATABASE=${{ secrets.PROD_DB_DATABASE }}
+            DB_USERNAME=${{ secrets.PROD_DB_USERNAME }}
+            DB_PASSWORD=${{ secrets.PROD_DB_PASSWORD }}
+            
+            BROADCAST_DRIVER=log
+            CACHE_DRIVER=file
+            FILESYSTEM_DISK=local
+            QUEUE_CONNECTION=sync
+            SESSION_DRIVER=file
+            SESSION_LIFETIME=120
+            
+            # Add any other environment variables here
+            ${{ secrets.PROD_ADDITIONAL_ENV_VARS }}
+            EOL
+            
+            # Start Docker containers
+            docker-compose up -d
+            
+            # Run migrations carefully in production
+            docker exec -i nu_scaler-backend-1 php artisan migrate --force
+            
+            # Optimize for production
+            docker exec -i nu_scaler-backend-1 php artisan config:cache
+            docker exec -i nu_scaler-backend-1 php artisan route:cache
+            docker exec -i nu_scaler-backend-1 php artisan view:cache
+            
+            # Restart nginx
+            sudo systemctl start nginx
+            
+            echo "Production deployment completed" 
