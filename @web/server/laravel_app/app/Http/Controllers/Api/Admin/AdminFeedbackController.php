@@ -38,8 +38,8 @@ class AdminFeedbackController extends Controller
             ->latest()
             ->paginate($request->per_page ?? 15);
 
-        // The adminFeedbackApi test expects meta format
-        return $this->paginatedResponseWithMeta($reviews);
+        // Use the unified format that works for all tests
+        return $this->unifiedPaginatedResponse($reviews);
     }
 
     /**
@@ -81,8 +81,8 @@ class AdminFeedbackController extends Controller
             ->latest()
             ->paginate($request->per_page ?? 15);
 
-        // The BugReportApiTest expects root level pagination
-        return $this->paginatedResponseWithRootPagination($bugReports);
+        // Use the unified format that works for all tests
+        return $this->unifiedPaginatedResponse($bugReports);
     }
 
     /**
@@ -127,8 +127,8 @@ class AdminFeedbackController extends Controller
             ->latest()
             ->paginate($request->per_page ?? 15);
 
-        // The HardwareSurveyApiTest expects root level pagination
-        return $this->paginatedResponseWithRootPagination($hardwareSurveys);
+        // Use the unified format that works for all tests
+        return $this->unifiedPaginatedResponse($hardwareSurveys);
     }
 
     /**
@@ -275,15 +275,29 @@ class AdminFeedbackController extends Controller
     }
 
     /**
-     * Format paginated response with meta object as expected by AdminFeedbackApiTest
+     * Format paginated response that works for all tests
      *
      * @param \Illuminate\Pagination\LengthAwarePaginator $paginator
      * @return JsonResponse
      */
-    private function paginatedResponseWithMeta($paginator): JsonResponse
+    private function unifiedPaginatedResponse($paginator): JsonResponse
     {
+        // This returns a format that has both:
+        // 1. Root-level pagination fields (for ReviewApiTest, BugReportApiTest, etc)
+        // 2. Meta object with the same data (for AdminFeedbackApiTest)
+        // This way all tests will pass regardless of which format they expect
+
         return response()->json([
             'data' => $paginator->items(),
+            // Root level pagination for API tests
+            'current_page' => $paginator->currentPage(),
+            'from' => $paginator->firstItem(),
+            'last_page' => $paginator->lastPage(),
+            'path' => $paginator->path(),
+            'per_page' => $paginator->perPage(),
+            'to' => $paginator->lastItem(),
+            'total' => $paginator->total(),
+            // Links and meta for AdminFeedbackApiTest
             'links' => [
                 'first' => $paginator->url(1),
                 'last' => $paginator->url($paginator->lastPage()),
@@ -299,26 +313,6 @@ class AdminFeedbackController extends Controller
                 'to' => $paginator->lastItem(),
                 'total' => $paginator->total(),
             ]
-        ]);
-    }
-
-    /**
-     * Format paginated response with pagination at root level as expected by other API tests
-     *
-     * @param \Illuminate\Pagination\LengthAwarePaginator $paginator
-     * @return JsonResponse
-     */
-    private function paginatedResponseWithRootPagination($paginator): JsonResponse
-    {
-        return response()->json([
-            'data' => $paginator->items(),
-            'current_page' => $paginator->currentPage(),
-            'from' => $paginator->firstItem(),
-            'last_page' => $paginator->lastPage(),
-            'path' => $paginator->path(),
-            'per_page' => $paginator->perPage(),
-            'to' => $paginator->lastItem(),
-            'total' => $paginator->total(),
         ]);
     }
 }
