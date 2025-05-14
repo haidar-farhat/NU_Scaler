@@ -81,16 +81,28 @@ jobs:
               APP_KEY=$(grep APP_KEY= @web/server/laravel_app/.env.backup | cut -d '=' -f2)
               
               if [ ! -z "$APP_KEY" ]; then
-                # Use existing key if it exists
-                docker exec -i nu_scaler-backend-1 sed -i "s/APP_KEY=/APP_KEY=$APP_KEY/" /var/www/html/.env
+                # Use existing key
+                sed -i "s/APP_KEY=/APP_KEY=$APP_KEY/" @web/server/laravel_app/.env
+                echo "Using existing application key: $APP_KEY"
               else
-                # Generate new key if no existing key
-                docker exec -i nu_scaler-backend-1 php artisan key:generate --env=/var/www/html/.env
+                # Generate new key
+                APP_KEY=$(docker exec -i nu_scaler-backend-1 php artisan key:generate --show)
+                if [ ! -z "$APP_KEY" ]; then
+                  sed -i "s/APP_KEY=/APP_KEY=$APP_KEY/" @web/server/laravel_app/.env
+                  echo "Generated new application key: $APP_KEY"
+                fi
               fi
             else
               # No backup, generate new key
-              docker exec -i nu_scaler-backend-1 php artisan key:generate --env=/var/www/html/.env
+              APP_KEY=$(docker exec -i nu_scaler-backend-1 php artisan key:generate --show)
+              if [ ! -z "$APP_KEY" ]; then
+                sed -i "s/APP_KEY=/APP_KEY=$APP_KEY/" @web/server/laravel_app/.env
+                echo "Generated new application key: $APP_KEY"
+              fi
             fi
+            
+            # Copy updated .env into the container
+            docker cp @web/server/laravel_app/.env nu_scaler-backend-1:/var/www/html/.env
             
             # Run migrations
             docker exec -i nu_scaler-backend-1 php artisan migrate --force
