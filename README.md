@@ -4,10 +4,9 @@
 
 <!-- project overview -->
 <img src="./readme/title2.svg"/>
+Nu Scaler is a modern desktop application designed to upscale and enhance images and video frames. It aims to provide high-quality results using smart, performance-optimized algorithms that work locally on your machine.
 
-> Description here.
->
-> Description here.
+Built with a clean and intuitive interface, Nu Scaler helps users improve visual quality without needing expensive hardware or a constant internet connection. It's especially useful for gamers, streamers, and content creators dealing with low resolution, poor frame rate, or slow internet speeds.
 
 <br><br>
 
