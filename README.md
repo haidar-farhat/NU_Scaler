@@ -13,29 +13,24 @@ Built with a clean and intuitive interface, Nu Scaler helps users improve visual
 <!-- System Design -->
 <img src="./readme/title3.svg"/>
 
-### Add Title Here
+### Architecture Overview
 
-- To be decided on later on.
+Nu Scaler follows a hybrid architecture combining Python and Rust to balance performance and flexibility. The user interface is built using PySide6 (Qt for Python), offering a modern and responsive cross-platform GUI. Behind the scenes, the heavy lifting is done in Rust, where advanced upscaling and frame interpolation algorithms are executed using WGPU-powered shaders for GPU acceleration. This separation allows the GUI to remain responsive while the computationally intensive tasks are offloaded to efficient, low-level Rust modules, ensuring both speed and stability across different systems.
 
 <br><br>
 
 <!-- Project Highlights -->
 <img src="./readme/title4.svg"/>
 
-### Add Title Here
+### NU's Features
 
-- List the sexy features.
+- Nu Scaler is packed with powerful features designed for both performance and usability. It leverages GPU-accelerated upscaling using Rust and WGPU shaders, delivering fast, high-quality results even on modest hardware. The application features a sleek and responsive interface built with PySide6, making it intuitive and cross-platform. Users can upscale images or video frames entirely offline, preserving privacy and eliminating the need for cloud-based processing. With support for frame interpolation, Nu Scaler can boost the smoothness of videos, making it ideal for gaming or streaming scenarios. Batch processing, drag-and-drop functionality, and a modular architecture make it efficient for everyday use while also extensible for advanced workflows.
 
 <br><br>
 
 <!-- Demo -->
 <img src="./readme/title5.svg"/>
 
-### User Screens (Mobile)
-
-| Login screen                            | Register screen                       | Register screen                       |
-| --------------------------------------- | ------------------------------------- | ------------------------------------- |
-| ![Landing](./readme/demo/1440x1024.png) | ![fsdaf](./readme/demo/1440x1024.png) | ![fsdaf](./readme/demo/1440x1024.png) |
 
 
 ### Admin Screens (Web)
