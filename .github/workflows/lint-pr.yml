@@ -1,0 +1,64 @@
+name: Laravel Lint and Test
+
+on:
+  pull_request:
+    branches: [ main, testing ]
+    paths:
+      - '@web/server/laravel_app/**'
+
+jobs:
+  laravel-lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: '@web/server/laravel_app'
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, dom, fileinfo, mysql, gd
+          coverage: none
+      
+      - name: Get Composer Cache Directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+      
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+          restore-keys: ${{ runner.os }}-composer-
+      
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-progress
+
+      - name: Generate test .env file and setup for tests
+        run: |
+          cp .env.example .env || echo "No .env.example found"
+          echo "APP_KEY=base64:$(openssl rand -base64 32)" >> .env
+          
+          # Create empty Vite manifest for tests to fix frontend tests
+          mkdir -p public/build
+          echo '{}' > public/build/manifest.json
+          
+          # Set up test database (SQLite)
+          touch database/database.sqlite
+          echo "DB_CONNECTION=sqlite" >> .env
+          echo "DB_DATABASE=database/database.sqlite" >> .env
+      
+      - name: PHP Code Sniffer
+        run: ./vendor/bin/phpcs --standard=PSR12 app || true
+
+      - name: PHP Mess Detector
+        run: ./vendor/bin/phpmd app text cleancode,codesize,controversial,design,naming,unusedcode || true
+
+      - name: PHP Stan
+        run: ./vendor/bin/phpstan analyse app --level=5 || true
+      
+      - name: Run PHPUnit Tests
+        run: ./vendor/bin/phpunit --testdox 

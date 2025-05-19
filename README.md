@@ -4,59 +4,69 @@
 
 <!-- project overview -->
 <img src="./readme/title2.svg"/>
+Nu Scaler is a modern desktop application designed to upscale and enhance images and video frames. It aims to provide high-quality results using smart, performance-optimized algorithms that work locally on your machine.
 
-> Description here.
->
-> Description here.
+Built with a clean and intuitive interface, Nu Scaler helps users improve visual quality without needing expensive hardware or a constant internet connection. It's especially useful for gamers, streamers, and content creators dealing with low resolution, poor frame rate, or slow internet speeds.
 
 <br><br>
 
 <!-- System Design -->
 <img src="./readme/title3.svg"/>
 
-### Add Title Here
+### Architecture Overview
 
-- To be decided on later on.
+Nu Scaler follows a hybrid architecture combining Python and Rust to balance performance and flexibility. The user interface is built using PySide6 (Qt for Python), offering a modern and responsive cross-platform GUI. Behind the scenes, the heavy lifting is done in Rust, where advanced upscaling and frame interpolation algorithms are executed using WGPU-powered shaders for GPU acceleration. This separation allows the GUI to remain responsive while the computationally intensive tasks are offloaded to efficient, low-level Rust modules, ensuring both speed and stability across different systems.
 
 <br><br>
 
 <!-- Project Highlights -->
 <img src="./readme/title4.svg"/>
 
-### Add Title Here
+### NU's Features
 
-- List the sexy features.
+- Nu Scaler is packed with powerful features designed for both performance and usability. It leverages GPU-accelerated upscaling using Rust and WGPU shaders, delivering fast, high-quality results even on modest hardware. The application features a sleek and responsive interface built with PySide6, making it intuitive and cross-platform. Users can upscale images or video frames entirely offline, preserving privacy and eliminating the need for cloud-based processing. With support for frame interpolation, Nu Scaler can boost the smoothness of videos, making it ideal for gaming or streaming scenarios. Batch processing, drag-and-drop functionality, and a modular architecture make it efficient for everyday use while also extensible for advanced workflows.
 
 <br><br>
 
 <!-- Demo -->
 <img src="./readme/title5.svg"/>
 
-### User Screens (Mobile)
-
-| Login screen                            | Register screen                       | Register screen                       |
-| --------------------------------------- | ------------------------------------- | ------------------------------------- |
-| ![Landing](./readme/demo/1440x1024.png) | ![fsdaf](./readme/demo/1440x1024.png) | ![fsdaf](./readme/demo/1440x1024.png) |
 
 
-### Admin Screens (Web)
+### GUI
 
-| Login screen                            | Register screen                       |
+| Live Feed Main Screen                   | Live Feed ON  screen                  |
 | --------------------------------------- | ------------------------------------- |
-| ![Landing](./readme/demo/1440x1024.png) | ![fsdaf](./readme/demo/1440x1024.png) |
+| ![Landing](./readme/demo/live_main.png) | ![fsdaf](./readme/demo/live_on.png)   |
+
+
+
+|  Overlay                                | settings screen                       |
+| --------------------------------------- | ------------------------------------- |
+| ![Landing](./readme/demo/Overlay.png)   | ![fsdaf](./readme/demo/settings.png)  |
+
+<br><br>
+### Web page
+
+
+| Admin Main screen                           | admin kpis screen                       | manage users screen                   |
+| ---------------------------------------     | -------------------------------------   | ------------------------------------- |
+| ![Landing](./readme/demo/admin_main.png)    | ![fsdaf](./readme/demo/kpis.png)        | ![fsdaf](./readme/demo/users.png)     |
+
 
 
 <br><br>
 
-<!-- Development & Testing -->
+
+<!-- Testing -->
 <img src="./readme/title6.svg"/>
 
 ### Add Title Here
 
+|  Debug Screen                           | Sample Peformance                     |
+| --------------------------------------- | ------------------------------------- |
+| ![Landing](./readme/demo/debug.png)     | ![fsdaf](./readme/demo/smpl_pef.png)  |
 
-| Services                            | Validation                       | Testing                        |
-| --------------------------------------- | ------------------------------------- | ------------------------------------- |
-| ![Landing](./readme/demo/1440x1024.png) | ![fsdaf](./readme/demo/1440x1024.png) | ![fsdaf](./readme/demo/1440x1024.png) |
 
 
 <br><br>
@@ -64,13 +74,13 @@
 <!-- Deployment -->
 <img src="./readme/title7.svg"/>
 
-### Add Title Here
+### Public website
 
-- Description here.
+- http://15.237.190.24/
 
 
-| Postman API 1                            | Postman API 2                       | Postman API 3                        |
-| --------------------------------------- | ------------------------------------- | ------------------------------------- |
-| ![Landing](./readme/demo/1440x1024.png) | ![fsdaf](./readme/demo/1440x1024.png) | ![fsdaf](./readme/demo/1440x1024.png) |
+| Home Screen                             | Download Screen                       | 
+| --------------------------------------- | ------------------------------------- | 
+| ![Landing](./readme/demo/home.png)      | ![fsdaf](./readme/demo/download.png) | 
 
 <br><br>

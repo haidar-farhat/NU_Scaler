@@ -1,0 +1,115 @@
+name: Production Server Deployment
+
+on:
+  push:
+    branches:
+      - main  # Adjust this branch name as needed
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Production Server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.PROD_SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script: |
+            cd /var/www/NU_Scaler
+            
+            # Stop nginx
+            sudo systemctl stop nginx
+            
+            # Stop Docker containers
+            docker-compose down
+            
+            # Handle local changes before pulling
+            # Option 1: Reset local changes (discards all local changes)
+            git reset --hard
+            
+            # Option 2: Alternatively, stash changes if you want to keep them
+            # git stash
+            
+            # Pull latest code
+            git pull origin main
+            
+            # Backup existing .env file if exists
+            if [ -f @web/server/laravel_app/.env ]; then
+              cp @web/server/laravel_app/.env @web/server/laravel_app/.env.backup
+              # Extract existing APP_KEY if available
+              EXISTING_APP_KEY=$(grep APP_KEY= @web/server/laravel_app/.env.backup | cut -d '=' -f2)
+            fi
+            
+            # Generate a new key if not found in backup
+            if [ -z "$EXISTING_APP_KEY" ]; then
+              APP_KEY_VALUE="base64:$(openssl rand -base64 32)"
+            else
+              APP_KEY_VALUE="$EXISTING_APP_KEY"
+              echo "Using existing APP_KEY: $APP_KEY_VALUE"
+            fi
+            
+            # Create .env file with proper variable expansion
+            cat > @web/server/laravel_app/.env << EOL
+            APP_NAME=NuScaler
+            APP_ENV=production
+            APP_DEBUG=false
+            APP_URL=${{ secrets.PROD_APP_URL }}
+            APP_KEY=${APP_KEY_VALUE}
+            
+            LOG_CHANNEL=stack
+            LOG_LEVEL=warning
+            
+            DB_CONNECTION=mysql
+            DB_HOST=db
+            DB_PORT=3306
+            DB_DATABASE=${{ secrets.PROD_DB_DATABASE }}
+            DB_USERNAME=${{ secrets.PROD_DB_USERNAME }}
+            DB_PASSWORD=${{ secrets.PROD_DB_PASSWORD }}
+            
+            BROADCAST_DRIVER=log
+            CACHE_DRIVER=file
+            FILESYSTEM_DISK=local
+            QUEUE_CONNECTION=sync
+            SESSION_DRIVER=file
+            SESSION_LIFETIME=120
+            
+            # Session and CORS settings
+            SESSION_DOMAIN=$(echo "${{ secrets.PROD_APP_URL }}" | sed -E 's/https?:\/\///')
+            SANCTUM_STATEFUL_DOMAINS=$(echo "${{ secrets.PROD_APP_URL }}" | sed -E 's/https?:\/\///')
+            SESSION_SECURE_COOKIE=true
+            
+            # Additional env vars
+            ${{ secrets.PROD_ADDITIONAL_ENV_VARS }}
+            EOL
+            
+            # Create empty Vite manifest for production
+            mkdir -p @web/server/laravel_app/public/build
+            echo '{}' > @web/server/laravel_app/public/build/manifest.json
+            
+            # Start Docker containers
+            docker-compose up -d
+            
+            # Get the Laravel container name
+            CONTAINER_NAME=$(docker-compose ps -q backend)
+            
+            # Copy updated .env into the container
+            docker cp @web/server/laravel_app/.env nu_scaler-backend-1:/var/www/html/.env 2>/dev/null || docker cp @web/server/laravel_app/.env ${CONTAINER_NAME}:/var/www/html/.env || docker cp @web/server/laravel_app/.env nu_scaler_backend_1:/var/www/html/.env
+            
+            # Reload configuration
+            docker exec -i nu_scaler-backend-1 php artisan config:clear 2>/dev/null || docker exec -i ${CONTAINER_NAME} php artisan config:clear || docker exec -i nu_scaler_backend_1 php artisan config:clear
+            
+            # Run migrations
+            docker exec -i nu_scaler-backend-1 php artisan migrate --force 2>/dev/null || docker exec -i ${CONTAINER_NAME} php artisan migrate --force || docker exec -i nu_scaler_backend_1 php artisan migrate --force
+            
+            # Optimize Laravel for production
+            docker exec -i nu_scaler-backend-1 php artisan config:cache 2>/dev/null || docker exec -i ${CONTAINER_NAME} php artisan config:cache || docker exec -i nu_scaler_backend_1 php artisan config:cache
+            docker exec -i nu_scaler-backend-1 php artisan route:cache 2>/dev/null || docker exec -i ${CONTAINER_NAME} php artisan route:cache || docker exec -i nu_scaler_backend_1 php artisan route:cache
+            docker exec -i nu_scaler-backend-1 php artisan view:cache 2>/dev/null || docker exec -i ${CONTAINER_NAME} php artisan view:cache || docker exec -i nu_scaler_backend_1 php artisan view:cache
+            
+            # Restart nginx
+            sudo systemctl start nginx
+            
+            echo "Production deployment completed with APP_KEY: ${APP_KEY_VALUE}" 
+

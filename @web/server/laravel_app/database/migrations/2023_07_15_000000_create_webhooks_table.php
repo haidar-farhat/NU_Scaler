@@ -17,7 +17,7 @@ return new class extends Migration
             $table->text('url');
             $table->text('description')->nullable();
             $table->boolean('is_active')->default(true);
-            $table->json('events')->default('[]');
+            $table->json('events');
             $table->string('secret', 100)->nullable();
             $table->foreignId('user_id')->constrained()->onDelete('cascade');
             $table->json('headers')->nullable();
