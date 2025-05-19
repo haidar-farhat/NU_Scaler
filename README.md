@@ -24,8 +24,11 @@ Nu Scaler follows a hybrid architecture combining Python and Rust to balance per
 
 ### NU's Features
 -Frame Interpolation: Nu Scaler includes support for frame interpolation, enhancing video smoothness—perfect for gaming, streaming, or any motion-intensive content.
+
 -Upscaling: Leveraging GPU-accelerated upscaling via Rust and WGPU shaders, Nu Scaler delivers fast, high-quality results. It works entirely offline, preserving user privacy while processing both images and video frames.
+
 -Cross-Compatibility: Featuring a sleek, responsive UI built with PySide6, Nu Scaler runs seamlessly across platforms. With batch processing, drag-and-drop support, and a modular architecture, it’s optimized for both casual users and advanced workflows.
+
 <br><br>
 
 <!-- Demo -->
