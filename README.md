@@ -33,24 +33,44 @@ Nu Scaler follows a hybrid architecture combining Python and Rust to balance per
 
 
 
-### Admin Screens (Web)
+### GUI
 
-| Login screen                            | Register screen                       |
+| Live Feed Main Screen                   | Live Feed ON  screen                  |
 | --------------------------------------- | ------------------------------------- |
-| ![Landing](./readme/demo/1440x1024.png) | ![fsdaf](./readme/demo/1440x1024.png) |
+| ![Landing](./readme/demo/live_main.png) | ![fsdaf](./readme/demo/live_on.png)   |
 
+
+
+|  Overlay                                | settings screen                       |
+| --------------------------------------- | ------------------------------------- |
+| ![Landing](./readme/demo/Overlay.png)   | ![fsdaf](./readme/demo/settings.png)  |
+
+<br><br>
+### Web page
+
+
+| Admin Main screen                           | admin kpis screen                       | manage users screen                   |
+| ---------------------------------------     | -------------------------------------   | ------------------------------------- |
+| ![Landing](./readme/demo/admin_main.png)    | ![fsdaf](./readme/demo/kpis.png)        | ![fsdaf](./readme/demo/users.png)     |
+
+
+
+|  Overlay                                | settings screen                       |
+| --------------------------------------- | ------------------------------------- |
+| ![Landing](./readme/demo/Overlay.png)   | ![fsdaf](./readme/demo/settings.png)  |
 
 <br><br>
 
-<!-- Development & Testing -->
+
+<!-- Testing -->
 <img src="./readme/title6.svg"/>
 
 ### Add Title Here
 
+|  Debug Screen                           | Sample Peformance                     |
+| --------------------------------------- | ------------------------------------- |
+| ![Landing](./readme/demo/debug.png)     | ![fsdaf](./readme/demo/smpl_pef.png)  |
 
-| Services                            | Validation                       | Testing                        |
-| --------------------------------------- | ------------------------------------- | ------------------------------------- |
-| ![Landing](./readme/demo/1440x1024.png) | ![fsdaf](./readme/demo/1440x1024.png) | ![fsdaf](./readme/demo/1440x1024.png) |
 
 
 <br><br>
@@ -58,13 +78,13 @@ Nu Scaler follows a hybrid architecture combining Python and Rust to balance per
 <!-- Deployment -->
 <img src="./readme/title7.svg"/>
 
-### Add Title Here
+### Public website
 
-- Description here.
+- http://15.237.190.24/
 
 
-| Postman API 1                            | Postman API 2                       | Postman API 3                        |
-| --------------------------------------- | ------------------------------------- | ------------------------------------- |
-| ![Landing](./readme/demo/1440x1024.png) | ![fsdaf](./readme/demo/1440x1024.png) | ![fsdaf](./readme/demo/1440x1024.png) |
+| Home Screen                             | Download Screen                       | 
+| --------------------------------------- | ------------------------------------- | 
+| ![Landing](./readme/demo/home.png) | ![fsdaf](./readme/demo/download.png) | 
 
 <br><br>
