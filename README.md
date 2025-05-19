@@ -55,10 +55,6 @@ Nu Scaler follows a hybrid architecture combining Python and Rust to balance per
 
 
 
-|  Overlay                                | settings screen                       |
-| --------------------------------------- | ------------------------------------- |
-| ![Landing](./readme/demo/Overlay.png)   | ![fsdaf](./readme/demo/settings.png)  |
-
 <br><br>
 
 
@@ -85,6 +81,6 @@ Nu Scaler follows a hybrid architecture combining Python and Rust to balance per
 
 | Home Screen                             | Download Screen                       | 
 | --------------------------------------- | ------------------------------------- | 
-| ![Landing](./readme/demo/home.png) | ![fsdaf](./readme/demo/download.png) | 
+| ![Landing](./readme/demo/home.png)      | ![fsdaf](./readme/demo/download.png) | 
 
 <br><br>
