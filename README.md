@@ -17,7 +17,7 @@ Built with a clean and intuitive interface, Nu Scaler helps users improve visual
 
 Nu Scaler follows a hybrid architecture combining Python and Rust to balance performance and flexibility. The user interface is built using PySide6 (Qt for Python), offering a modern and responsive cross-platform GUI. Behind the scenes, the heavy lifting is done in Rust, where advanced upscaling and frame interpolation algorithms are executed using WGPU-powered shaders for GPU acceleration. This separation allows the GUI to remain responsive while the computationally intensive tasks are offloaded to efficient, low-level Rust modules, ensuring both speed and stability across different systems.
 
-| Component Diagrame                      | Flow Diagrame                  |
+| Component Diagrame                      | Flow Diagrame                         |
 | --------------------------------------- | ------------------------------------- |
 | ![Landing](./readme/demo/component_diagrame.png) | ![fsdaf](./readme/demo/flow.png)   |
 
@@ -27,6 +27,11 @@ Nu Scaler follows a hybrid architecture combining Python and Rust to balance per
 <img src="./readme/title4.svg"/>
 
 ### NU's Features
+
+| Frames and resoulation Enhancements     | Cross platform support                 |
+| --------------------------------------- | ------------------------------------- |
+| ![Landing](./readme/demo/high1.png) | ![fsdaf](./readme/demo/high2.png)   |
+
 -Frame Interpolation: Nu Scaler includes support for frame interpolation, enhancing video smoothness—perfect for gaming, streaming, or any motion-intensive content.
 
 -Upscaling: Leveraging GPU-accelerated upscaling via Rust and WGPU shaders, Nu Scaler delivers fast, high-quality results. It works entirely offline, preserving user privacy while processing both images and video frames.
@@ -80,7 +85,9 @@ Nu Scaler follows a hybrid architecture combining Python and Rust to balance per
 
 <!-- Deployment -->
 <img src="./readme/title7.svg"/>
-
+| Deployment Worflow                      | Lint workflow                         |
+| --------------------------------------- | ------------------------------------- |
+| ![Landing](./readme/demo/cicd1.png)     | ![fsdaf](./readme/demo/cicd2.png)     |
 ### Public website
 
 - http://15.237.190.24/
