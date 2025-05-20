@@ -34,17 +34,14 @@ const AdminDashboard = () => {
       // First check if we have a token in localStorage
       const token = localStorage.getItem('token');
       if (!token) {
-        console.error('No authentication token found');
         showToast('Please log in first', 'error');
         navigate('/login');
         return;
       }
-      // Now check admin session specifically
       try {
+        // Check admin session specifically
         const adminSessionResponse = await adminApiService.checkAdminSession();
-        console.log('Admin session check response:', adminSessionResponse.data);
         if (adminSessionResponse.data.authenticated && adminSessionResponse.data.is_admin) {
-          console.log('Admin authentication confirmed');
           setAuthChecked(true);
           dispatch(fetchReviews());
           dispatch(fetchBugReports());
@@ -52,32 +49,31 @@ const AdminDashboard = () => {
           dispatch(fetchUserGrowth());
           return;
         }
-      } catch (adminError) {
-        console.error('Admin session check failed:', adminError);
-      }
-      // If admin check failed, try general auth check as fallback
-      const response = await adminApiService.checkAuthStatus();
-      console.log('General auth check response:', response.data);
-      const isAdmin = response.data.user?.is_admin === true;
-      const authenticated = response.data.authenticated === true;
-      if (!authenticated) {
-        console.error('User is not authenticated for admin dashboard');
-        showToast('Please log in as an admin to access this page', 'error');
+        // Fallback: check general auth status
+        const response = await adminApiService.checkAuthStatus();
+        const isAdmin = response.data.user?.is_admin === true;
+        const authenticated = response.data.authenticated === true;
+        if (!authenticated) {
+          showToast('Please log in as an admin to access this page', 'error');
+          navigate('/login');
+          return;
+        }
+        if (!isAdmin) {
+          showToast('You do not have admin privileges', 'error');
+          navigate('/');
+          return;
+        }
+        setAuthChecked(true);
+        dispatch(fetchReviews());
+        dispatch(fetchBugReports());
+        dispatch(fetchSurveys());
+        dispatch(fetchUserGrowth());
+      } catch (error) {
+        showToast('Authentication error: ' + (error.message || 'Unknown error'), 'error');
         navigate('/login');
-        return;
+      } finally {
+        setAuthLoading(false);
       }
-      if (!isAdmin) {
-        console.error('User is authenticated but not an admin');
-        showToast('You do not have admin privileges', 'error');
-        navigate('/');
-        return;
-      }
-      console.log('Admin authentication confirmed through fallback');
-      setAuthChecked(true);
-      dispatch(fetchReviews());
-      dispatch(fetchBugReports());
-      dispatch(fetchSurveys());
-      dispatch(fetchUserGrowth());
     };
     checkAdminAuth();
   }, [dispatch, navigate, showToast]);
