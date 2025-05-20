@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import { Link } from 'react-router-dom';
-import { fetchUsers } from '../../features/admin/usersSlice';
+import { fetchUsers, updateUserRole, updateUserStatus } from '../../features/admin/usersSlice';
 import { useToast } from '../../components/ToastContext';
 import '../../styles/admin.css';
 
@@ -98,11 +98,15 @@ const AdminUsersPage = () => {
   const handleConfirm = async () => {
     try {
       const { userId, action, targetState } = confirmDialog;
-      
       setConfirmDialog({ show: false, userId: null, action: null, targetState: null });
+
+      if (action === 'role') {
+        await dispatch(updateUserRole({ userId, is_admin: targetState === 'admin' })).unwrap();
+      } else if (action === 'status') {
+        await dispatch(updateUserStatus({ userId, is_active: targetState === 'active' })).unwrap();
+      }
       dispatch(fetchUsers(filters));
     } catch (error) {
-      console.error("Error updating user:", error);
       showToast(error.message || 'An error occurred', 'error');
     }
   };
