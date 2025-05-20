@@ -4,7 +4,7 @@ import axios from 'axios';
  * Admin API utility for making authenticated requests to admin endpoints
  */
 const adminApi = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api',
+  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://15.237.190.24:8000/api',
   withCredentials: true, // Critical for Sanctum authentication
   headers: {
     'Content-Type': 'application/json',
@@ -19,7 +19,7 @@ async function setupCSRF() {
   try {
     // Get CSRF cookie from Laravel Sanctum endpoint
     const csrfResponse = await axios.get('/sanctum/csrf-cookie', {
-      baseURL: import.meta.env.VITE_APP_URL || 'http://localhost:8000',
+      baseURL: import.meta.env.VITE_APP_URL || 'http://15.237.190.24:8000',
       withCredentials: true
     });
     
