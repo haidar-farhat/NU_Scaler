@@ -6,9 +6,18 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use App\Http\Responses\ApiResponse;
+use App\Services\UserService;
 
 class UserManagementController extends Controller
 {
+    protected $userService;
+
+    public function __construct(UserService $userService)
+    {
+        $this->userService = $userService;
+    }
+
     // List users (paginated)
     public function index(Request $request)
     {
@@ -16,7 +25,7 @@ class UserManagementController extends Controller
             ->select('id', 'name', 'email', 'is_admin', 'is_active', 'created_at', 'updated_at')
             ->orderByDesc('created_at')
             ->paginate($request->get('per_page', 20));
-        return response()->json($users);
+        return ApiResponse::success('Users fetched successfully', $users);
     }
 
     // Promote/demote user
@@ -27,11 +36,10 @@ class UserManagementController extends Controller
         ]);
         // Prevent self-demotion
         if ($user->id === $request->user()->id) {
-            return response()->json(['message' => 'You cannot change your own admin status.'], 403);
+            return ApiResponse::error('You cannot change your own admin status.', null, 403);
         }
-        $user->is_admin = $request->is_admin;
-        $user->save();
-        return response()->json(['message' => 'User role updated.', 'user' => $user]);
+        $user = $this->userService->update($user, ['is_admin' => $request->is_admin]);
+        return ApiResponse::success('User role updated.', $user);
     }
 
     // Activate/deactivate user
@@ -42,10 +50,9 @@ class UserManagementController extends Controller
         ]);
         // Prevent self-deactivation
         if ($user->id === $request->user()->id) {
-            return response()->json(['message' => 'You cannot change your own active status.'], 403);
+            return ApiResponse::error('You cannot change your own active status.', null, 403);
         }
-        $user->is_active = $request->is_active;
-        $user->save();
-        return response()->json(['message' => 'User status updated.', 'user' => $user]);
+        $user = $this->userService->update($user, ['is_active' => $request->is_active]);
+        return ApiResponse::success('User status updated.', $user);
     }
 }

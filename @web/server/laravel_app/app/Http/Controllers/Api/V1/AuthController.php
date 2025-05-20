@@ -8,33 +8,31 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
+use App\Http\Requests\Api\V1\RegisterRequest;
+use App\Http\Requests\Api\V1\LoginRequest;
+use App\Http\Responses\ApiResponse;
+use App\Services\UserService;
 
 class AuthController extends Controller
 {
+    protected $userService;
+
+    public function __construct(UserService $userService)
+    {
+        $this->userService = $userService;
+    }
+
     /**
      * Register a new user.
      *
      * @param  \Illuminate\Http\Request  $request
      * @return \Illuminate\Http\JsonResponse
      */
-    public function register(Request $request)
+    public function register(RegisterRequest $request)
     {
-        $request->validate([
-            'name' => 'required|string|max:255',
-            'email' => 'required|string|email|max:255|unique:users',
-            'password' => 'required|string|min:8|confirmed',
-        ]);
-
-        $user = User::create([
-            'name' => $request->name,
-            'email' => $request->email,
-            'password' => Hash::make($request->password),
-        ]);
-
+        $user = $this->userService->register($request->validated());
         $token = $user->createToken('auth-token')->plainTextToken;
-
-        return response()->json([
-            'message' => 'User registered successfully',
+        return ApiResponse::success('User registered successfully', [
             'token_type' => 'Bearer',
             'access_token' => $token,
             'user' => [
@@ -52,45 +50,20 @@ class AuthController extends Controller
      * @param  \Illuminate\Http\Request  $request
      * @return \Illuminate\Http\JsonResponse
      */
-    public function login(Request $request)
+    public function login(LoginRequest $request)
     {
-        $request->validate([
-            'email' => 'required|email',
-            'password' => 'required|string',
-        ]);
-
-        $user = User::where('email', $request->email)->first();
-
-        if (!$user || !Hash::check($request->password, $user->password)) {
-            throw ValidationException::withMessages([
-                'email' => ['The provided credentials are incorrect.'],
-            ]);
+        $user = $this->userService->login($request->email, $request->password);
+        if (!$user) {
+            return ApiResponse::error('The provided credentials are incorrect.', null, 422);
         }
-
-        // Check if user account is active
         if (isset($user->is_active) && !$user->is_active) {
-            return response()->json([
-                'message' => 'Your account has been deactivated. Please contact an administrator.',
-                'account_disabled' => true
-            ], 403);
+            return ApiResponse::error('Your account has been deactivated. Please contact an administrator.', ['account_disabled' => true], 403);
         }
-
-        // Generate token with explicit name for better tracking
         $tokenName = 'api-token-' . now()->timestamp;
         $token = $user->createToken($tokenName)->plainTextToken;
-
-        Log::info('User login successful', [
-            'user_id' => $user->id,
-            'email' => $user->email,
-            'is_admin' => $user->is_admin ?? false,
-            'ip' => $request->ip(),
-            'user_agent' => $request->userAgent(),
-        ]);
-
-        return response()->json([
-            'message' => 'Login successful',
+        return ApiResponse::success('Login successful', [
             'token_type' => 'Bearer',
-            'access_token' => $token, // Key name matching front-end expectations
+            'access_token' => $token,
             'user' => [
                 'id' => $user->id,
                 'name' => $user->name,

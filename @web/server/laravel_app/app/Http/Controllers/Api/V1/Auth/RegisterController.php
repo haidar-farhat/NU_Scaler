@@ -9,55 +9,37 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rules\Password;
 use Illuminate\Http\JsonResponse;
+use App\Http\Requests\Api\V1\RegisterRequest;
+use App\Http\Responses\ApiResponse;
+use App\Services\UserService;
 
 class RegisterController extends Controller
 {
+    protected $userService;
+
+    public function __construct(UserService $userService)
+    {
+        $this->userService = $userService;
+    }
+
     /**
      * Handle a registration request.
      *
-     * @param  Request $request
+     * @param  RegisterRequest $request
      * @return JsonResponse
      */
-    public function register(Request $request): JsonResponse
+    public function register(RegisterRequest $request): JsonResponse
     {
-        $validator = Validator::make($request->all(), [
-            'name' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'string', 'email', 'max:255', 'unique:users'],
-            'password' => ['required', 'string', Password::defaults(), 'confirmed'], // Use default password rules, require confirmation
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json($validator->errors(), 422);
-        }
-
-        $validated = $validator->validated();
-
-        $user = User::create([
-            'name' => $validated['name'],
-            'email' => $validated['email'],
-            'password' => Hash::make($validated['password']),
-            // 'is_admin' defaults to false in the migration
-            // 'role' is not set here, assuming default or handled differently
-        ]);
-
-        // Option 1: Just return success message
-        // return response()->json(['message' => 'User registered successfully.'], 201);
-
-        // Option 2: Create a token and return it (log user in automatically)
+        $user = $this->userService->register($request->validated());
         $token = $user->createToken('user-registration-token')->plainTextToken;
-
-        return response()->json([
-            'message' => 'User registered successfully.',
+        return ApiResponse::success('User registered successfully.', [
             'token_type' => 'Bearer',
             'access_token' => $token,
             'user' => [
-                 'id' => $user->id,
-                 'name' => $user->name,
-                 'email' => $user->email,
-             ]
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+            ]
         ], 201);
-
-        // TODO: Add welcome email notification
-        // $user->notify(new WelcomeNotification());
     }
 }

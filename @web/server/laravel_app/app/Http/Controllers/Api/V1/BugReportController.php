@@ -6,9 +6,18 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\StoreBugReportRequest;
 use App\Models\BugReport;
 use Illuminate\Http\JsonResponse;
+use App\Http\Responses\ApiResponse;
+use App\Services\BugReportService;
 
 class BugReportController extends Controller
 {
+    protected $bugReportService;
+
+    public function __construct(BugReportService $bugReportService)
+    {
+        $this->bugReportService = $bugReportService;
+    }
+
     /**
      * Display a listing of the resource.
      */
@@ -25,14 +34,8 @@ class BugReportController extends Controller
      */
     public function store(StoreBugReportRequest $request): JsonResponse
     {
-        $validatedData = $request->validated();
-
-        $bugReport = BugReport::create($validatedData);
-
-        return response()->json([
-            'message' => 'Bug report submitted successfully.',
-            'data' => $bugReport
-        ], 201);
+        $bugReport = $this->bugReportService->create($request->validated());
+        return ApiResponse::success('Bug report submitted successfully.', $bugReport, 201);
     }
 
     /**

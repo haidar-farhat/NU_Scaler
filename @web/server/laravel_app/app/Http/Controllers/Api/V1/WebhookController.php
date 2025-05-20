@@ -9,6 +9,10 @@ use App\Services\WebhookService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
+use App\Http\Requests\Api\V1\StoreWebhookRequest;
+use App\Http\Requests\Api\V1\UpdateWebhookRequest;
+use App\Http\Responses\ApiResponse;
+use App\Repositories\WebhookRepository;
 
 class WebhookController extends Controller
 {
@@ -20,14 +24,23 @@ class WebhookController extends Controller
     protected $webhookService;
 
     /**
+     * The webhook repository instance.
+     *
+     * @var \App\Repositories\WebhookRepository
+     */
+    protected $webhookRepository;
+
+    /**
      * Create a new controller instance.
      *
      * @param \App\Services\WebhookService $webhookService
+     * @param \App\Repositories\WebhookRepository $webhookRepository
      * @return void
      */
-    public function __construct(WebhookService $webhookService)
+    public function __construct(WebhookService $webhookService, WebhookRepository $webhookRepository)
     {
         $this->webhookService = $webhookService;
+        $this->webhookRepository = $webhookRepository;
     }
 
     /**
@@ -38,55 +51,20 @@ class WebhookController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $webhooks = Webhook::where('user_id', $request->user()->id)
-            ->latest()
-            ->paginate();
-
-        return response()->json($webhooks);
+        $webhooks = $this->webhookRepository->findByUser($request->user()->id);
+        return ApiResponse::success('Webhooks fetched successfully', $webhooks);
     }
 
     /**
      * Store a newly created resource in storage.
      *
-     * @param Request $request
+     * @param StoreWebhookRequest $request
      * @return JsonResponse
      */
-    public function store(Request $request): JsonResponse
+    public function store(StoreWebhookRequest $request): JsonResponse
     {
-        $validator = Validator::make($request->all(), [
-            'name' => 'required|string|max:255',
-            'url' => 'required|url|max:1000',
-            'description' => 'nullable|string|max:1000',
-            'events' => 'required|array',
-            'events.*' => 'string|in:feedback.review.created,feedback.bug.created,feedback.hardware.created,user.registered',
-            'headers' => 'nullable|array',
-            'headers.*' => 'string',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Validation failed',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
-
-        $webhook = new Webhook([
-            'name' => $request->input('name'),
-            'url' => $request->input('url'),
-            'description' => $request->input('description'),
-            'events' => $request->input('events'),
-            'headers' => $request->input('headers', []),
-            'secret' => Webhook::generateSecret(),
-            'user_id' => $request->user()->id,
-            'is_active' => true,
-        ]);
-
-        $webhook->save();
-
-        return response()->json([
-            'message' => 'Webhook created successfully',
-            'data' => $webhook,
-        ], 201);
+        $webhook = $this->webhookService->create($request->validated(), $request->user());
+        return ApiResponse::success('Webhook created successfully', $webhook, 201);
     }
 
     /**
@@ -98,67 +76,26 @@ class WebhookController extends Controller
      */
     public function show(Webhook $webhook, Request $request): JsonResponse
     {
-        // Check if the webhook belongs to the user
         if ($webhook->user_id !== $request->user()->id) {
-            return response()->json([
-                'message' => 'Forbidden',
-            ], 403);
+            return ApiResponse::error('Forbidden', null, 403);
         }
-
-        return response()->json([
-            'data' => $webhook,
-        ]);
+        return ApiResponse::success('Webhook fetched successfully', $webhook);
     }
 
     /**
      * Update the specified resource in storage.
      *
-     * @param Request $request
+     * @param UpdateWebhookRequest $request
      * @param Webhook $webhook
      * @return JsonResponse
      */
-    public function update(Request $request, Webhook $webhook): JsonResponse
+    public function update(UpdateWebhookRequest $request, Webhook $webhook): JsonResponse
     {
-        // Check if the webhook belongs to the user
         if ($webhook->user_id !== $request->user()->id) {
-            return response()->json([
-                'message' => 'Forbidden',
-            ], 403);
+            return ApiResponse::error('Forbidden', null, 403);
         }
-
-        $validator = Validator::make($request->all(), [
-            'name' => 'sometimes|required|string|max:255',
-            'url' => 'sometimes|required|url|max:1000',
-            'description' => 'nullable|string|max:1000',
-            'events' => 'sometimes|required|array',
-            'events.*' => 'string|in:feedback.review.created,feedback.bug.created,feedback.hardware.created,user.registered',
-            'headers' => 'nullable|array',
-            'headers.*' => 'string',
-            'is_active' => 'sometimes|boolean',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'Validation failed',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
-
-        $webhook->fill($request->only([
-            'name',
-            'url',
-            'description',
-            'events',
-            'headers',
-            'is_active',
-        ]));
-
-        $webhook->save();
-
-        return response()->json([
-            'message' => 'Webhook updated successfully',
-            'data' => $webhook,
-        ]);
+        $webhook = $this->webhookService->update($webhook, $request->validated());
+        return ApiResponse::success('Webhook updated successfully', $webhook);
     }
 
     /**
@@ -170,18 +107,11 @@ class WebhookController extends Controller
      */
     public function destroy(Webhook $webhook, Request $request): JsonResponse
     {
-        // Check if the webhook belongs to the user
         if ($webhook->user_id !== $request->user()->id) {
-            return response()->json([
-                'message' => 'Forbidden',
-            ], 403);
+            return ApiResponse::error('Forbidden', null, 403);
         }
-
-        $webhook->delete();
-
-        return response()->json([
-            'message' => 'Webhook deleted successfully',
-        ]);
+        $this->webhookService->delete($webhook);
+        return ApiResponse::success('Webhook deleted successfully');
     }
 
     /**

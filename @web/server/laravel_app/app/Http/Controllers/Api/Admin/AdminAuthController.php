@@ -7,36 +7,33 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
+use App\Http\Requests\Api\V1\LoginRequest;
+use App\Http\Responses\ApiResponse;
+use App\Services\UserService;
 
 class AdminAuthController extends Controller
 {
+    protected $userService;
+
+    public function __construct(UserService $userService)
+    {
+        $this->userService = $userService;
+    }
+
     /**
      * Handle admin login
      *
      * @param  \Illuminate\Http\Request  $request
      * @return \Illuminate\Http\JsonResponse
      */
-    public function login(Request $request)
+    public function login(LoginRequest $request)
     {
-        $request->validate([
-            'email' => 'required|email',
-            'password' => 'required|string',
-        ]);
-
-        $user = User::where('email', $request->email)->first();
-
-        // Check if user exists and is an admin
-        if (!$user || !Hash::check($request->password, $user->password) || !$user->is_admin) {
-            throw ValidationException::withMessages([
-                'email' => ['The provided credentials are incorrect or you do not have admin privileges.'],
-            ]);
+        $user = $this->userService->login($request->email, $request->password);
+        if (!$user || !$user->is_admin) {
+            return ApiResponse::error('The provided credentials are incorrect or you do not have admin privileges.', null, 422);
         }
-
-        // Create token with admin abilities
         $token = $user->createToken('admin-token', ['admin'])->plainTextToken;
-
-        return response()->json([
-            'message' => 'Admin logged in successfully',
+        return ApiResponse::success('Admin logged in successfully', [
             'token_type' => 'Bearer',
             'access_token' => $token,
             'user' => [

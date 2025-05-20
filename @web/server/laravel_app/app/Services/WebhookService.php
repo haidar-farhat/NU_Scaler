@@ -8,9 +8,17 @@ use Exception;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use App\Repositories\WebhookRepository;
 
 class WebhookService
 {
+    protected $webhookRepository;
+
+    public function __construct(WebhookRepository $webhookRepository)
+    {
+        $this->webhookRepository = $webhookRepository;
+    }
+
     /**
      * Dispatch an event to all registered webhooks.
      *
@@ -161,5 +169,23 @@ class WebhookService
             $log->event_type,
             $log->payload
         );
+    }
+
+    public function create(array $data, $user): Webhook
+    {
+        $data['user_id'] = $user->id;
+        $data['secret'] = $data['secret'] ?? \App\Models\Webhook::generateSecret();
+        $data['is_active'] = $data['is_active'] ?? true;
+        return $this->webhookRepository->create($data);
+    }
+
+    public function update(Webhook $webhook, array $data): Webhook
+    {
+        return $this->webhookRepository->update($webhook, $data);
+    }
+
+    public function delete(Webhook $webhook): void
+    {
+        $this->webhookRepository->delete($webhook);
     }
 }

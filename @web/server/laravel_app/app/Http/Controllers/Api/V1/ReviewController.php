@@ -6,9 +6,18 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\StoreReviewRequest;
 use App\Models\Review;
 use Illuminate\Http\JsonResponse;
+use App\Http\Responses\ApiResponse;
+use App\Services\ReviewService;
 
 class ReviewController extends Controller
 {
+    protected $reviewService;
+
+    public function __construct(ReviewService $reviewService)
+    {
+        $this->reviewService = $reviewService;
+    }
+
     /**
      * Display a listing of the resource.
      */
@@ -25,18 +34,8 @@ class ReviewController extends Controller
      */
     public function store(StoreReviewRequest $request): JsonResponse
     {
-        // Validation handled by StoreReviewRequest
-        $validatedData = $request->validated();
-
-        // Create the review
-        $review = Review::create($validatedData);
-
-        // Return a success response (201 Created)
-        // Optionally return the created resource
-        return response()->json([
-            'message' => 'Review submitted successfully.',
-            'data' => $review // Or just ['id' => $review->id]
-        ], 201);
+        $review = $this->reviewService->create($request->validated());
+        return ApiResponse::success('Review submitted successfully.', $review, 201);
     }
 
     /**
