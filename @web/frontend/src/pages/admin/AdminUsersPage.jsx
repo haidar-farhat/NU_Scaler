@@ -99,10 +99,6 @@ const AdminUsersPage = () => {
     try {
       const { userId, action, targetState } = confirmDialog;
       
-      // Using alert for now to avoid potential issues with the Redux actions
-      // In a real app, you would use the actual updateUserRole and updateUserStatus actions
-      alert(`Would ${action} user ${userId} to ${targetState}`);
-      
       setConfirmDialog({ show: false, userId: null, action: null, targetState: null });
       dispatch(fetchUsers(filters));
     } catch (error) {

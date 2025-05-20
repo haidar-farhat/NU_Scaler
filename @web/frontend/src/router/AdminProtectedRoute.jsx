@@ -8,12 +8,6 @@ export default function AdminProtectedRoute({ children }) {
   const [error, setError] = useState(null);
   
   useEffect(() => {
-    console.log('🔒 AdminProtectedRoute - Auth State:', auth);
-    console.log('🔑 Token from Redux:', token);
-    console.log('👤 User from auth state:', user);
-    console.log('🔐 Auth state:', isAuthenticated);
-    console.log('🔒 Token in localStorage:', localStorage.getItem('token'));
-    
     // Validate token format
     const storedToken = localStorage.getItem('token');
     if (!storedToken) {
@@ -23,13 +17,10 @@ export default function AdminProtectedRoute({ children }) {
     }
     
     if (!user) {
-      console.log('❌ No user in state - redirecting to login');
       setError('No user data found. Please log in again.');
     } else if (!user.is_admin) {
-      console.log('⛔ User is not admin - access denied');
       setError(`User ${user.name} (${user.email}) does not have admin privileges.`);
     } else {
-      console.log('✅ User is authenticated and has admin privileges');
       setError(null);
     }
   }, [auth, user, token, isAuthenticated]);

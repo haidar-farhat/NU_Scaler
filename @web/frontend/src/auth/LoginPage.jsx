@@ -25,14 +25,11 @@ const LoginPage = () => {
   useEffect(() => {
     const fetchCsrfToken = async () => {
       try {
-        console.log('Fetching CSRF cookie...');
         await axios.get('http://localhost:8000/sanctum/csrf-cookie', { 
           withCredentials: true
         });
-        console.log('CSRF cookie set successfully');
         setCsrfLoaded(true);
       } catch (err) {
-        console.error('Failed to fetch CSRF cookie:', err);
       }
     };
     
@@ -40,18 +37,7 @@ const LoginPage = () => {
   }, []);
   
   useEffect(() => {
-    console.log('Auth state changed:', { isAuthenticated, user });
     if (isAuthenticated && user) {
-      console.log('User is authenticated, redirecting to:', from);
-      console.log('User details:', user);
-      
-      // Check if the user is an admin and log that information
-      if (user.is_admin) {
-        console.log('User has admin privileges');
-      } else {
-        console.log('User does not have admin privileges');
-      }
-      
       navigate(from, { replace: true });
     }
   }, [isAuthenticated, user, navigate, from]);
@@ -61,16 +47,12 @@ const LoginPage = () => {
     setLoginError(null); // Clear previous local errors
     
     try {
-      console.log('Attempting login with:', { email: form.email });
-      
       const result = await dispatch(login({ email: form.email, password: form.password })).unwrap();
-      console.log('Login result:', result);
       
       if (result) {
         navigate(from, { replace: true });
       }
     } catch (err) {
-      console.error('Login failed:', err);
       // Store error in local state as a backup
       setLoginError(err);
     }

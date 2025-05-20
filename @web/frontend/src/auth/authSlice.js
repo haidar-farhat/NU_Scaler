@@ -38,12 +38,10 @@ export const login = createAsyncThunk(
       
       console.log('Attempting login with credentials:', credentials);
       const response = await api.post('/v1/login', credentials);
-      console.log('Login response:', response.data);
-      
-      // Extract token and user from the response
-      // The Laravel API returns data in this format
-      const token = response.data.access_token;
-      const user = response.data.user;
+      // Extract token and user from the nested data object
+      const { data } = response.data;
+      const token = data?.access_token;
+      const user = data?.user;
       
       if (!token || !user) {
         console.error('Invalid response format from login API', response.data);
