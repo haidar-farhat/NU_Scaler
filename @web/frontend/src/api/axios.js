@@ -2,13 +2,30 @@ import axios from 'axios';
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api',
-  withCredentials: true, // Include credentials (cookies) with all requests
+  withCredentials: true,
+  headers: {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+    'X-Requested-With': 'XMLHttpRequest',
+  },
 });
 
 // Add a request interceptor to attach the auth token to all requests
-api.interceptors.request.use((config) => {
+api.interceptors.request.use(async (config) => {
   const token = localStorage.getItem('token');
   console.log('API Request:', config.url, 'Token exists:', !!token);
+  
+  // If this is not a CSRF cookie request, try to get a fresh CSRF cookie
+  if (!config.url.includes('sanctum/csrf-cookie')) {
+    try {
+      await axios.get('http://localhost:8000/sanctum/csrf-cookie', {
+        withCredentials: true,
+      });
+    } catch (error) {
+      console.warn('Failed to get CSRF cookie:', error);
+    }
+  }
+
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
