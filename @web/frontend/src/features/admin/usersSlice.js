@@ -49,18 +49,20 @@ const adminUsersSlice = createSlice({
       })
       .addCase(fetchUsers.fulfilled, (state, action) => {
         state.loading = false;
-        state.users = action.payload.users || [];
-        state.meta = action.payload.meta || null;
+        state.users = action.payload?.users || [];
+        state.meta = action.payload?.meta || null;
       })
       .addCase(fetchUsers.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload;
       })
       .addCase(updateUserRole.fulfilled, (state, action) => {
+        if (!action.payload || !action.payload.id) return;
         const idx = state.users.findIndex(u => u.id === action.payload.id);
         if (idx !== -1) state.users[idx] = action.payload;
       })
       .addCase(updateUserStatus.fulfilled, (state, action) => {
+        if (!action.payload || !action.payload.id) return;
         const idx = state.users.findIndex(u => u.id === action.payload.id);
         if (idx !== -1) state.users[idx] = action.payload;
       });
