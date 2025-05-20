@@ -73,7 +73,7 @@ Nu Scaler follows a hybrid architecture combining Python and Rust to balance per
 <!-- Testing -->
 <img src="./readme/title6.svg"/>
 
-### Add Title Here
+### Debug and testing
 
 |  Debug Screen                           | Sample Peformance                     |
 | --------------------------------------- | ------------------------------------- |
