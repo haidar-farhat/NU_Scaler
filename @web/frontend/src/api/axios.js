@@ -21,9 +21,23 @@ api.interceptors.request.use(async (config) => {
   // If this is not a CSRF cookie request, try to get a fresh CSRF cookie
   if (!config.url.includes('sanctum/csrf-cookie')) {
     try {
-      await axios.get(`${SANCTUM_URL}/csrf-cookie`, {
+      const response = await axios.get(`${SANCTUM_URL}/csrf-cookie`, {
         withCredentials: true,
+        headers: {
+          'Accept': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
       });
+      
+      // Get the XSRF-TOKEN from the response cookies
+      const cookies = response.headers['set-cookie'];
+      if (cookies) {
+        const xsrfToken = cookies.find(cookie => cookie.includes('XSRF-TOKEN'));
+        if (xsrfToken) {
+          const token = xsrfToken.split(';')[0].split('=')[1];
+          config.headers['X-XSRF-TOKEN'] = decodeURIComponent(token);
+        }
+      }
     } catch (error) {
       console.warn('Failed to get CSRF cookie:', error);
     }
