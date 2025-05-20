@@ -15,11 +15,15 @@ return [
     |
     */
 
-    'paths' => ['api/*', 'sanctum/csrf-cookie', 'login', 'logout'],
+    'paths' => ['*', 'sanctum/csrf-cookie', 'api/*', 'login', 'logout'],
 
     'allowed_methods' => ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 
-    'allowed_origins' => ['*'],
+    'allowed_origins' => [
+        'http://15.237.190.24',
+        'http://localhost:5173',
+        'http://localhost:8000',
+    ],
 
     'allowed_origins_patterns' => [],
 
@@ -31,9 +35,16 @@ return [
         'X-CSRF-TOKEN',
         'X-XSRF-TOKEN',
         'X-Socket-ID',
+        'Origin',
+        'Access-Control-Request-Method',
+        'Access-Control-Request-Headers',
     ],
 
-    'exposed_headers' => [],
+    'exposed_headers' => [
+        'Set-Cookie',
+        'X-CSRF-TOKEN',
+        'X-XSRF-TOKEN',
+    ],
 
     'max_age' => 0,
 
