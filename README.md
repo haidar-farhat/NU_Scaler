@@ -85,9 +85,11 @@ Nu Scaler follows a hybrid architecture combining Python and Rust to balance per
 
 <!-- Deployment -->
 <img src="./readme/title7.svg"/>
+
 | Deployment Worflow                      | Lint workflow                         |
 | --------------------------------------- | ------------------------------------- |
 | ![Landing](./readme/demo/cicd1.png)     | ![fsdaf](./readme/demo/cicd2.png)     |
+
 ### Public website
 
 - http://15.237.190.24/
@@ -95,6 +97,6 @@ Nu Scaler follows a hybrid architecture combining Python and Rust to balance per
 
 | Home Screen                             | Download Screen                       | 
 | --------------------------------------- | ------------------------------------- | 
-| ![Landing](./readme/demo/home.png)      | ![fsdaf](./readme/demo/download.png) | 
+| ![Landing](./readme/demo/home.png)      | ![fsdaf](./readme/demo/download.png)  | 
 
 <br><br>
