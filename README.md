@@ -50,6 +50,12 @@ Nu Scaler follows a hybrid architecture combining Python and Rust to balance per
 | ------------------------------------- |
 | ![fsdaf](./readme/demo/testrun.gif)   |
 
+
+| Sample Test                             |Test peformance                        |
+| --------------------------------------- | ------------------------------------- |
+| ![Landing](./readme/demo/stat.gif) | ![fsdaf](./readme/demo/stat.png)   |
+
+
 ### GUI
 
 | Live Feed Main Screen                   | Live Feed ON  screen                  |
