@@ -149,3 +149,4 @@ Route::fallback(function(){
 Route::get('/test-cors', function () {
     return response()->json(['message' => 'CORS works!']);
 });
+//test

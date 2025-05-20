@@ -8,11 +8,9 @@ const SANCTUM_URL = `${SERVER_URL}/sanctum`;
 // Create axios instance with default config
 const api = axios.create({
   baseURL: API_BASE_URL,
-  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
-    'X-Requested-With': 'XMLHttpRequest',
   },
 });
 
@@ -34,17 +32,8 @@ const getCsrfToken = async () => {
 };
 
 // Add a request interceptor
-api.interceptors.request.use(async (config) => {
+api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
-  console.log('API Request:', config.url, 'Token exists:', !!token);
-
-  // Always get CSRF token before any request
-  try {
-    await getCsrfToken();
-  } catch (error) {
-    console.warn('Failed to get CSRF token:', error);
-  }
-
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }

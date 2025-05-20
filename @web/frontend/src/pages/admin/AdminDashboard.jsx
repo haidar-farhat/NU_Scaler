@@ -31,82 +31,54 @@ const AdminDashboard = () => {
   // Check if the user is authenticated and is an admin
   useEffect(() => {
     const checkAdminAuth = async () => {
-      try {
-        // Make sure CSRF cookie is set up
-        await adminApiService.ensureCSRF();
-        
-        // Check admin-specific authentication status
-        console.log('Checking admin authentication status...');
-        
-        // First check if we have a token in localStorage
-        const token = localStorage.getItem('token');
-        if (!token) {
-          console.error('No authentication token found');
-          showToast('Please log in first', 'error');
-          navigate('/login');
-          return;
-        }
-        
-        // Now check admin session specifically
-        try {
-          const adminSessionResponse = await adminApiService.checkAdminSession();
-          console.log('Admin session check response:', adminSessionResponse.data);
-          
-          if (adminSessionResponse.data.authenticated && adminSessionResponse.data.is_admin) {
-            console.log('Admin authentication confirmed');
-            setAuthChecked(true);
-            
-            // Load the dashboard data
-            dispatch(fetchReviews());
-            dispatch(fetchBugReports());
-            dispatch(fetchSurveys());
-            dispatch(fetchUserGrowth());
-            return;
-          }
-        } catch (adminError) {
-          console.error('Admin session check failed:', adminError);
-          // Fall through to the general auth check
-        }
-        
-        // If admin check failed, try general auth check as fallback
-        const response = await adminApiService.checkAuthStatus();
-        console.log('General auth check response:', response.data);
-        
-        const isAdmin = response.data.user?.is_admin === true;
-        const authenticated = response.data.authenticated === true;
-        
-        if (!authenticated) {
-          console.error('User is not authenticated for admin dashboard');
-          showToast('Please log in as an admin to access this page', 'error');
-          navigate('/login');
-          return;
-        }
-        
-        if (!isAdmin) {
-          console.error('User is authenticated but not an admin');
-          showToast('You do not have admin privileges', 'error');
-          navigate('/');
-          return;
-        }
-        
-        // If we get here, the user is authenticated and is an admin
-        console.log('Admin authentication confirmed through fallback');
-        setAuthChecked(true);
-        
-        // Load the dashboard data
-        dispatch(fetchReviews());
-        dispatch(fetchBugReports());
-        dispatch(fetchSurveys());
-        dispatch(fetchUserGrowth());
-      } catch (error) {
-        console.error('Error checking admin auth:', error);
-        showToast('Authentication error: ' + (error.message || 'Unknown error'), 'error');
+      // First check if we have a token in localStorage
+      const token = localStorage.getItem('token');
+      if (!token) {
+        console.error('No authentication token found');
+        showToast('Please log in first', 'error');
         navigate('/login');
-      } finally {
-        setAuthLoading(false);
+        return;
       }
+      // Now check admin session specifically
+      try {
+        const adminSessionResponse = await adminApiService.checkAdminSession();
+        console.log('Admin session check response:', adminSessionResponse.data);
+        if (adminSessionResponse.data.authenticated && adminSessionResponse.data.is_admin) {
+          console.log('Admin authentication confirmed');
+          setAuthChecked(true);
+          dispatch(fetchReviews());
+          dispatch(fetchBugReports());
+          dispatch(fetchSurveys());
+          dispatch(fetchUserGrowth());
+          return;
+        }
+      } catch (adminError) {
+        console.error('Admin session check failed:', adminError);
+      }
+      // If admin check failed, try general auth check as fallback
+      const response = await adminApiService.checkAuthStatus();
+      console.log('General auth check response:', response.data);
+      const isAdmin = response.data.user?.is_admin === true;
+      const authenticated = response.data.authenticated === true;
+      if (!authenticated) {
+        console.error('User is not authenticated for admin dashboard');
+        showToast('Please log in as an admin to access this page', 'error');
+        navigate('/login');
+        return;
+      }
+      if (!isAdmin) {
+        console.error('User is authenticated but not an admin');
+        showToast('You do not have admin privileges', 'error');
+        navigate('/');
+        return;
+      }
+      console.log('Admin authentication confirmed through fallback');
+      setAuthChecked(true);
+      dispatch(fetchReviews());
+      dispatch(fetchBugReports());
+      dispatch(fetchSurveys());
+      dispatch(fetchUserGrowth());
     };
-    
     checkAdminAuth();
   }, [dispatch, navigate, showToast]);
 

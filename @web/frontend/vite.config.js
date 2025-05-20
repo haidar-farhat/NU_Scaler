@@ -16,12 +16,6 @@ export default defineConfig({
         secure: false,
         ws: true,
         rewrite: (path) => path.replace(/^\/api/, '')
-      },
-      '/sanctum': {
-        target: SERVER_URL,
-        changeOrigin: true,
-        secure: false,
-        rewrite: (path) => path.replace(/^\/sanctum/, '')
       }
     }
   }

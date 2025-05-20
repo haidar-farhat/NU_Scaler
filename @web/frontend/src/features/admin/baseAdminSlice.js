@@ -4,7 +4,6 @@ import adminApiService from '../../api/adminApi';
 // Base query with auth
 export const baseQuery = fetchBaseQuery({
   baseURL: 'http://15.237.190.24:8000/api',
-  credentials: 'include',
   prepareHeaders: (headers) => {
     const token = localStorage.getItem('token');
     console.log('API Request Header - Token Exists:', !!token);

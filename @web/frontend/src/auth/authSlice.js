@@ -21,52 +21,18 @@ export const login = createAsyncThunk(
   'auth/login',
   async (credentials, { rejectWithValue }) => {
     try {
-      const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://15.237.190.24:8000';
-      
-      // First get the CSRF cookie from Laravel Sanctum using the correct base URL
-      console.log('Fetching CSRF cookie...');
-      try {
-        await axios.get(`${baseURL}/sanctum/csrf-cookie`, { 
-          withCredentials: true 
-        });
-        console.log('Initial CSRF setup: success');
-      } catch (csrfError) {
-        console.error('Failed to fetch CSRF cookie:', csrfError);
-        console.log('Initial CSRF setup: failed');
-        // Continue anyway - some setups don't require CSRF
-      }
-      
-      console.log('Attempting login with credentials:', credentials);
       const response = await api.post('/v1/login', credentials);
-      // Extract token and user from the nested data object
-      const { data } = response.data;
+      // Accept both { access_token, user } or { data: { access_token, user } }
+      const data = response.data.data || response.data;
       const token = data?.access_token;
       const user = data?.user;
-      
       if (!token || !user) {
-        console.error('Invalid response format from login API', response.data);
         return rejectWithValue('Invalid server response format');
       }
-      
-      // Store in localStorage
       localStorage.setItem('token', token);
       localStorage.setItem('user', JSON.stringify(user));
-      
-      console.log('Login successful', { token: token.substring(0, 10) + '...', user });
       return { token, user };
     } catch (error) {
-      console.error('Login error details:', {
-        status: error.response?.status,
-        data: error.response?.data,
-        message: error.message
-      });
-      
-      // For account disabled errors
-      if (error.response?.status === 403 && error.response?.data?.account_disabled) {
-        return rejectWithValue('Your account has been deactivated. Please contact an administrator.');
-      }
-      
-      // For all other errors, keep it simple with just a string
       return rejectWithValue(
         error.response?.data?.message || 
         error.message || 
@@ -99,17 +65,12 @@ export const logout = createAsyncThunk(
   async (_, { rejectWithValue }) => {
     try {
       await api.post('/v1/logout');
-      
-      // Clear localStorage
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      
       return null;
     } catch (error) {
-      // Still remove items from localStorage even if API call fails
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      
       return rejectWithValue(error.response?.data?.message || 'Logout failed');
     }
   }
