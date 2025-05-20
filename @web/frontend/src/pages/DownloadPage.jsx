@@ -143,7 +143,10 @@ const DownloadPage = () => {
                         )}
                       </div>
                       <button
-                        onClick={(e) => handleDownload(e, 'windows')}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          window.open('https://github.com/haidar-farhat/NU_Scaler/releases/download/release/NuScaler.exe', '_blank');
+                        }}
                         className="bg-indigo-600 text-white py-2 px-4 rounded hover:bg-indigo-700 transition duration-200"
                       >
                         Download
