@@ -1,10 +1,13 @@
 import axios from 'axios';
 
-const API_BASE_URL = 'http://15.237.190.24:8000/api';
-const SANCTUM_URL = 'http://15.237.190.24:8000/sanctum';
+// Ensure we're using the correct server URL
+const SERVER_URL = 'http://15.237.190.24:8000';
+const API_BASE_URL = `${SERVER_URL}/api`;
+const SANCTUM_URL = `${SERVER_URL}/sanctum`;
 
+// Create axios instance with default config
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || API_BASE_URL,
+  baseURL: API_BASE_URL,
   withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
@@ -13,33 +16,34 @@ const api = axios.create({
   },
 });
 
-// Add a request interceptor to attach the auth token to all requests
+// Function to get CSRF token
+const getCsrfToken = async () => {
+  try {
+    const response = await axios.get(`${SANCTUM_URL}/csrf-cookie`, {
+      withCredentials: true,
+      headers: {
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+    });
+    return response;
+  } catch (error) {
+    console.error('CSRF token fetch failed:', error);
+    throw error;
+  }
+};
+
+// Add a request interceptor
 api.interceptors.request.use(async (config) => {
   const token = localStorage.getItem('token');
   console.log('API Request:', config.url, 'Token exists:', !!token);
-  
-  // If this is not a CSRF cookie request, try to get a fresh CSRF cookie
-  if (!config.url.includes('sanctum/csrf-cookie')) {
+
+  // Skip CSRF for login and CSRF cookie requests
+  if (!config.url.includes('login') && !config.url.includes('sanctum/csrf-cookie')) {
     try {
-      const response = await axios.get(`${SANCTUM_URL}/csrf-cookie`, {
-        withCredentials: true,
-        headers: {
-          'Accept': 'application/json',
-          'X-Requested-With': 'XMLHttpRequest',
-        },
-      });
-      
-      // Get the XSRF-TOKEN from the response cookies
-      const cookies = response.headers['set-cookie'];
-      if (cookies) {
-        const xsrfToken = cookies.find(cookie => cookie.includes('XSRF-TOKEN'));
-        if (xsrfToken) {
-          const token = xsrfToken.split(';')[0].split('=')[1];
-          config.headers['X-XSRF-TOKEN'] = decodeURIComponent(token);
-        }
-      }
+      await getCsrfToken();
     } catch (error) {
-      console.warn('Failed to get CSRF cookie:', error);
+      console.warn('Failed to get CSRF token:', error);
     }
   }
 
@@ -49,7 +53,7 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
-// Add a response interceptor to handle common errors
+// Add a response interceptor
 api.interceptors.response.use(
   (response) => {
     console.log('API Response:', response.config.url, 'Status:', response.status);
@@ -58,13 +62,9 @@ api.interceptors.response.use(
   (error) => {
     console.error('API Error:', error.config?.url, 'Status:', error.response?.status, 'Message:', error.message);
     
-    // Handle 401 Unauthorized errors (token expired, etc.)
     if (error.response && error.response.status === 401) {
       console.warn('Unauthorized request - clearing token');
       localStorage.removeItem('token');
-      // Let the components handle redirects instead of forcing a redirect here
-      // which might interrupt normal component lifecycle
-      // window.location.href = '/login';
     }
     return Promise.reject(error);
   }
