@@ -81,7 +81,7 @@ Route::prefix('v1')->middleware('auth:sanctum')->name('api.v1.')->group(function
 
 // Admin Routes - Using full middleware class reference to avoid alias issues
 Route::prefix('admin')->name('api.admin.')
-    ->middleware(['auth:sanctum', \App\Http\Middleware\IsAdmin::class])
+    ->middleware(['jwt.auth', \App\Http\Middleware\IsAdmin::class])
     ->group(function () {
         // Admin session check
         Route::get('/session/check', [AdminSessionController::class, 'check'])->name('session.check');
