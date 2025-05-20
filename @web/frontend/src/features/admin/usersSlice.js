@@ -1,14 +1,15 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import adminApi from '../../api/adminApi';
 
-export const fetchUsers = createAsyncThunk('adminUsers/fetchUsers', async (_, { rejectWithValue }) => {
+export const fetchUsers = createAsyncThunk('adminUsers/fetchUsers', async (params, { rejectWithValue }) => {
   try {
-    console.log('Fetching admin users...');
-    const res = await adminApi.getUsers();
-    console.log('Fetching users response:', res.data);
-    return res.data;
+    const res = await adminApi.getUsers(params);
+    const { data } = res.data;
+    return {
+      users: data.data,
+      meta: { ...data, data: undefined },
+    };
   } catch (err) {
-    console.error('Error fetching users:', err);
     return rejectWithValue(err.response?.data || err.message);
   }
 });
@@ -35,6 +36,7 @@ const adminUsersSlice = createSlice({
   name: 'adminUsers',
   initialState: {
     users: [],
+    meta: null,
     loading: false,
     error: null,
   },
@@ -47,11 +49,8 @@ const adminUsersSlice = createSlice({
       })
       .addCase(fetchUsers.fulfilled, (state, action) => {
         state.loading = false;
-        if (action.payload && action.payload.data) {
-          state.users = action.payload.data;
-        } else {
-          state.users = action.payload || [];
-        }
+        state.users = action.payload.users || [];
+        state.meta = action.payload.meta || null;
       })
       .addCase(fetchUsers.rejected, (state, action) => {
         state.loading = false;
@@ -68,4 +67,4 @@ const adminUsersSlice = createSlice({
   },
 });
 
-export default adminUsersSlice.reducer; 
+export default adminUsersSlice.reducer;
