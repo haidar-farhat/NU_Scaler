@@ -17,10 +17,14 @@ Built with a clean and intuitive interface, Nu Scaler helps users improve visual
 
 Nu Scaler follows a hybrid architecture combining Python and Rust to balance performance and flexibility. The user interface is built using PySide6 (Qt for Python), offering a modern and responsive cross-platform GUI. Behind the scenes, the heavy lifting is done in Rust, where advanced upscaling and frame interpolation algorithms are executed using WGPU-powered shaders for GPU acceleration. This separation allows the GUI to remain responsive while the computationally intensive tasks are offloaded to efficient, low-level Rust modules, ensuring both speed and stability across different systems.
  
-| Component Diagram                       | Flow Diagram                          |
-| --------------------------------------- | ------------------------------------- |
-| ![Landing](./readme/demo/component_diagrame.png) | ![fsdaf](./readme/demo/flow.png)   |
+| Component Diagram                       |
+| --------------------------------------- |
+| ![Landing](./readme/demo/component_diagrame.png) |
 
+
+| Flow Diagram                          |
+| ------------------------------------- |
+| ![fsdaf](./readme/demo/flow.png)   |
 <br><br>
 
 <!-- Project Highlights -->
