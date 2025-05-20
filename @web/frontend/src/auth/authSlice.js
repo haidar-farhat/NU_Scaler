@@ -21,7 +21,7 @@ export const login = createAsyncThunk(
   'auth/login',
   async (credentials, { rejectWithValue }) => {
     try {
-      const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+      const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://15.237.190.24:8000';
       
       // First get the CSRF cookie from Laravel Sanctum using the correct base URL
       console.log('Fetching CSRF cookie...');
