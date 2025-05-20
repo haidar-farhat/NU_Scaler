@@ -149,28 +149,28 @@ const DownloadPage = () => {
                         Download
                       </button>
                     </div>
-                    <div className="flex items-center justify-between border-b pb-4">
+                    <div className="flex items-center justify-between border-b pb-4 opacity-60">
                       <div>
                         <p className="font-medium">Nu Scaler for macOS</p>
                         <p className="text-sm text-gray-500">v{downloadInfo?.version || '2.1.0'} (Universal)</p>
                       </div>
                       <button
-                        onClick={(e) => handleDownload(e, 'macos')}
-                        className="bg-indigo-600 text-white py-2 px-4 rounded hover:bg-indigo-700 transition duration-200"
+                        disabled
+                        className="bg-gray-300 text-gray-600 py-2 px-4 rounded cursor-not-allowed"
                       >
-                        Download
+                        Coming Soon
                       </button>
                     </div>
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between opacity-60">
                       <div>
                         <p className="font-medium">Nu Scaler for Linux</p>
                         <p className="text-sm text-gray-500">v{downloadInfo?.version || '2.1.0'} (.deb package)</p>
                       </div>
                       <button
-                        onClick={(e) => handleDownload(e, 'linux')}
-                        className="bg-indigo-600 text-white py-2 px-4 rounded hover:bg-indigo-700 transition duration-200"
+                        disabled
+                        className="bg-gray-300 text-gray-600 py-2 px-4 rounded cursor-not-allowed"
                       >
-                        Download
+                        Coming Soon
                       </button>
                     </div>
                   </>
