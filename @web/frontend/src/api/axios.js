@@ -38,13 +38,11 @@ api.interceptors.request.use(async (config) => {
   const token = localStorage.getItem('token');
   console.log('API Request:', config.url, 'Token exists:', !!token);
 
-  // Skip CSRF for login and CSRF cookie requests
-  if (!config.url.includes('login') && !config.url.includes('sanctum/csrf-cookie')) {
-    try {
-      await getCsrfToken();
-    } catch (error) {
-      console.warn('Failed to get CSRF token:', error);
-    }
+  // Always get CSRF token before any request
+  try {
+    await getCsrfToken();
+  } catch (error) {
+    console.warn('Failed to get CSRF token:', error);
   }
 
   if (token) {
