@@ -45,7 +45,9 @@ Nu Scaler follows a hybrid architecture combining Python and Rust to balance per
 <!-- Demo -->
 <img src="./readme/title5.svg"/>
 
-
+| Test In Real time                     |
+| ------------------------------------- |
+| ![fsdaf](./readme/demo/testrun.gif)   |
 
 ### GUI
 
@@ -82,7 +84,7 @@ Nu Scaler follows a hybrid architecture combining Python and Rust to balance per
 | ![Landing](./readme/demo/debug.png)     | ![fsdaf](./readme/demo/smpl_pef.png)  |
 
 
-| Base 2d                                 | Scaled 2d                             |
+| Base 2d (low res- 15fps- low quality)   | Live 2d (High res- 30fps- high quality)|
 | --------------------------------------- | ------------------------------------- |
 | ![Landing](./readme/demo/sprite1.gif)   | ![fsdaf](./readme/demo/sprite2.gif)   |
 
