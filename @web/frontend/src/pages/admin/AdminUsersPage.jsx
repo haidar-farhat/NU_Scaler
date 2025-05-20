@@ -115,6 +115,14 @@ const AdminUsersPage = () => {
     setConfirmDialog({ show: false, userId: null, action: null, targetState: null });
   };
 
+  const handleRoleChange = (user, newRole) => {
+    confirmAction(user.id, 'role', newRole);
+  };
+
+  const handleStatusChange = (user, newStatus) => {
+    confirmAction(user.id, 'status', newStatus);
+  };
+
   return (
     <div className="admin-container">
       <div className="flex justify-between items-center mb-8">
@@ -230,7 +238,7 @@ const AdminUsersPage = () => {
                   </tr>
                 </thead>
                 <tbody className="admin-table-body">
-                  {Array.isArray(users) && users.map(user => (
+                  {users.map(user => (
                     <tr key={user.id} className="admin-table-row">
                       <td className="admin-table-cell">{user.id}</td>
                       <td className="admin-table-cell">{user.name}</td>
@@ -238,31 +246,26 @@ const AdminUsersPage = () => {
                       <td className="admin-table-cell">
                         <select
                           className="admin-form-input"
-                          value={user.role || 'user'}
-                          onChange={() => confirmAction(user.id, 'role', user.role === 'admin' ? 'user' : 'admin')}
+                          value={user.is_admin ? 'admin' : 'user'}
+                          onChange={e => handleRoleChange(user, e.target.value)}
                         >
                           <option value="admin">Admin</option>
-                          <option value="moderator">Moderator</option>
                           <option value="user">User</option>
                         </select>
                       </td>
                       <td className="admin-table-cell">
-                        <span className={`status-badge ${(user.status || user.is_active === true) ? 'status-badge-active' : 'status-badge-inactive'}`}>
-                          {user.status || (user.is_active ? 'active' : 'inactive')}
+                        <span className={`status-badge ${user.is_active ? 'status-badge-active' : 'status-badge-inactive'}`}>
+                          {user.is_active ? 'active' : 'inactive'}
                         </span>
                       </td>
                       <td className="admin-table-cell">{user.created_at ? new Date(user.created_at).toLocaleDateString() : 'N/A'}</td>
                       <td className="admin-table-cell">
                         <div className="flex space-x-2">
                           <button
-                            onClick={() => confirmAction(
-                              user.id, 
-                              'status', 
-                              (user.status === 'active' || user.is_active === true) ? 'inactive' : 'active'
-                            )}
-                            className={(user.status === 'active' || user.is_active === true) ? 'admin-button-danger' : 'admin-button'}
+                            onClick={() => handleStatusChange(user, user.is_active ? 'inactive' : 'active')}
+                            className={user.is_active ? 'admin-button-danger' : 'admin-button'}
                           >
-                            {(user.status === 'active' || user.is_active === true) ? (
+                            {user.is_active ? (
                               <>
                                 <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
