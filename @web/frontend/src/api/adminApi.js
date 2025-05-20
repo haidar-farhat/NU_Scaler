@@ -12,6 +12,7 @@ const adminApi = axios.create({
   }
 });
 
+
 /**
  * Get CSRF cookie and set up token for admin requests
  */
