@@ -18,7 +18,7 @@ class IsAdmin
      */
     public function handle(Request $request, Closure $next)
     {
-        $user = $request->user();
+        $user = auth()->user();
 
         // Log authentication attempt for debugging
         Log::info('Admin check', [
@@ -32,12 +32,8 @@ class IsAdmin
             'request_has_session' => $request->hasSession(),
         ]);
 
-        if (!$user) {
-            return response()->json(['message' => 'Unauthorized. Not authenticated.'], Response::HTTP_UNAUTHORIZED);
-        }
-
-        if (!$user->isAdmin()) {
-            return response()->json(['message' => 'Forbidden. Admin access required.'], Response::HTTP_FORBIDDEN);
+        if (!$user || !$user->is_admin) {
+            return response()->json(['message' => 'Unauthorized. Admin access required.'], 403);
         }
 
         return $next($request);
