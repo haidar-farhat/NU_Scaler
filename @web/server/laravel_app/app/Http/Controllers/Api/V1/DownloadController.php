@@ -23,7 +23,7 @@ class DownloadController extends Controller
      */
     public function __construct()
     {
-        $this->releasesPath = base_path('../../@releases');
+        $this->releasesPath = base_path('../../releases');
     }
 
     /**
