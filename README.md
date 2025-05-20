@@ -63,9 +63,9 @@ Nu Scaler follows a hybrid architecture combining Python and Rust to balance per
 ### Web page
 
 
-| Admin Main screen                           | admin kpis screen                       | manage users screen                   |
-| ---------------------------------------     | -------------------------------------   | ------------------------------------- |
-| ![Landing](./readme/demo/admin_main.png)    | ![fsdaf](./readme/demo/kpis.png)        | ![fsdaf](./readme/demo/users.png)     |
+| Admin Main screen                           | manage users screen                   |
+| ---------------------------------------     | ------------------------------------- |
+| ![Landing](./readme/demo/admin_main.png)    | ![fsdaf](./readme/demo/users.png)     |
 
 
 
@@ -81,6 +81,10 @@ Nu Scaler follows a hybrid architecture combining Python and Rust to balance per
 | --------------------------------------- | ------------------------------------- |
 | ![Landing](./readme/demo/debug.png)     | ![fsdaf](./readme/demo/smpl_pef.png)  |
 
+
+| Base 2d                                 | Scaled 2d                             |
+| --------------------------------------- | ------------------------------------- |
+| ![Landing](./readme/demo/sprite1.gif)   | ![fsdaf](./readme/demo/sprite2.gif)   |
 
 
 <br><br>
