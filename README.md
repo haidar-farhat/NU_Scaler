@@ -1,6 +1,5 @@
 # Nu Scaler
 
-[![Build](https://github.com/haidar-farhat/NU_Scaler/actions/workflows/main.yml/badge.svg)](https://github.com/haidar-farhat/NU_Scaler/actions)
 ![License](https://img.shields.io/github/license/haidar-farhat/NU_Scaler)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)
 ![Last Commit](https://img.shields.io/github/last-commit/haidar-farhat/NU_Scaler)
