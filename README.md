@@ -1,3 +1,11 @@
+# Nu Scaler
+
+[![Build](https://github.com/haidar-farhat/NU_Scaler/actions/workflows/main.yml/badge.svg)](https://github.com/haidar-farhat/NU_Scaler/actions)
+![License](https://img.shields.io/github/license/haidar-farhat/NU_Scaler)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)
+![Last Commit](https://img.shields.io/github/last-commit/haidar-farhat/NU_Scaler)
+
+
 <img src="./readme/title1.svg"/>
 
 <br><br>
@@ -46,19 +54,19 @@ Nu Scaler follows a hybrid architecture combining Python and Rust to balance per
 <img src="./readme/title5.svg"/>
 
 ### Showcase
-| Test In Real time                     |
+| Real-Time Test                     |
 | ------------------------------------- |
 | ![fsdaf](./readme/demo/testrun.gif)   |
 
 
-| Sample Test                             |Test peformance                        |
+| Sample Test                             |Performance Testing                        |
 | --------------------------------------- | ------------------------------------- |
 | ![Landing](./readme/demo/stat.gif) | ![fsdaf](./readme/demo/stat.png)   |
 
 
 ### GUI
 
-| Live Feed Main Screen                   | Live Feed ON  screen                  |
+| Live Feed Main Screen                   | Live Feed (Active)                  |
 | --------------------------------------- | ------------------------------------- |
 | ![Landing](./readme/demo/live_main.png) | ![fsdaf](./readme/demo/live_on.png)   |
 
@@ -86,12 +94,12 @@ Nu Scaler follows a hybrid architecture combining Python and Rust to balance per
 
 ### Debug and testing
 
-|  Debug Screen                           | Sample Peformance                     |
+|  Debug Screen                           | Sample Performance                     |
 | --------------------------------------- | ------------------------------------- |
 | ![Landing](./readme/demo/debug.png)     | ![fsdaf](./readme/demo/smpl_pef.png)  |
 
 
-| Base 2d (low res- 15fps- low quality)   | Live 2d (High res- 30fps- high quality)|
+| Low-Res 2D                              | Enhanced 2D|
 | --------------------------------------- | ------------------------------------- |
 | ![Landing](./readme/demo/sprite1.gif)   | ![fsdaf](./readme/demo/sprite2.gif)   |
 
@@ -105,9 +113,11 @@ Nu Scaler follows a hybrid architecture combining Python and Rust to balance per
 | --------------------------------------- | ------------------------------------- |
 | ![Landing](./readme/demo/cicd1.png)     | ![fsdaf](./readme/demo/cicd2.png)     |
 
-### Public website
+### Live Demo
 
-- http://15.237.190.24/
+You can try Nu Scaler from the official site:
+
+🌐 **[Live Site](http://15.237.190.24/)** – Desktop app preview and download links.
 
 
 | Home Screen                             | Download Screen                       | 
